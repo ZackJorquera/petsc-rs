@@ -1,0 +1,15 @@
+[package]
+name = "petsc-rs"
+version = "0.1.0"
+authors = ["ZackJorquera <zackary.jorquera@colorado.edu>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# this is a work around, mpi requeres libffi which will fail to compile on WSL2 without the `system` feature
+# so we requere libffi to be already be install everywhere (maybe there is a way to just target WSL)
+# although this is only an issue with the "user-operations" on (which is the default).
+libffi-sys = { version = "1.1.1", features = ["system"] }
+mpi = {git = "https://github.com/rsmpi/rsmpi.git", branch = "master", features = ["user-operations", "derive"]}
+petsc-sys = { path = "./petsc-sys/" }

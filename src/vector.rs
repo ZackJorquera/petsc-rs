@@ -1,0 +1,183 @@
+use crate::prelude::*;
+
+// https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Vec/index.html
+
+// TODO: should we add a builder type so that you have to call set_type or set_from_options in order to use the vector
+pub struct Vector<'a> {
+    petsc: &'a crate::Petsc,
+    pub(crate) vec_p: *mut petsc_raw::_p_Vec, // I could use Vec which is the same thing, but i think using a pointer is more clear
+}
+
+impl<'a> Drop for Vector<'a> {
+    fn drop(&mut self) {
+        unsafe {
+            let ierr = petsc_raw::VecDestroy(&mut self.vec_p as *mut *mut petsc_raw::_p_Vec);
+            let _ = self.petsc.check_error(ierr); // TODO should i unwrap or what idk?
+        }
+    }
+}
+
+impl_petsc_object_funcs!{ Vector, vec_p }
+
+pub use petsc_raw::NormType;
+
+impl<'a> Vector<'a> {
+    /// Creates an empty vector object. The type can then be set with [`Vector::set_type`], or [`Vector::set_from_options`].
+    /// Same as [`Petsc::vec_create`].
+    ///
+    /// ```
+    /// # use petsc_rs::prelude::*;
+    /// let petsc = Petsc::init_no_args().unwrap();
+    ///
+    /// Vector::create(&petsc).unwrap();
+    /// ```
+    pub fn create(petsc: &'a crate::Petsc) -> Result<Self> {
+        let mut vec_p = MaybeUninit::uninit();
+        let ierr = unsafe { petsc_raw::VecCreate(petsc.world.as_raw(), vec_p.as_mut_ptr()) };
+        petsc.check_error(ierr)?;
+
+        Ok(Vector { petsc, vec_p: unsafe { vec_p.assume_init() } })
+    }
+
+    /// Creates a new vector of the same type as an existing vector.
+    /// [`duplicate`](Vector::duplicate) DOES NOT COPY the vector entries, but rather 
+    /// allocates storage for the new vector. Use [`copy_data`] to copy a vector.
+    pub fn duplicate(&self) -> Result<Self> {
+        let mut vec2_p = MaybeUninit::uninit();
+        let ierr = unsafe { petsc_raw::VecDuplicate(self.vec_p, vec2_p.as_mut_ptr()) };
+        self.petsc.check_error(ierr)?;
+
+        Ok(Vector { petsc: &self.petsc, vec_p: unsafe { vec2_p.assume_init() } })
+    }
+
+    /// Configures the vector from the options database.
+    pub fn set_from_options(&mut self) -> Result<()> {
+        // I feel like a lot of these easy function can be generated with a macro
+        let ierr = unsafe { petsc_raw::VecSetFromOptions(self.vec_p) };
+        self.petsc.check_error(ierr)
+    }
+
+    /// Sets the local and global sizes, and checks to determine compatibility
+    /// The inputs can be `None` to have PETSc decide the size.
+    /// `local_size` and `global_size` cannot be both `None`. If one processor calls this with
+    /// `global_size` of `None` then all processors must, otherwise the program will hang.
+    pub fn set_sizes(&mut self, local_size: Option<i32>, global_size: Option<i32>) -> Result<()> {
+        let ierr = unsafe { petsc_raw::VecSetSizes(
+            self.vec_p, local_size.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
+            global_size.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER)) };
+        self.petsc.check_error(ierr)
+    }
+
+    /// Sets all components of a vector to a single scalar value.
+    ///
+    /// You CANNOT call this after you have called VecSetValues().
+    pub fn set_all(&mut self, alpha: f64) -> Result<()>
+    {
+        // TODO: we should accept PetscScalar, but we will just assume that it is always a f64 for now.
+        // https://petsc.org/release/docs/manualpages/Sys/PetscScalar.html#PetscScalar
+
+        let ierr = unsafe { petsc_raw::VecSet(self.vec_p, alpha) };
+        self.petsc.check_error(ierr)
+    }
+
+    /// Computes self += alpha * other
+    pub fn axpy(&mut self, alpha: f64, other: &Vector) -> Result<()>
+    {
+        let ierr = unsafe { petsc_raw::VecAXPY(self.vec_p, alpha, other.vec_p) };
+        self.petsc.check_error(ierr)
+    }
+
+    /// Computes the vector norm.
+    pub fn norm(&self, norm_type: NormType) -> Result<f64>
+    {
+        let mut res = MaybeUninit::<f64>::uninit();
+        let ierr = unsafe { petsc_raw::VecNorm(self.vec_p, norm_type, res.as_mut_ptr()) };
+        self.petsc.check_error(ierr)?;
+
+        Ok(unsafe { res.assume_init() })
+    }
+
+    /// Inserts or adds values into certain locations of a vector.
+    /// `ix` and `v` must be the same length or `set_values` will panic
+    ///
+    /// Parameters.
+    /// 
+    /// * `ix` - The relative convergence tolerance, relative decrease in the (possibly preconditioned) residual norm
+    /// * `v` - The absolute convergence tolerance absolute size of the (possibly preconditioned) residual norm
+    /// * `iora` - Either [`INSERT_VALUES`](InsertMode::INSERT_VALUES) or [`ADD_VALUES`](InsertMode::ADD_VALUES), 
+    /// where [`ADD_VALUES`](InsertMode::ADD_VALUES) adds values to any existing entries, and 
+    /// [`INSERT_VALUES`](InsertMode::INSERT_VALUES) replaces existing entries with new values.
+    ///
+    /// Example
+    ///
+    /// ```
+    /// # use petsc_rs::prelude::*;
+    /// # let petsc = Petsc::init_no_args().unwrap();
+    /// let mut v = petsc.vec_create().unwrap();
+    /// v.set_sizes(None, Some(10)).unwrap(); // create vector of size 10
+    /// v.set_from_options().unwrap();
+    ///
+    /// v.set_values(&[0, 3, 7, 9], &[1.1, 2.2, 3.3, 4.4], InsertMode::INSERT_VALUES).unwrap();
+    /// assert_eq!(&v.get_values(0..10).unwrap()[..], &[1.1,0.0,0.0,2.2,0.0,0.0,0.0,3.3,0.0,4.4]);
+    ///
+    /// v.set_values(&[0, 2, 8, 9], &[1.0, 2.0, 3.0, 4.0], InsertMode::ADD_VALUES).unwrap();
+    /// assert_eq!(&v.get_values(0..10).unwrap()[..], &[2.1,0.0,2.0,2.2,0.0,0.0,0.0,3.3,3.0,8.4]);
+    /// ```
+    pub fn set_values(&mut self, ix: &[i32], v: &[f64], iora: InsertMode) -> Result<()>
+    {
+        // TODO: should I do these asserts?
+        assert!(iora == InsertMode::INSERT_VALUES || iora == InsertMode::ADD_VALUES);
+        assert_eq!(ix.len(), v.len());
+
+        let ni = ix.len() as i32;
+        let ierr = unsafe { petsc_raw::VecSetValues(self.vec_p, ni, ix.as_ptr(), v.as_ptr(), iora) };
+        self.petsc.check_error(ierr)
+    }
+
+    /// Gets values from certain locations of a vector. Currently can only get values on the same processor
+    ///
+    /// Example
+    ///
+    /// ```
+    /// # use petsc_rs::prelude::*;
+    /// # let petsc = Petsc::init_no_args().unwrap();
+    /// let mut v = petsc.vec_create().unwrap();
+    /// v.set_sizes(None, Some(10)).unwrap(); // create vector of size 10
+    /// v.set_from_options().unwrap();
+    ///
+    /// let ix = [0, 2, 7, 9];
+    /// v.set_values(&ix, &[1.1, 2.2, 3.3, 4.4], InsertMode::INSERT_VALUES).unwrap();
+    ///
+    /// assert_eq!(&v.get_values(ix).unwrap()[..], &[1.1, 2.2, 3.3, 4.4]);
+    /// assert_eq!(&v.get_values(vec![2, 0, 9, 7]).unwrap()[..], &[2.2, 1.1, 4.4, 3.3]);
+    /// assert_eq!(&v.get_values(0..10).unwrap()[..], &[1.1,0.0,2.2,0.0,0.0,0.0,0.0,3.3,0.0,4.4]);
+    /// assert_eq!(&v.get_values((0..5).map(|v| v*2)).unwrap()[..], &[1.1,2.2,0.0,0.0,0.0]);
+    /// ```
+    pub fn get_values<T>(&self, ix: T) -> Result<Vec<f64>>
+    where
+        T: IntoIterator<Item = i32>,
+        <T as IntoIterator>::IntoIter: ExactSizeIterator
+    {
+        // TODO: ix can't be a &[i32; N] because it impl IntoIterator with Item=&i32 (same with &Vec<i32>)
+        // This might not be an issue because [i32; N] implements copy
+
+        // TODO: make this return a slice (like how libceed has the VectorView type)
+        // For now im going to return a vector because this is a temporary testing function
+
+        // TODO: is this good, it feels like it would be better to just accept &[i32] and then we dont 
+        // need to do the collect. Although, it is nice to accept ranges or iters as input.
+
+        let ix_iter = ix.into_iter();
+        let ni = ix_iter.len();
+        let ix_array = ix_iter.collect::<Vec<_>>();
+        let mut out_vec = vec![f64::default();ni];
+
+        let ierr = unsafe { petsc_raw::VecGetValues(self.vec_p, ni as i32, ix_array.as_ptr(), out_vec[..].as_mut_ptr()) };
+        self.petsc.check_error(ierr)?;
+
+        Ok(out_vec)
+    }
+    
+    // TODO: add `from_array`/`from_slice` and maybe also `set_slice`
+}
+
