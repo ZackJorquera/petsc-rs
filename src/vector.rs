@@ -5,6 +5,9 @@ use crate::prelude::*;
 // TODO: should we add a builder type so that you have to call set_type or set_from_options in order to use the vector
 pub struct Vector<'a> {
     petsc: &'a crate::Petsc,
+    // Note, we do not have exclusive access to this pointer necessarily
+    // When ever there is a PetscObjectReference call, this normally means that we will
+    // give the pointer to another process.
     pub(crate) vec_p: *mut petsc_raw::_p_Vec, // I could use Vec which is the same thing, but i think using a pointer is more clear
 }
 

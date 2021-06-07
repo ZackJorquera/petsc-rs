@@ -50,6 +50,8 @@ impl<'a> Mat<'a> {
         MatSetFromOptions, set_from_options, mat_p, #[doc = "Configures the Mat from the options database."];
         MatSetUp, set_up, mat_p, #[doc = "Sets up the internal matrix data structures for later use"];
     }
+    
+    // TODO: maybe these two functions should be combined with a lambda to run in between
     wrap_simple_petsc_member_funcs! {
         MatAssemblyBegin, assembly_begin, mat_p, assembly_type, MatAssemblyType, #[doc = "Begins assembling the matrix. This routine should be called after completing all calls to MatSetValues()."];
         MatAssemblyEnd, assembly_end, mat_p, assembly_type, MatAssemblyType, #[doc = "Completes assembling the matrix. This routine should be called after MatAssemblyBegin()."];

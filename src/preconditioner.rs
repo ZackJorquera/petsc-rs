@@ -109,7 +109,21 @@ pub enum PCType {
 
 pub struct PC<'a> {
     pub(crate) petsc: &'a crate::Petsc,
-    pub(crate) pc_p: *mut petsc_raw::_p_PC, // I could use PC which is the same thing, but i think using a pointer is more clear
+    pub(crate) pc_p: *mut petsc_raw::_p_PC, // I could use petsc_raw::PC which is the same thing, but i think using a pointer is more clear
+
+    // This comment might be wrong:
+    // Here is the problem, we have the two raw functions `PCSetOperators` and `PCGetOperators`. Both of these
+    // use the underling members amat and pmat which are required to have a lifetime at least as long as the
+    // PC type its self. General usage could be to set the operators (which would increase the reference
+    // count under the hood) and then to get them and edit them maybe. idk if you are allowed to edit them this
+    // way, and for sure dont know if this is possible to do safely with rust and include the next feature.
+    // But there is an alternative usage, to use PCGetOperators to create the mats (this is also a thing for KSPGetPC).
+    // This causes the mats to be "owned" by the PC object. The user code (the rust code) doesn't own it.
+    // And everything (like calling destroy) is all handled internally. This is why we have the two types of members
+    // `owned_amat` and `ref_amat`, both of which we can get a reference to the inner Mat type to give to the user.
+
+    ref_amat: Option<Rc<Mat<'a>>>,
+    ref_pmat: Option<Rc<Mat<'a>>>,
 }
 
 impl<'a> Drop for PC<'a> {
@@ -118,8 +132,6 @@ impl<'a> Drop for PC<'a> {
         unsafe {
             let ierr = petsc_raw::PCDestroy(&mut self.pc_p as *mut *mut petsc_raw::_p_PC);
             let _ = self.petsc.check_error(ierr); // TODO: should i unwrap or what idk?
-
-            println!("drop called for PC");
         }
     }
 }
@@ -129,7 +141,7 @@ impl_petsc_object_funcs!{ PC, pc_p }
 impl<'a> PC<'a> {
     /// Same as `PC { ... }` but sets all optional params to `None`
     pub(crate) fn new(petsc: &'a crate::Petsc, pc_p: *mut petsc_raw::_p_PC) -> Self {
-        PC { petsc, pc_p }
+        PC { petsc, pc_p, ref_amat: None, ref_pmat: None }
     }
 
     /// Creates a preconditioner context.
@@ -159,25 +171,35 @@ impl<'a> PC<'a> {
         let ierr = unsafe { petsc_raw::PCSetType(self.pc_p, cstring.as_ptr()) };
         self.petsc.check_error(ierr)
     }
-
+    
     /// Sets the matrix associated with the linear system and a (possibly)
     /// different one associated with the preconditioner.
     ///
     /// Passing a `None` for `a_mat` or `p_mat` removes the matrix that is currently used.
-    pub unsafe fn set_operators(&mut self, a_mat: Option<&Mat<'a>>, p_mat: Option<&Mat<'a>>) -> Result<()>
+    pub fn set_operators(&mut self, a_mat: Option<Rc<Mat<'a>>>, p_mat: Option<Rc<Mat<'a>>>) -> Result<()>
     {
         // Should this function consume the mats? Right now once call this function you can not edit the mats with
         // out first removing them.
 
-        // TODO: i am 100% not doing this correctly. This is unsafe, here are the docs:
+        // TODO: i am 100% not doing this correctly. This is might be unsafe, here are the docs:
         // https://petsc.org/release/docs/manualpages/KSP/KSPSetOperators.html#KSPSetOperators
-        // TODO: if you set a_mat and p_mat to be the same, under the hood they are refrenc counted. Our current setup
-        // does not account for that. also pointers to the a_mat and p_mat are stored in the c struct so 
-        // We need to tell rust that this struct owns a refrence to a_mat and p_mat
-        let ierr = petsc_raw::PCSetOperators(self.pc_p,
+        // TODO: if you set a_mat and p_mat to be the same, under the hood they are refrenc counted. Does our current setup
+        // account for that? idk, i think it does, but idk
+        let ierr = unsafe { petsc_raw::PCSetOperators(self.pc_p,
             a_mat.as_ref().map_or(std::ptr::null_mut(), |m| m.mat_p), 
-            p_mat.as_ref().map_or(std::ptr::null_mut(), |m| m.mat_p));
-        self.petsc.check_error(ierr)
+            p_mat.as_ref().map_or(std::ptr::null_mut(), |m| m.mat_p)) };
+        self.petsc.check_error(ierr)?;
+
+        // drop everything as it is getting replaced. (note under the hood MatDestroy is called on both of them).
+        // let _ = self.owned_amat.take();
+        // let _ = self.owned_pmat.take();
+        let _ = self.ref_amat.take();
+        let _ = self.ref_pmat.take();
+
+        self.ref_amat = a_mat;
+        self.ref_pmat = p_mat;
+
+        Ok(())
     }
 
     pub fn dumby(&self) -> Result<()>

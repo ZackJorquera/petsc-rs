@@ -29,7 +29,7 @@ pub mod prelude {
     pub(crate) use crate::petsc_raw;
     pub(crate) use std::mem::MaybeUninit;
     pub(crate) use std::ffi::CString;
-    pub(crate) use std::mem::ManuallyDrop;
+    pub(crate) use std::rc::Rc;
 }
 
 use prelude::*;
