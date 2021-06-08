@@ -120,7 +120,7 @@ impl<'a> Vector<'a> {
     /// v.set_values(&[0, 3, 7, 9], &[1.1, 2.2, 3.3, 4.4], InsertMode::INSERT_VALUES).unwrap();
     /// assert_eq!(&v.get_values(0..10).unwrap()[..], &[1.1,0.0,0.0,2.2,0.0,0.0,0.0,3.3,0.0,4.4]);
     ///
-    /// v.set_values(&[0, 2, 8, 9], &[1.0, 2.0, 3.0, 4.0], InsertMode::ADD_VALUES).unwrap();
+    /// v.set_values(&vec![0, 2, 8, 9], &vec![1.0, 2.0, 3.0, 4.0], InsertMode::ADD_VALUES).unwrap();
     /// assert_eq!(&v.get_values(0..10).unwrap()[..], &[2.1,0.0,2.0,2.2,0.0,0.0,0.0,3.3,3.0,8.4]);
     /// ```
     pub fn set_values(&mut self, ix: &[i32], v: &[f64], iora: InsertMode) -> Result<()>
@@ -177,7 +177,40 @@ impl<'a> Vector<'a> {
 
         Ok(out_vec)
     }
-    
+
+    /// Returns the range of indices owned by this processor, assuming that the vectors are laid
+    /// out with the first n1 elements on the first processor, next n2 elements on the second, etc.
+    /// For certain parallel layouts this range may not be well defined.
+    pub fn get_ownership_range(&self) -> Result<std::ops::Range<i32>> {
+        let mut low = MaybeUninit::<i32>::uninit();
+        let mut high = MaybeUninit::<i32>::uninit();
+        let ierr = unsafe { petsc_raw::VecGetOwnershipRange(self.vec_p, low.as_mut_ptr(), high.as_mut_ptr()) };
+        self.petsc.check_error(ierr)?;
+
+        Ok(unsafe { low.assume_init()..high.assume_init() })
+    }
+
+    /// Returns the range of indices owned by EACH processor, assuming that the vectors are laid
+    /// out with the first n1 elements on the first processor, next n2 elements on the second, etc.
+    /// For certain parallel layouts this range may not be well defined.
+    pub fn get_ownership_ranges(&self) -> Result<Vec<std::ops::Range<i32>>> {
+        let mut array = MaybeUninit::<*const i32>::uninit();
+        let ierr = unsafe { petsc_raw::VecGetOwnershipRanges(self.vec_p, array.as_mut_ptr()) };
+        self.petsc.check_error(ierr)?;
+
+        // SAFETY: Petsc says it is an array of length size+1
+        let slice_from_array = unsafe { 
+            std::slice::from_raw_parts(array.assume_init(), self.petsc.world.size() as usize + 1) };
+        let array_iter = slice_from_array.iter();
+        let mut slice_iter_p1 = slice_from_array.iter();
+        let _ = slice_iter_p1.next();
+        Ok(array_iter.zip(slice_iter_p1).map(|(s,e)| *s..*e).collect())
+    }
+
+    wrap_simple_petsc_member_funcs! {
+        VecGetLocalSize, get_local_size, vec_p, i32, #[doc = "Returns the number of elements of the vector stored in local memory."];
+    }
+
     // TODO: add `from_array`/`from_slice` and maybe also `set_slice`
 }
 

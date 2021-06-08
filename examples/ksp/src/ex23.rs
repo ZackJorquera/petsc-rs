@@ -1,31 +1,26 @@
-//! This file will show how to do the kps ex1 example in rust using the petsc-rs bindings.
+//! This file will show how to do the ksp ex23 example in rust using the petsc-rs bindings.
 //!
-//! Concepts: KSP^solving a system of linear equations
-//! Processors: 1
-//!
-//! Use "petsc_rs::prelude::*" to get direct access to all important petsc-rs bindings
-//!     and mpi traits which allow you to call things like `world.size()`.
+//! Concepts: KSP^basic parallel example for solving a system of linear equations
+//! Processors: n
 //!
 //! To run:
-//! ```text
-//! $ cargo build ex1
-//! $ target/debug/ex1
+//! ```test
+//! $ cargo build ex23
+//! $ mpiexec -n 1 target/debug/ex23
 //! Norm of error 2.41202e-15, Iters 5
-//! $ target/debug/ex1 -n 100
-//! Norm of error 1.14852e-2, Iters 318
+//! $ mpiexec -n 2 target/debug/ex23
+//! Norm of error 2.41202e-15, Iters 5
 //! ```
 //!
-//! Note:  The corresponding parallel example is ex23.rs
-
+//! Note: The corresponding uniprocessor example is ex1.rs
 
 static HELP_MSG: &'static str = "Solves a tridiagonal linear system with KSP.\n\n";
 
 use petsc_rs::prelude::*;
 use structopt::StructOpt;
 
-// TODO: make this more stream-lined, maybe add to the petsc-rs lib
 #[derive(Debug, StructOpt)]
-#[structopt(name = "ex1", about = HELP_MSG)]
+#[structopt(name = "ex23", about = HELP_MSG)]
 struct Opt {
     /// Size of the vector and matrix
     #[structopt(short, long, default_value = "10")]
@@ -65,7 +60,7 @@ fn main() -> petsc_rs::Result<()> {
 
     // optionally initialize mpi
     // let _univ = mpi::initialize().unwrap();
-    // init with options
+    // init with no options
     let petsc = Petsc::builder()
         .args(petsc_args)
         .help_msg(HELP_MSG)
@@ -74,10 +69,7 @@ fn main() -> petsc_rs::Result<()> {
     // or init with no options
     // let petsc = Petsc::init_no_args()?;
 
-    if petsc.world().size() != 1
-    {
-        petsc.set_error(PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
-    }
+    petsc_println!(petsc, "(petsc_println!) Hello parallel world of {} processes!", petsc.world().size() );
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
          Compute the matrix and right-hand-side vector that define
@@ -95,9 +87,30 @@ fn main() -> petsc_rs::Result<()> {
     let mut b = x.duplicate()?;
     let mut u = x.duplicate()?;
 
+    /* 
+        Identify the starting and ending mesh points on each
+        processor for the interior part of the mesh. We let PETSc decide
+        above.
+    */
+
+    let mut vec_ownership_range = x.get_ownership_range()?;
+    let local_size = x.get_local_size()?;
+
+
+    /*
+        Create matrix.  When using MatCreate(), the matrix format can
+        be specified at runtime.
+
+        Performance tuning note:  For problems of substantial size,
+        preallocation of matrix memory is crucial for attaining good
+        performance. See the matrix chapter of the users manual for details.
+
+        We pass in nlocal as the "local" size of the matrix to force it
+        to have the same parallel layout as the vector created above.
+    */
     #[allow(non_snake_case)]
     let mut A = petsc.mat_create()?;
-    A.set_sizes(None, None, Some(n), Some(n))?;
+    A.set_sizes(Some(local_size), Some(local_size), Some(n), Some(n))?;
     A.set_from_options()?;
     A.set_up()?;
 
@@ -105,15 +118,23 @@ fn main() -> petsc_rs::Result<()> {
         Assemble matrix
     */
     let value = vec![-1.0, 2.0, -1.0];
-    for i in 1..n-1
+    if vec_ownership_range.contains(&0)
+    {
+        let _ = vec_ownership_range.next();
+        let col = vec![1, 0];
+        A.set_values(1, &vec![0], 2, &col, &value, InsertMode::INSERT_VALUES)?;
+    }
+    if vec_ownership_range.contains(&(n-1))
+    {
+        let _ = vec_ownership_range.next_back();
+        let col = vec![n-2, n-1];
+        A.set_values(1, &vec![n-1], 2, &col, &value, InsertMode::INSERT_VALUES)?;
+    }
+    for i in vec_ownership_range
     {
         let col = vec![i-1, i, i+1];
         A.set_values(1, &vec![i], 3, &col, &value, InsertMode::INSERT_VALUES)?;
     }
-    let col = vec![n-2, n-1];
-    A.set_values(1, &vec![n-1], 2, &col, &value, InsertMode::INSERT_VALUES)?;
-    let col = vec![1, 0];
-    A.set_values(1, &vec![0], 2, &col, &value, InsertMode::INSERT_VALUES)?;
     A.assembly_begin(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
     A.assembly_end(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
 
@@ -122,6 +143,7 @@ fn main() -> petsc_rs::Result<()> {
     */
     u.set_all(1.0)?;
     Mat::mult(&A, &u, &mut b)?;
+    // petsc_println!(petsc, "b: {:?}", b.get_values(0..n)?);
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
                 Create the linear solver and set various options
@@ -132,7 +154,10 @@ fn main() -> petsc_rs::Result<()> {
         Set operators. Here the matrix that defines the linear system
         also serves as the matrix that defines the preconditioner.
     */
-    unsafe { ksp.set_operators(Some(&A), Some(&A))?; }
+    // #[allow(non_snake_case)]
+    // let rc_A = std::rc::Rc::new(A);
+    // ksp.set_operators(Some(rc_A.clone()), Some(rc_A.clone()))?;
+    unsafe { ksp.set_operators(Some(&A), Some(&A)) }?;
 
     /*
         Set linear solver defaults for this problem (optional).
