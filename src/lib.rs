@@ -1,4 +1,5 @@
 use std::os::raw::c_char;
+use std::vec;
 
 pub(crate) mod petsc_raw {
     pub use petsc_sys::*;
@@ -19,7 +20,7 @@ pub mod prelude {
         InsertMode,
         petsc_println,
         vector::{self, Vector, NormType, },
-        mat::{self, Mat, MatAssemblyType, },
+        mat::{self, Mat, MatAssemblyType, MatOption, },
         ksp::{self, KSP, },
         pc::{self, PC, PCType, },
     };
@@ -38,22 +39,8 @@ use prelude::*;
 
 // TODO: add viewer type https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Viewer/PetscViewer.html#PetscViewer
 
-// TODO: do something for `PetscOptionsGet*`, or at least allow the user to use something like structopt
-// I dont want to have `PetscOptionsGet*` because it can all be done better on the rust side, but we still need
-// to support PetscInitialize with the args
-// Or we can make our own options database
-
-// TODO: add viewer type
-
-// Here is a rule that I think applies. PETSc types are organized in a hierarchy, with some types
-// controlling other types. A good example of this is KSP and PC. Using KSPGetPC you can get a pointer
-// to a preconditioner that you never initialized. So this brings up the question, what object should
-// we drop. Generally, if we create the object with a create function, then we are expected to destroy
-// it even if we give it to a higher level type to use (like for KSPSetPC). This is hard to tell because
-// it seems that the PC is destroyed even if KSPSetPC is used (but examples still call PCDestroy). Maybe
-// This has something to do with the Petsc objects being reference counted.
-// Or actually it seems like at the top of each destroy call, they check the reference count to see if
-// there are any references.
+// TODO: Would it make sense to only have PetscInitializeNoArguments and have rust deal with all the 
+// options database.
 
 // TODO: should all Petsc types be reference counted, are should we force functions that create refrences 
 // (i.e. call `PetscObjectReference`) to take `Rc`s (or `Arc`s, idk if it needs to be thread safe (i would 
@@ -123,11 +110,6 @@ impl PetscBuilder
     /// [`PetscInitialize`]: petsc_raw::PetscInitialize
     pub fn init(self) -> Result<Petsc>
     {
-        // TODO: prevent memory leaks
-        // We could pass the CStrings to the Petsc type and then it will dropped them for us.
-        // Petsc will stop using them when `PetscFinalize` is called (note, it wont free them)
-        // so this should be safe to do.
-
         let mut argc;
         let c_argc_p = if let Some(ref args) = self.args { 
             argc = args.len() as i32;
@@ -139,21 +121,23 @@ impl PetscBuilder
 
         // I think we want to leak args because Petsc stores it as a global
         // At least we need to make sure it lives past the call to `PetscFinalize`
-        // We heap allocate args with a Ven and then leak it
+        // We heap allocate args with a Vec and then leak it
         let mut args_array = vec![std::ptr::null_mut(); argc as usize];
-        let mut c_args;
+        let vec_cap = args_array.capacity();
+        let mut c_args = std::ptr::null_mut();
         let c_args_p = if let Some(ref args) = self.args {
             for (arg, c_arg_p) in args.iter().zip(args_array.iter_mut()) {
+                // `CString::into_raw` will leak the data.
                 *c_arg_p = CString::new(arg.to_string()).expect("CString::new failed").into_raw();
             }
-            // Does this line even work (why dont i have to use MaybeUninit::assume_init)
-            c_args = MaybeUninit::new(args_array.leak().as_mut_ptr() as *mut *mut c_char);
 
-            c_args.as_mut_ptr()
+            c_args = args_array.leak().as_mut_ptr() as *mut *mut c_char;
+
+            &mut c_args as *mut *mut *mut c_char
         } else {
             std::ptr::null_mut()
         };
-        // Note: we leak c_argc and args_array
+        // Note: we leak each arg (as CString) and args_array.
 
         // We dont have to leak the file string
         let file_cstring = self.file.map(|ref f| CString::new(f.to_string()).ok()).flatten();
@@ -164,10 +148,11 @@ impl PetscBuilder
         let help_c_str = help_cstring.as_ref().map_or_else(|| std::ptr::null(), |v| v.as_ptr());
 
         let ierr = unsafe { petsc_raw::PetscInitialize(c_argc_p, c_args_p, file_c_str, help_c_str) };
+        // We pass in the args data so that we can reconstruct the vec to free all the memory.
         let petsc = Petsc { world: match self.world { 
             Some(world) => world, 
             _ => mpi::topology::SystemCommunicator::world() 
-        } };
+        }, raw_args_vec_data: self.args.map(|_| (c_args, argc as usize, vec_cap)) };
         petsc.check_error(ierr)?;
 
         Ok(petsc)
@@ -215,6 +200,9 @@ impl PetscBuilder
 pub struct Petsc {
     // TODO: make world be of type AsRaw<Raw = mpi::ffi::MPI_Comm>
     pub(crate) world: mpi::topology::SystemCommunicator,
+
+    // This is used to drop the args data
+    raw_args_vec_data: Option<(*mut *mut c_char, usize, usize)>,
 }
 
 // Destructor
@@ -222,6 +210,14 @@ impl Drop for Petsc {
     fn drop(&mut self) {
         unsafe {
             petsc_raw::PetscFinalize();
+        }
+
+        if let Some((ptr, len, cap)) = self.raw_args_vec_data
+        {
+            // SAFETY: The vec ptr was created with `Vec::leak` and the str_ptr's were created
+            // with `CString::into_raw`. Everything should be valid.
+            let vec = unsafe { Vec::from_raw_parts(ptr, len, cap) };
+            vec.iter().for_each(|str_ptr| { let _ = unsafe { CString::from_raw(*str_ptr) }; });
         }
     }
 }
@@ -250,7 +246,7 @@ impl Petsc {
     /// [`Petsc::builder`]: Petsc::builder
     pub fn init_no_args() -> Result<Self> {
         let ierr = unsafe { petsc_raw::PetscInitializeNoArguments() };
-        let petsc = Self { world: mpi::topology::SystemCommunicator::world() };
+        let petsc = Self { world: mpi::topology::SystemCommunicator::world(), raw_args_vec_data: None };
         petsc.check_error(ierr)?;
 
         Ok(petsc)
@@ -274,7 +270,7 @@ impl Petsc {
         }
 
         // SAFETY: This should be safe as we expect the errors to be valid. All inputs are generated from
-        // Petsc functions, not user input. But we can guarantee that they are all valid. 
+        // Petsc functions, not user input. But we can't guarantee that they are all valid. 
         // Note, there is no way to make sure PetscErrorKind uses `u32` under the hood, but it should
         // use `u32` as long as there are no negative numbers and all variants fit in a u32 (which, right 
         // now is the case). Also note, `petsc_raw::PetscErrorCodeEnum` is defined with the #[repr(u32)] 
@@ -284,7 +280,7 @@ impl Petsc {
 
         let c_s_r = CString::new(error.error.to_string());
 
-        // TODO: add file macro, and line macro if possible
+        // TODO: add file macro and line macro if possible
         unsafe {
             let _ = petsc_raw::PetscError(self.world.as_raw(), -1, std::ptr::null(), 
                 std::ptr::null(), ierr, PetscErrorType::PETSC_ERROR_REPEAT,
