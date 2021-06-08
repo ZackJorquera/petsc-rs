@@ -176,6 +176,8 @@ impl<'a> PC<'a> {
     /// different one associated with the preconditioner.
     ///
     /// Passing a `None` for `a_mat` or `p_mat` removes the matrix that is currently used.
+    // TODO: should we pass in `Rc`s or should we just transfer ownership.
+    // or we could do `Rc<RefCell<Mat>>` so that when you remove the mats we can give mut access back
     pub fn set_operators(&mut self, a_mat: Option<Rc<Mat<'a>>>, p_mat: Option<Rc<Mat<'a>>>) -> Result<()>
     {
         // Should this function consume the mats? Right now once call this function you can not edit the mats with

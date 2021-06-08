@@ -132,7 +132,9 @@ fn main() -> petsc_rs::Result<()> {
         Set operators. Here the matrix that defines the linear system
         also serves as the matrix that defines the preconditioner.
     */
-    unsafe { ksp.set_operators(Some(&A), Some(&A))?; }
+    #[allow(non_snake_case)]
+    let rc_A = std::rc::Rc::new(A);
+    ksp.set_operators(Some(rc_A.clone()), Some(rc_A.clone()))?;
 
     /*
         Set linear solver defaults for this problem (optional).
