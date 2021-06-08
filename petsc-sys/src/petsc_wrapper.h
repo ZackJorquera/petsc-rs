@@ -7,7 +7,7 @@
 // The PETSC_ERR variants are defined with `#define` so they don't show up with bindgen
 // At least not yet, see: https://github.com/rust-lang/rust-bindgen/issues/316
 // So some stuff from `petscerror.h` here as an enum
-// Alse we renamed the variants to PETSC_ERROR_*
+// Also we renamed the variants to PETSC_ERROR_*
 
 /// PETSc Error Codes
 typedef enum {

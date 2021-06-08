@@ -37,6 +37,7 @@ impl<'a> KSP<'a> {
         KSP { petsc, ksp_p, owned_pc: None }
     }
 
+    /// Same as [`Petsc::ksp_create()`].
     pub fn create(petsc: &'a crate::Petsc) -> Result<Self> {
         let mut ksp_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::KSPCreate(petsc.world.as_raw(), ksp_p.as_mut_ptr()) };

@@ -26,6 +26,7 @@ pub use petsc_raw::MatOption;
 impl_petsc_object_funcs!{ Mat, mat_p }
 
 impl<'a> Mat<'a> {
+    /// Same at [`Petsc::mat_create()`].
     pub fn create(petsc: &'a crate::Petsc) -> Result<Self> {
         let mut mat_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::MatCreate(petsc.world.as_raw(), mat_p.as_mut_ptr()) };
@@ -56,8 +57,8 @@ impl<'a> Mat<'a> {
         MatAssemblyEnd, assembly_end, mat_p, assembly_type, MatAssemblyType, #[doc = "Completes assembling the matrix. This routine should be called after MatAssemblyBegin()."];
     }
 
-    /// Inserts or adds a block of values into a matrix. These values may be cached, so MatAssemblyBegin()
-    /// and MatAssemblyEnd() MUST be called after all calls to MatSetValues() have been completed.
+    /// Inserts or adds a block of values into a matrix. These values may be cached, so [`Mat::assembly_begin()`]
+    /// and [`Mat::assembly_end()`] MUST be called after all calls to [`Mat::set_values()`] have been completed.
     /// Read: <https://petsc.org/release/docs/manualpages/Mat/MatSetValues.html>
     pub fn set_values(&mut self, m: i32, idxm: &[i32], n: i32, idxn: &[i32], v: &[f64], addv: InsertMode) -> Result<()> {
         // TODO: I feel like most of the inputs are redundant and only will cause errors

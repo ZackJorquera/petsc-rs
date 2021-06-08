@@ -107,6 +107,7 @@ pub enum PCType {
     PCHARA,
 }
 
+/// Abstract PETSc object that manages all preconditioners including direct solvers such as PCLU
 pub struct PC<'a> {
     pub(crate) petsc: &'a crate::Petsc,
     pub(crate) pc_p: *mut petsc_raw::_p_PC, // I could use PC which is the same thing, but i think using a pointer is more clear
@@ -135,7 +136,7 @@ impl<'a> PC<'a> {
     /// Creates a preconditioner context.
     ///
     /// You will most likely create a preconditioner context from a solver type such as
-    /// from a Krylov solver, [`KSP`], using the [`KSP::get_pc`] method.
+    /// from a Krylov solver, [`KSP`], using the [`KSP::get_pc()`] method.
     ///
     /// [`KSP::get_pc`]: KSP::get_pc
     pub fn create(petsc: &'a crate::Petsc) -> Result<Self> {
@@ -179,10 +180,4 @@ impl<'a> PC<'a> {
             p_mat.as_ref().map_or(std::ptr::null_mut(), |m| m.mat_p));
         self.petsc.check_error(ierr)
     }
-
-    pub fn dumby(&self) -> Result<()>
-    {
-        self.petsc.check_error(0)
-    }
-
 }

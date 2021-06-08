@@ -3,6 +3,7 @@ use crate::prelude::*;
 // https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Vec/index.html
 
 // TODO: should we add a builder type so that you have to call set_type or set_from_options in order to use the vector
+/// Abstract PETSc vector object
 pub struct Vector<'a> {
     petsc: &'a crate::Petsc,
     pub(crate) vec_p: *mut petsc_raw::_p_Vec, // I could use Vec which is the same thing, but i think using a pointer is more clear
@@ -22,7 +23,7 @@ impl_petsc_object_funcs!{ Vector, vec_p }
 pub use petsc_raw::NormType;
 
 impl<'a> Vector<'a> {
-    /// Creates an empty vector object. The type can then be set with [`Vector::set_type`], or [`Vector::set_from_options`].
+    /// Creates an empty vector object. The type can then be set with [`Vector::set_type`](#), or [`Vector::set_from_options`].
     /// Same as [`Petsc::vec_create`].
     ///
     /// ```
@@ -41,7 +42,7 @@ impl<'a> Vector<'a> {
 
     /// Creates a new vector of the same type as an existing vector.
     /// [`duplicate`](Vector::duplicate) DOES NOT COPY the vector entries, but rather 
-    /// allocates storage for the new vector. Use [`copy_data`] to copy a vector.
+    /// allocates storage for the new vector. Use [`Vector::copy_data`](#) to copy a vector.
     pub fn duplicate(&self) -> Result<Self> {
         let mut vec2_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::VecDuplicate(self.vec_p, vec2_p.as_mut_ptr()) };
@@ -70,7 +71,7 @@ impl<'a> Vector<'a> {
 
     /// Sets all components of a vector to a single scalar value.
     ///
-    /// You CANNOT call this after you have called VecSetValues().
+    /// You CANNOT call this after you have called [`Vector::set_values()`].
     pub fn set_all(&mut self, alpha: f64) -> Result<()>
     {
         // TODO: we should accept PetscScalar, but we will just assume that it is always a f64 for now.
@@ -108,7 +109,7 @@ impl<'a> Vector<'a> {
     /// where [`ADD_VALUES`](InsertMode::ADD_VALUES) adds values to any existing entries, and 
     /// [`INSERT_VALUES`](InsertMode::INSERT_VALUES) replaces existing entries with new values.
     ///
-    /// Example
+    /// # Example
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
@@ -136,7 +137,7 @@ impl<'a> Vector<'a> {
 
     /// Gets values from certain locations of a vector. Currently can only get values on the same processor
     ///
-    /// Example
+    /// # Example
     ///
     /// ```
     /// # use petsc_rs::prelude::*;

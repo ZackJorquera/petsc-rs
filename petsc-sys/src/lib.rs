@@ -8,6 +8,7 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 // Im creating variables with the fortran binding names when I can
 // I would like to have these defined in the petsc_wrapper.h file, but 
 // bindgen seems to not be able to turn them into rust equivalents like bellow.
+// https://github.com/rust-lang/rust-bindgen/issues/316
 pub const PETSC_DECIDE_INTEGER: PetscInt = -1;
 pub const PETSC_DETERMINE_INTEGER: PetscInt = PETSC_DECIDE_INTEGER;
 

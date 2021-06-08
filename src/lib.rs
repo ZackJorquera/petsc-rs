@@ -1,3 +1,6 @@
+//! TODO: add stuff.
+//! from https://petsc.org/release/documentation/manual/getting_started
+
 use std::os::raw::c_char;
 use std::vec;
 
@@ -50,6 +53,21 @@ use prelude::*;
 
 /// Prints to standard out, only from the first processor in the communicator.
 /// Calls from other processes are ignored.
+///
+/// Note, the macro internally uses the try operator, `?`, so it can only be used
+/// in functions the returns a [`petsc_rs::Result`](Result).
+///
+/// # Example
+///
+/// ```
+/// # use petsc_rs::prelude::*;
+/// # fn main() -> petsc_rs::Result<()> {
+/// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
+///
+/// petsc_println!(petsc, "Hello parallel world of {} processes!", petsc.world().size());
+/// # Ok(())
+/// # }
+/// ```
 #[macro_export]
 macro_rules! petsc_println {
     ($petsc:ident) => ($petsc.print("\n")?);
@@ -89,6 +107,8 @@ pub struct PetscBuilder
 /// Allows you to call [`PetscInitialize`] with optional parameters.
 /// Must call [`PetscBuilder::init`] to get [`Petsc`].
 ///
+/// # Examples
+///
 /// ```
 /// # use petsc_rs::prelude::*;
 /// let petsc = Petsc::builder()
@@ -96,6 +116,8 @@ pub struct PetscBuilder
 ///     .help_msg("Hello, this is a help message\n")
 ///     .init().unwrap();
 /// ```
+///
+/// Note `Petsc::builder().init()` is the same as [`Petsc::init_no_args()`].
 ///
 /// [`PetscInitialize`]: petsc_raw::PetscInitialize
 /// [`PetscBuilder::init`]: PetscBuilder::init
@@ -223,7 +245,7 @@ impl Drop for Petsc {
 }
 
 impl Petsc {
-    /// Creates a [`PetscBuilder`] which allows you to specify arguments.
+    /// Creates a [`PetscBuilder`] which allows you to specify arguments when calling [`PetscInitialize`](petsc_raw::PetscInitialize).
     pub fn builder() -> PetscBuilder
     {
         PetscBuilder::default()
@@ -237,7 +259,7 @@ impl Petsc {
     /// If you want to pass in Arguments use [`Petsc::builder`].
     ///
     /// ```
-    /// let petsc = petsc_rs::Petsc::init_no_args();
+    /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
     /// ```
     ///
     /// [`PetscInitialize`]: petsc_raw::PetscInitialize
@@ -281,6 +303,7 @@ impl Petsc {
         let c_s_r = CString::new(error.error.to_string());
 
         // TODO: add file macro and line macro if possible
+        // might not matter because in debug rust will give stack trace
         unsafe {
             let _ = petsc_raw::PetscError(self.world.as_raw(), -1, std::ptr::null(), 
                 std::ptr::null(), ierr, PetscErrorType::PETSC_ERROR_REPEAT,
@@ -298,6 +321,7 @@ impl Petsc {
     /// # use petsc_rs::prelude::*;
     /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
     /// if petsc.world().size() != 1 {
+    ///     // note, cargo wont run tests with mpi so this will never be reached
     ///     assert!(petsc.set_error(PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!").is_err());
     /// }
     /// ```
@@ -311,6 +335,7 @@ impl Petsc {
         let c_s_r = CString::new(error.error.to_string());
 
         // TODO: add file petsc func, and line if possible
+        // might not matter because in debug rust will give stack trace
         unsafe {
             let _ = petsc_raw::PetscError(self.world.as_raw(), -1, std::ptr::null(), 
                 std::ptr::null(), error_kind as petsc_raw::PetscErrorCode,
@@ -325,8 +350,22 @@ impl Petsc {
     /// to have string formatting.
     /// Prints to standard out, only from the first processor in the communicator. Calls from other processes are ignored.
     ///
+    /// # Example
+    ///
+    /// ```
+    /// # use petsc_rs::prelude::*;
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
+    ///
+    /// petsc.print(format!("Hello parallel world of {} processes!\n", petsc.world().size()))?;
+    /// // or use:
+    /// petsc_println!(petsc, "Hello parallel world of {} processes!", petsc.world().size());
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
     /// [`petsc_println`]: petsc_println
-    #[doc(hidden)]
+    //#[doc(hidden)]
     pub fn print<T: ToString>(&self, msg: T) -> Result<()> {
         let msg_cs = ::std::ffi::CString::new(msg.to_string()).expect("`CString::new` failed");
 
@@ -338,26 +377,42 @@ impl Petsc {
         self.check_error(ierr)
     }
 
-    /// Creates an empty vector object. The type can then be set with [`Vector::set_type`], or [`Vector::set_from_options`].
+    /// Creates an empty vector object. The type can then be set with [`Vector::set_type`](#), or [`Vector::set_from_options`].
     /// Same as [`Vector::create`].
+    ///
+    /// # Example
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
     /// let petsc = Petsc::init_no_args().unwrap();
-    /// petsc.vec_create().unwrap();
+    /// let vec = petsc.vec_create().unwrap();
     /// ```
     pub fn vec_create(&self) -> Result<crate::Vector> {
         crate::Vector::create(self)
     }
 
     /// Creates an empty matrix object. 
-    /// TODO: add more
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use petsc_rs::prelude::*;
+    /// let petsc = Petsc::init_no_args().unwrap();
+    /// let mat = petsc.mat_create().unwrap();
+    /// ```
     pub fn mat_create(&self) -> Result<crate::Mat> {
         crate::Mat::create(self)
     }
 
     /// Creates the default KSP context.
-    /// TODO: add more
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use petsc_rs::prelude::*;
+    /// let petsc = Petsc::init_no_args().unwrap();
+    /// let ksp = petsc.ksp_create().unwrap();
+    /// ```
     pub fn ksp_create(&self) -> Result<crate::KSP> {
         crate::KSP::create(self)
     }
