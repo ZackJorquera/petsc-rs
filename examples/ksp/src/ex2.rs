@@ -5,7 +5,7 @@
 //!
 //! To run:
 //! ```text
-//! $ cargo build ex2
+//! $ cargo build --bin ex2
 //! $ mpiexec -n 1 target/debug/ex2
 //! Norm of error 1.56044e-4, Iters 6
 //! $ mpiexec -n 2 target/debug/ex2

@@ -1,3 +1,13 @@
+//! The Scalable Linear Equations Solvers (KSP) component provides an easy-to-use interface to 
+//! the combination of a Krylov subspace iterative method and a preconditioner (in the [KSP](ksp) and [PC](pc) 
+//! components, respectively) or a sequential direct solver. 
+//!
+//! KSP users can set various preconditioning options at runtime via the options database 
+//! (e.g., -pc_type jacobi ). KSP users can also set PC options directly in application codes by 
+//! first extracting the PC context from the KSP context via [`KSP::get_pc()`] and then directly
+//! calling the PC routines listed below (e.g., [`PC::set_type()`]). PC components can be used directly
+//! to create and destroy solvers; this is not needed for users but is for library developers.
+
 use crate::prelude::*;
 
 // https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/PC/index.html
@@ -107,6 +117,7 @@ pub enum PCType {
     PCHARA,
 }
 
+/// Abstract PETSc object that manages all preconditioners including direct solvers such as PCLU
 pub struct PC<'a> {
     pub(crate) petsc: &'a crate::Petsc,
     pub(crate) pc_p: *mut petsc_raw::_p_PC, // I could use petsc_raw::PC which is the same thing, but i think using a pointer is more clear
@@ -147,7 +158,7 @@ impl<'a> PC<'a> {
     /// Creates a preconditioner context.
     ///
     /// You will most likely create a preconditioner context from a solver type such as
-    /// from a Krylov solver, [`KSP`], using the [`KSP::get_pc`] method.
+    /// from a Krylov solver, [`KSP`], using the [`KSP::get_pc()`] method.
     ///
     /// [`KSP::get_pc`]: KSP::get_pc
     pub fn create(petsc: &'a crate::Petsc) -> Result<Self> {
@@ -203,10 +214,4 @@ impl<'a> PC<'a> {
 
         Ok(())
     }
-
-    pub fn dumby(&self) -> Result<()>
-    {
-        self.petsc.check_error(0)
-    }
-
 }

@@ -1,3 +1,5 @@
+//! PETSc matrices (Mat objects) are used to store Jacobians and other sparse matrices in PDE-based (or other) simulations.
+
 use crate::prelude::*;
 
 // https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Mat/index.html
@@ -5,6 +7,9 @@ use crate::prelude::*;
 // TODO: should we add a builder type so that you have to call some functions
 // I feel like this could also be important for create, set up, assembly, and then finally using it.
 // Because these stages need to be separate.
+
+/// Abstract PETSc matrix object used to manage all linear operators in PETSc, even those
+/// without an explicit sparse representation (such as matrix-free operators).
 pub struct Mat<'a> {
     petsc: &'a crate::Petsc,
     pub(crate) mat_p: *mut petsc_raw::_p_Mat, // I could use Mat which is the same thing, but i think using a pointer is more clear
@@ -26,6 +31,7 @@ pub use petsc_raw::MatOption;
 impl_petsc_object_funcs!{ Mat, mat_p }
 
 impl<'a> Mat<'a> {
+    /// Same at [`Petsc::mat_create()`].
     pub fn create(petsc: &'a crate::Petsc) -> Result<Self> {
         let mut mat_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::MatCreate(petsc.world.as_raw(), mat_p.as_mut_ptr()) };
@@ -58,8 +64,8 @@ impl<'a> Mat<'a> {
         MatAssemblyEnd, assembly_end, mat_p, assembly_type, MatAssemblyType, #[doc = "Completes assembling the matrix. This routine should be called after MatAssemblyBegin()."];
     }
 
-    /// Inserts or adds a block of values into a matrix. These values may be cached, so MatAssemblyBegin()
-    /// and MatAssemblyEnd() MUST be called after all calls to MatSetValues() have been completed.
+    /// Inserts or adds a block of values into a matrix. These values may be cached, so [`Mat::assembly_begin()`]
+    /// and [`Mat::assembly_end()`] MUST be called after all calls to [`Mat::set_values()`] have been completed.
     /// Read: <https://petsc.org/release/docs/manualpages/Mat/MatSetValues.html>
     pub fn set_values(&mut self, m: i32, idxm: &[i32], n: i32, idxn: &[i32], v: &[f64], addv: InsertMode) -> Result<()> {
         // TODO: I feel like most of the inputs are redundant and only will cause errors

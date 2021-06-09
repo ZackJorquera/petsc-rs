@@ -1,7 +1,18 @@
+//! The scalable linear equations solvers (KSP) component provides an easy-to-use interface to the 
+//! combination of a Krylov subspace iterative method and a preconditioner (in the [KSP](ksp) and [PC](pc)
+//! components, respectively) or a sequential direct solver. 
+//! 
+//! KSP users can set various Krylov subspace options at runtime via the options database 
+//! (e.g., -ksp_type cg ). KSP users can also set KSP options directly in application by directly calling
+//! the KSP routines listed below (e.g., [`KSP::set_type()`](#) ). KSP components can be used directly to
+//! create and destroy solvers; this is not needed for users but is intended for library developers.
+
 use crate::prelude::*;
 
 // https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/KSP/index.html
 
+/// Abstract PETSc object that manages all Krylov methods. This is the object that manages the linear
+/// solves in PETSc (even those such as direct solvers that do no use Krylov accelerators).
 pub struct KSP<'a> {
     petsc: &'a crate::Petsc,
     pub(crate) ksp_p: *mut petsc_raw::_p_KSP, // I could use KSP which is the same thing, but i think using a pointer is more clear
@@ -40,6 +51,7 @@ impl<'a> KSP<'a> {
         KSP { petsc, ksp_p, pc: None }
     }
 
+    /// Same as [`Petsc::ksp_create()`].
     pub fn create(petsc: &'a crate::Petsc) -> Result<Self> {
         let mut ksp_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::KSPCreate(petsc.world.as_raw(), ksp_p.as_mut_ptr()) };
