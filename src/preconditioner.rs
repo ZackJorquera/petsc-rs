@@ -1,3 +1,13 @@
+//! The Scalable Linear Equations Solvers (KSP) component provides an easy-to-use interface to 
+//! the combination of a Krylov subspace iterative method and a preconditioner (in the [KSP](ksp) and [PC](pc) 
+//! components, respectively) or a sequential direct solver. 
+//!
+//! KSP users can set various preconditioning options at runtime via the options database 
+//! (e.g., -pc_type jacobi ). KSP users can also set PC options directly in application codes by 
+//! first extracting the PC context from the KSP context via [`KSP::get_pc()`] and then directly
+//! calling the PC routines listed below (e.g., [`PC::set_type()`]). PC components can be used directly
+//! to create and destroy solvers; this is not needed for users but is for library developers.
+
 use crate::prelude::*;
 
 // https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/PC/index.html

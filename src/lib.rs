@@ -1,5 +1,6 @@
-//! TODO: add stuff.
-//! from https://petsc.org/release/documentation/manual/getting_started
+//! # petsc-rs: PETSc rust bindings
+//!
+//! read <https://petsc.org/release/documentation/manual/getting_started>
 
 use std::os::raw::c_char;
 use std::vec;
@@ -13,10 +14,10 @@ pub(crate) mod macros;
 pub mod vector;
 pub mod mat;
 pub mod ksp;
-mod preconditioner;
-pub mod pc { pub use crate::preconditioner::*; }
+#[path = "preconditioner.rs"] pub mod pc; // TODO: or should i just rename the file
 
 pub mod prelude {
+    //! Commonly used items.
     pub use crate::{
         Petsc,
         PetscErrorKind,
@@ -55,7 +56,7 @@ use prelude::*;
 /// Calls from other processes are ignored.
 ///
 /// Note, the macro internally uses the try operator, `?`, so it can only be used
-/// in functions the returns a [`petsc_rs::Result`](Result).
+/// in functions that return a [`petsc_rs::Result`](Result).
 ///
 /// # Example
 ///
@@ -80,8 +81,9 @@ macro_rules! petsc_println {
 /// PETSc result
 pub type Result<T> = std::result::Result<T, PetscError>;
 
-/// PETSc Error.
-/// Can created with [`Petsc::set_error`].
+/// PETSc Error type.
+///
+/// Can be used with [`Petsc::set_error`].
 ///
 /// [`Petsc::set_error`]: Petsc::set_error
 #[derive(Debug)]
@@ -94,18 +96,9 @@ pub use petsc_raw::PetscErrorType as PetscErrorType;
 pub use petsc_raw::PetscErrorCodeEnum as PetscErrorKind;
 pub use petsc_raw::InsertMode;
 
-#[derive(Default)]
-pub struct PetscBuilder
-{
-    world: Option<mpi::topology::SystemCommunicator>,
-    args: Option<Vec<String>>,
-    file: Option<String>,
-    help_msg: Option<String>,
-
-}
-
-/// Allows you to call [`PetscInitialize`] with optional parameters.
-/// Must call [`PetscBuilder::init`] to get [`Petsc`].
+/// Helper struct which allows you to call [`PetscInitialize`] with optional parameters.
+///
+/// Must call [`PetscBuilder::init()`] to get the [`Petsc`] object.
 ///
 /// # Examples
 ///
@@ -120,8 +113,16 @@ pub struct PetscBuilder
 /// Note `Petsc::builder().init()` is the same as [`Petsc::init_no_args()`].
 ///
 /// [`PetscInitialize`]: petsc_raw::PetscInitialize
-/// [`PetscBuilder::init`]: PetscBuilder::init
-/// [`Petsc`]: Petsc
+#[derive(Default)]
+pub struct PetscBuilder
+{
+    world: Option<mpi::topology::SystemCommunicator>,
+    args: Option<Vec<String>>,
+    file: Option<String>,
+    help_msg: Option<String>,
+
+}
+
 impl PetscBuilder
 {
     /// Calls [`PetscInitialize`] with the options given.

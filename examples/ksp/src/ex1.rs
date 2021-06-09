@@ -8,8 +8,10 @@
 //!
 //! To run:
 //! ```text
-//! $ cargo build ex1
+//! $ cargo build --bin ex1
 //! $ target/debug/ex1
+//! Norm of error 2.41202e-15, Iters 5
+//! $ mpiexec -n 1 target/debug/ex1
 //! Norm of error 2.41202e-15, Iters 5
 //! $ target/debug/ex1 -n 100
 //! Norm of error 1.14852e-2, Iters 318

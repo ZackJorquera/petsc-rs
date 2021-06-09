@@ -1,3 +1,5 @@
+//! PETSc matrices (Mat objects) are used to store Jacobians and other sparse matrices in PDE-based (or other) simulations.
+
 use crate::prelude::*;
 
 // https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Mat/index.html
@@ -5,6 +7,9 @@ use crate::prelude::*;
 // TODO: should we add a builder type so that you have to call some functions
 // I feel like this could also be important for create, set up, assembly, and then finally using it.
 // Because these stages need to be separate.
+
+/// Abstract PETSc matrix object used to manage all linear operators in PETSc, even those
+/// without an explicit sparse representation (such as matrix-free operators).
 pub struct Mat<'a> {
     petsc: &'a crate::Petsc,
     pub(crate) mat_p: *mut petsc_raw::_p_Mat, // I could use Mat which is the same thing, but i think using a pointer is more clear
