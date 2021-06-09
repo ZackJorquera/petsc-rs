@@ -1,8 +1,9 @@
-//! PETSc matrices (Mat objects) are used to store Jacobians and other sparse matrices in PDE-based (or other) simulations.
+//! PETSc matrices (Mat objects) are used to store Jacobians and other
+//! sparse matrices in PDE-based (or other) simulations.
+//!
+//! PETSc C API docs: <https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Mat/index.html>
 
 use crate::prelude::*;
-
-// https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Mat/index.html
 
 // TODO: should we add a builder type so that you have to call some functions
 // I feel like this could also be important for create, set up, assembly, and then finally using it.

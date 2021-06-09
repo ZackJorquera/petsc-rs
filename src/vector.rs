@@ -1,16 +1,14 @@
 //! PETSc vectors (Vec objects) are used to store the field variables in PDE-based (or other) simulations.
+//!
+//! PETSc C API docs: <https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Vec/index.html>
 
 use crate::prelude::*;
-
-// https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Vec/index.html
 
 // TODO: should we add a builder type so that you have to call set_type or set_from_options in order to use the vector
 /// Abstract PETSc vector object
 pub struct Vector<'a> {
     petsc: &'a crate::Petsc,
-    // Note, we do not have exclusive access to this pointer necessarily
-    // When ever there is a PetscObjectReference call, this normally means that we will
-    // give the pointer to another process.
+
     pub(crate) vec_p: *mut petsc_raw::_p_Vec, // I could use Vec which is the same thing, but i think using a pointer is more clear
 }
 
@@ -56,11 +54,15 @@ impl<'a> Vector<'a> {
         Ok(Vector { petsc: &self.petsc, vec_p: unsafe { vec2_p.assume_init() } })
     }
 
-    /// Configures the vector from the options database.
-    pub fn set_from_options(&mut self) -> Result<()> {
-        // I feel like a lot of these easy function can be generated with a macro
-        let ierr = unsafe { petsc_raw::VecSetFromOptions(self.vec_p) };
-        self.petsc.check_error(ierr)
+    wrap_simple_petsc_member_funcs! {
+        VecSetFromOptions, set_from_options, vec_p, #[doc = "Configures the vector from the options database."];
+        VecSetUp, set_up, mat_p, #[doc = "Sets up the internal vector data structures for the later use."];
+        // VecAssemblyBegin, assembly_begin, vec_p, #[doc = "Begins assembling the vector. This routine should be called after completing all calls to VecSetValues()."];
+        // VecAssemblyEnd, assembly_end, vec_p, #[doc = "Completes assembling the vector. This routine should be called after VecAssemblyBegin()."];
+    }
+
+    wrap_simple_petsc_member_funcs! {
+        VecSet, set_all, vec_p, alpha, f64, #[doc = "Sets all components of a vector to a single scalar value.\n\nYou CANNOT call this after you have called [`Vector::set_values()`]."];
     }
 
     /// Sets the local and global sizes, and checks to determine compatibility
@@ -71,18 +73,6 @@ impl<'a> Vector<'a> {
         let ierr = unsafe { petsc_raw::VecSetSizes(
             self.vec_p, local_size.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
             global_size.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER)) };
-        self.petsc.check_error(ierr)
-    }
-
-    /// Sets all components of a vector to a single scalar value.
-    ///
-    /// You CANNOT call this after you have called [`Vector::set_values()`].
-    pub fn set_all(&mut self, alpha: f64) -> Result<()>
-    {
-        // TODO: we should accept PetscScalar, but we will just assume that it is always a f64 for now.
-        // https://petsc.org/release/docs/manualpages/Sys/PetscScalar.html#PetscScalar
-
-        let ierr = unsafe { petsc_raw::VecSet(self.vec_p, alpha) };
         self.petsc.check_error(ierr)
     }
 
@@ -165,10 +155,11 @@ impl<'a> Vector<'a> {
         <T as IntoIterator>::IntoIter: ExactSizeIterator
     {
         // TODO: ix can't be a &[i32; N] because it impl IntoIterator with Item=&i32 (same with &Vec<i32>)
-        // This might not be an issue because [i32; N] implements copy
+        // This might not be an issue because [i32; N] implements copy.
 
         // TODO: make this return a slice (like how libceed has the VectorView type)
         // For now im going to return a vector because this is a temporary testing function
+        // Really we need to use `VecView` which can get data from the whole vector
 
         // TODO: is this good, it feels like it would be better to just accept &[i32] and then we dont 
         // need to do the collect. Although, it is nice to accept ranges or iters as input.

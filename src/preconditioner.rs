@@ -7,12 +7,13 @@
 //! first extracting the PC context from the KSP context via [`KSP::get_pc()`] and then directly
 //! calling the PC routines listed below (e.g., [`PC::set_type()`]). PC components can be used directly
 //! to create and destroy solvers; this is not needed for users but is for library developers.
+//!
+//! PETSc C API docs: <https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/PC/index.html>
 
 use crate::prelude::*;
 
-// https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/PC/index.html
-
-// This table is from: https://petsc.org/release/docs/manualpages/PC/PCType.html#PCType
+// TODO: should this table and the following enum be in petsc-sys
+/// This table is from: https://petsc.org/release/docs/manualpages/PC/PCType.html#PCType
 static PCTYPE_TABLE: &'static [&str] = &[
     "none",
     "jacobi",
@@ -65,6 +66,7 @@ static PCTYPE_TABLE: &'static [&str] = &[
     "hara"
 ];
 
+/// This enum is from: https://petsc.org/release/docs/manualpages/PC/PCType.html#PCType
 pub enum PCType {
     PCNONE = 0,
     PCJACOBI,
@@ -122,17 +124,12 @@ pub struct PC<'a> {
     pub(crate) petsc: &'a crate::Petsc,
     pub(crate) pc_p: *mut petsc_raw::_p_PC, // I could use petsc_raw::PC which is the same thing, but i think using a pointer is more clear
 
-    // This comment might be wrong:
-    // Here is the problem, we have the two raw functions `PCSetOperators` and `PCGetOperators`. Both of these
-    // use the underling members amat and pmat which are required to have a lifetime at least as long as the
-    // PC type its self. General usage could be to set the operators (which would increase the reference
-    // count under the hood) and then to get them and edit them maybe. idk if you are allowed to edit them this
-    // way, and for sure dont know if this is possible to do safely with rust and include the next feature.
-    // But there is an alternative usage, to use PCGetOperators to create the mats (this is also a thing for KSPGetPC).
-    // This causes the mats to be "owned" by the PC object. The user code (the rust code) doesn't own it.
-    // And everything (like calling destroy) is all handled internally. This is why we have the two types of members
-    // `owned_amat` and `ref_amat`, both of which we can get a reference to the inner Mat type to give to the user.
-
+    // We take an `Rc` because we don't want ownership of the Mat. Under the hood, this is how the 
+    // PetscSetOperators function works, it increments the reference count. The problem with this
+    // solution right now is that we lose mutable access. It might be worth making it a Rc<RefCell<Mat>>.
+    // This might also allow us to have a get_operators function (which would also returns a Rc<RefCell<Mat>>).
+    // Regardless, returning mutable access would be hard, especially when the rust side can't guarantee how the 
+    // C api accesses the operators behind the scenes.
     ref_amat: Option<Rc<Mat<'a>>>,
     ref_pmat: Option<Rc<Mat<'a>>>,
 }
@@ -188,7 +185,7 @@ impl<'a> PC<'a> {
     ///
     /// Passing a `None` for `a_mat` or `p_mat` removes the matrix that is currently used.
     // TODO: should we pass in `Rc`s or should we just transfer ownership.
-    // or we could do `Rc<RefCell<Mat>>` so that when you remove the mats we can give mut access back
+    // or we could do `Rc<RefCell<Mat>>` so that when you remove the mats we can give mut access back.
     pub fn set_operators(&mut self, a_mat: Option<Rc<Mat<'a>>>, p_mat: Option<Rc<Mat<'a>>>) -> Result<()>
     {
         // Should this function consume the mats? Right now once call this function you can not edit the mats with

@@ -6,10 +6,10 @@
 //! (e.g., -ksp_type cg ). KSP users can also set KSP options directly in application by directly calling
 //! the KSP routines listed below (e.g., [`KSP::set_type()`](#) ). KSP components can be used directly to
 //! create and destroy solvers; this is not needed for users but is intended for library developers.
+//!
+//! PETSc C API docs: <https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/KSP/index.html>
 
 use crate::prelude::*;
-
-// https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/KSP/index.html
 
 /// Abstract PETSc object that manages all Krylov methods. This is the object that manages the linear
 /// solves in PETSc (even those such as direct solvers that do no use Krylov accelerators).
@@ -17,18 +17,9 @@ pub struct KSP<'a> {
     petsc: &'a crate::Petsc,
     pub(crate) ksp_p: *mut petsc_raw::_p_KSP, // I could use KSP which is the same thing, but i think using a pointer is more clear
 
-    // TODO: update comment
-    // This comment IS wrong:
-    // `owned_pc` is the internal pc created by the ksp object. The user code (the rust code) doesn't own it.
-    // And everything (like calling destroy) is all handled internally. Calling PCDestroy our self will cause
-    // problems internally. That's why we have it in a `ManuallyDrop` (or a NoDestroyDrop) so PCDestroy is never called.
-    // This really just serves as a reference to the PC. But we can't create a reference to a rust type if 
-    // it doesn't exist anywhere. Also, the PC object does contain some members that we do want to drop, 
-    // like `ref_amat` which is a `Rc` (we need to decrement the reference count) so rust can drop the
-    // the Mat (by calling MatDestroy). We need to do this because the Mat was created by the user and thus
-    // needs to be dropped by the user (or by rust in this case).
-    // Note, if a higher level type contains a ManuallyDrop (or a NoDestroyDrop) of this type, we expect that it will manually drop 
-    // the members that need to be dropped, like `set_pc` and everything in `owned_pc`.
+    // As far as Petsc is concerned we own a reference to the PC as it is reference counted under the hood.
+    // But it should be fine to keep it here as an owned reference because we can control access and the 
+    // default `KSPDestroy` accounts for references.
     #[doc(hidden)]
     pc: Option<PC<'a>>
     
@@ -67,7 +58,7 @@ impl<'a> KSP<'a> {
     /// Passing a `None` for `a_mat` or `p_mat` removes the matrix that is currently used.
     pub fn set_operators(&mut self, a_mat: Option<Rc<Mat<'a>>>, p_mat: Option<Rc<Mat<'a>>>) -> Result<()>
     {
-        // TODO: should we call `KSPSetOperators`? or should we just call PC::set_operators>
+        // TODO: should we call `KSPSetOperators`? or should we just call `PC::set_operators`
         // The source for KSPSetOperators basically just calls PCSetOperators but does something with 
         // `ksp->setupstage` so idk.
         self.get_pc_mut()?.set_operators(a_mat, p_mat)
@@ -84,6 +75,7 @@ impl<'a> KSP<'a> {
     }
 
     /// Sets the preconditioner to be used to calculate the application of the preconditioner on a vector.
+    /// if you change the PC by calling set again, then the original will be dropped.
     pub fn set_pc(&mut self, pc: PC<'a>) -> Result<()>
     {
         
@@ -99,13 +91,11 @@ impl<'a> KSP<'a> {
     /// Returns a reference to the preconditioner context set with KSPSetPC().
     pub fn get_pc<'b>(&'b mut self) -> Result<&'b PC<'a>> // IDK if this has to be a `&mut self` call
     {
-        // Note, the PC object might be handled by the ksp object. Thus  if so we only want to return 
-        // a reference to it. The KSPDestroy function will also call PCDestroy for us.
-
         // TODO: should we even have a non mut one (or only `get_pc_mut`)
 
         // Under the hood, if the pc is already set, i.e. with `set_pc`, then `KSPGetPC` just returns a pointer
-        // to that, so we can bypass calling KSPGetPC.
+        // to that, so we can bypass calling KSPGetPC. However, there shouldn't be any problem with just calling
+        // `KSPGetPC` again as we incremented the reference of the PC we "own" so dropping it wont do anything.
         if let Some(ref pc) = self.pc
         {
             Ok(pc)
@@ -127,9 +117,6 @@ impl<'a> KSP<'a> {
     /// Returns a mutable reference to the preconditioner context set with KSPSetPC().
     pub fn get_pc_mut<'b>(&'b mut self) -> Result<&'b mut PC<'a>> // IDK if this has to be a `&mut self` call
     {
-        // Note, the PC object is handled by the ksp object. Thus we only want to return a reference to it
-        // The KSPDestroy function will also call PCDestroy for us
-
         if let Some(ref mut pc) = self.pc
         {
             Ok(pc)

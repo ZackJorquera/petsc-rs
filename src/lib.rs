@@ -52,6 +52,11 @@ use prelude::*;
 // facing function. And it is unclear how to remove a reference count, like it seems that calling destroy
 // or PetscObjectDereference will decrement the count.
 
+// TODO: we should accept PetscScalar, but we will just assume that it is always a f64 for now.
+// We need to add support for PetscScalar being complex, or being a different size float.
+// It seems like this is a compile time thing so it isn't as important to add right now.
+// https://petsc.org/release/docs/manualpages/Sys/PetscScalar.html#PetscScalar
+
 /// Prints to standard out, only from the first processor in the communicator.
 /// Calls from other processes are ignored.
 ///
