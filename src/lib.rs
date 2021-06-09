@@ -15,6 +15,7 @@ pub mod vector;
 pub mod mat;
 pub mod ksp;
 #[path = "preconditioner.rs"] pub mod pc; // TODO: or should i just rename the file
+pub mod viewer;
 
 pub mod prelude {
     //! Commonly used items.
@@ -23,10 +24,11 @@ pub mod prelude {
         PetscErrorKind,
         InsertMode,
         petsc_println,
-        vector::{self, Vector, NormType, },
-        mat::{self, Mat, MatAssemblyType, MatOption, },
-        ksp::{self, KSP, },
-        pc::{self, PC, PCType, },
+        vector::{Vector, NormType, },
+        mat::{Mat, MatAssemblyType, MatOption, },
+        ksp::{KSP, },
+        pc::{PC, PCType, },
+        viewer::{Viewer, PetscViewerFormat, },
     };
     pub use mpi::traits::*;
     pub(crate) use crate::Result;

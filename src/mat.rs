@@ -193,3 +193,5 @@ impl<'a> Mat<'a> {
         * Read docs for [`Mat::mpi_aij_set_preallocation()`](Mat::mpi_aij_set_preallocation())"];
     }
 }
+
+impl_petsc_view_func!{ Mat, mat_p, MatView }

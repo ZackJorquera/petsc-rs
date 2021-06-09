@@ -45,7 +45,7 @@ impl<'a> Vector<'a> {
 
     /// Creates a new vector of the same type as an existing vector.
     /// [`duplicate`](Vector::duplicate) DOES NOT COPY the vector entries, but rather 
-    /// allocates storage for the new vector. Use [`Vector::copy_data`](#) to copy a vector.
+    /// allocates storage for the new vector. Use [`Vector::copy_values`](#) to copy a vector.
     pub fn duplicate(&self) -> Result<Self> {
         let mut vec2_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::VecDuplicate(self.vec_p, vec2_p.as_mut_ptr()) };
@@ -56,13 +56,26 @@ impl<'a> Vector<'a> {
 
     wrap_simple_petsc_member_funcs! {
         VecSetFromOptions, set_from_options, vec_p, #[doc = "Configures the vector from the options database."];
-        VecSetUp, set_up, mat_p, #[doc = "Sets up the internal vector data structures for the later use."];
-        // VecAssemblyBegin, assembly_begin, vec_p, #[doc = "Begins assembling the vector. This routine should be called after completing all calls to VecSetValues()."];
-        // VecAssemblyEnd, assembly_end, vec_p, #[doc = "Completes assembling the vector. This routine should be called after VecAssemblyBegin()."];
+        VecSetUp, set_up, vec_p, #[doc = "Sets up the internal vector data structures for the later use."];
+        VecAssemblyBegin, assembly_begin, vec_p, #[doc = "Begins assembling the vector. This routine should be called after completing all calls to VecSetValues()."];
+        VecAssemblyEnd, assembly_end, vec_p, #[doc = "Completes assembling the vector. This routine should be called after VecAssemblyBegin()."];
     }
 
     wrap_simple_petsc_member_funcs! {
         VecSet, set_all, vec_p, alpha, f64, #[doc = "Sets all components of a vector to a single scalar value.\n\nYou CANNOT call this after you have called [`Vector::set_values()`]."];
+    }
+
+    wrap_simple_petsc_member_funcs! {
+        VecGetLocalSize, get_local_size, vec_p, i32, #[doc = "Returns the number of elements of the vector stored in local memory."];
+        VecGetSize, get_global_size, vec_p, i32, #[doc = "Returns the global number of elements of the vector."];
+    }
+
+    ///  Assembling the vector by calling [`Vector::assembly_begin()`] then [`Vector::assembly_end()`]
+    pub fn assemble(&mut self) -> Result<()>
+    {
+        self.assembly_begin()?;
+        // TODO: what would even go here?
+        self.assembly_end()
     }
 
     /// Sets the local and global sizes, and checks to determine compatibility
@@ -204,10 +217,7 @@ impl<'a> Vector<'a> {
         Ok(array_iter.zip(slice_iter_p1).map(|(s,e)| *s..*e).collect())
     }
 
-    wrap_simple_petsc_member_funcs! {
-        VecGetLocalSize, get_local_size, vec_p, i32, #[doc = "Returns the number of elements of the vector stored in local memory."];
-    }
-
     // TODO: add `from_array`/`from_slice` and maybe also `set_slice`
 }
 
+impl_petsc_view_func!{ Vector, vec_p, VecView }

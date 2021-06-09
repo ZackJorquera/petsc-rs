@@ -25,6 +25,9 @@ static HELP_MSG: &'static str = "Solves a tridiagonal linear system with KSP.\n\
 use petsc_rs::prelude::*;
 use structopt::StructOpt;
 
+mod opt;
+use opt::*;
+
 // TODO: make this more stream-lined, maybe add to the petsc-rs lib
 #[derive(Debug, StructOpt)]
 #[structopt(name = "ex1", about = HELP_MSG)]
@@ -38,30 +41,8 @@ struct Opt {
     sub: Option<PetscOpt>,
 }
 
-#[derive(Debug, PartialEq, StructOpt)]
-enum PetscOpt {
-    /// use `-- -help` for petsc help
-    #[structopt(name = "Petsc Args", external_subcommand)]
-    PetscArgs(Vec<String>),
-}
-
-impl PetscOpt
-{
-    fn petsc_args(self_op: Option<Self>) -> Vec<String>
-    {
-        match self_op
-        {
-            Some(PetscOpt::PetscArgs(mut vec)) => {
-                vec.push(std::env::args().next().unwrap());
-                vec.rotate_right(1);
-                vec
-            },
-            _ => vec![std::env::args().next().unwrap()]
-        }
-    }
-}
-
 fn main() -> petsc_rs::Result<()> {
+    // Note, this does not work. It runs of all precesses which isn't what we want
     let Opt {num_elems: n, sub: ext_args} = Opt::from_args();
     let petsc_args = PetscOpt::petsc_args(ext_args); // Is there an easier way to do this
 
@@ -169,7 +150,8 @@ fn main() -> petsc_rs::Result<()> {
         View solver info; we could instead use the option -ksp_view to
         print this info to the screen at the conclusion of KSPSolve().
     */
-    // TODO
+    let viewer = Viewer::ascii_get_stdout(&petsc)?;
+    ksp.view(&viewer)?;
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
                       Check the solution and clean up

@@ -20,6 +20,9 @@ Input parameters include:\n\n";
 use petsc_rs::prelude::*;
 use structopt::StructOpt;
 
+mod opt;
+use opt::*;
+
 #[derive(Debug, StructOpt)]
 #[structopt(name = "ex2", about = HELP_MSG)]
 struct Opt {
@@ -40,31 +43,8 @@ struct Opt {
     sub: Option<PetscOpt>,
 }
 
-#[derive(Debug, PartialEq, StructOpt)]
-enum PetscOpt {
-    /// use `-- -help` for petsc help
-    #[structopt(name = "Petsc Args", external_subcommand)]
-    PetscArgs(Vec<String>),
-}
-
-impl PetscOpt
-{
-    fn petsc_args(self_op: Option<Self>) -> Vec<String>
-    {
-        match self_op
-        {
-            Some(PetscOpt::PetscArgs(mut vec)) => {
-                vec.push(std::env::args().next().unwrap());
-                vec.rotate_right(1);
-                vec
-            },
-            _ => vec![std::env::args().next().unwrap()]
-        }
-    }
-}
-
 fn main() -> petsc_rs::Result<()> {
-    let Opt {m, n, view_exact_sol: _, sub: ext_args} = Opt::from_args();
+    let Opt {m, n, view_exact_sol, sub: ext_args} = Opt::from_args();
     let petsc_args = PetscOpt::petsc_args(ext_args); // Is there an easier way to do this
 
     // optionally initialize mpi
@@ -167,6 +147,7 @@ fn main() -> petsc_rs::Result<()> {
             below).
     */
     let mut u = petsc.vec_create()?;
+    u.set_name("Exact Solution")?;
     u.set_sizes(None, Some(n*m))?;
     u.set_from_options()?;
     let mut b = u.duplicate()?;
@@ -181,11 +162,11 @@ fn main() -> petsc_rs::Result<()> {
     Mat::mult(&A, &u, &mut b)?;
 
     // View the exact solution vector if desired
-    // TODO
-    // if view_exact_sol
-    // {
-    //     // TODO
-    // }
+    if view_exact_sol
+    {
+        let viewer = Viewer::ascii_get_stdout(&petsc)?;
+        u.view(&viewer)?;
+    }
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
                 Create the linear solver and set various options

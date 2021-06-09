@@ -125,3 +125,17 @@ macro_rules! impl_petsc_object_funcs {
         }
     };
 }
+
+macro_rules! impl_petsc_view_func {
+    ($struct_name:ident, $raw_ptr_var:ident, $raw_view_func:ident) => {
+        impl<'a> $struct_name<'a>
+        {
+            /// Views the object with a viewer
+            pub fn view(&self, viewer: &crate::viewer::Viewer) -> crate::Result<()> {
+                
+                let ierr = unsafe { crate::petsc_raw::$raw_view_func(self.$raw_ptr_var, viewer.viewer_p) };
+                self.petsc.check_error(ierr)
+            }
+        }
+    };
+}

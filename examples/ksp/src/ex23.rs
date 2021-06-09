@@ -19,6 +19,9 @@ static HELP_MSG: &'static str = "Solves a tridiagonal linear system with KSP.\n\
 use petsc_rs::prelude::*;
 use structopt::StructOpt;
 
+mod opt;
+use opt::*;
+
 #[derive(Debug, StructOpt)]
 #[structopt(name = "ex23", about = HELP_MSG)]
 struct Opt {
@@ -29,29 +32,6 @@ struct Opt {
     /// use `-- -help` for petsc help
     #[structopt(subcommand)]
     sub: Option<PetscOpt>,
-}
-
-#[derive(Debug, PartialEq, StructOpt)]
-enum PetscOpt {
-    /// use `-- -help` for petsc help
-    #[structopt(name = "Petsc Args", external_subcommand)]
-    PetscArgs(Vec<String>),
-}
-
-impl PetscOpt
-{
-    fn petsc_args(self_op: Option<Self>) -> Vec<String>
-    {
-        match self_op
-        {
-            Some(PetscOpt::PetscArgs(mut vec)) => {
-                vec.push(std::env::args().next().unwrap());
-                vec.rotate_right(1);
-                vec
-            },
-            _ => vec![std::env::args().next().unwrap()]
-        }
-    }
 }
 
 fn main() -> petsc_rs::Result<()> {
@@ -189,7 +169,8 @@ fn main() -> petsc_rs::Result<()> {
         View solver info; we could instead use the option -ksp_view to
         print this info to the screen at the conclusion of KSPSolve().
     */
-    // TODO
+    let viewer = Viewer::ascii_get_stdout(&petsc)?;
+    ksp.view(&viewer)?;
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
                       Check the solution and clean up

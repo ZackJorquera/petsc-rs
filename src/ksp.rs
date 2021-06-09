@@ -1,5 +1,5 @@
 //! The scalable linear equations solvers (KSP) component provides an easy-to-use interface to the 
-//! combination of a Krylov subspace iterative method and a preconditioner (in the [KSP](ksp) and [PC](pc)
+//! combination of a Krylov subspace iterative method and a preconditioner (in the [KSP](crate::ksp) and [PC](crate::pc)
 //! components, respectively) or a sequential direct solver. 
 //! 
 //! KSP users can set various Krylov subspace options at runtime via the options database 
@@ -163,3 +163,5 @@ impl<'a> KSP<'a> {
     }
 
 }
+
+impl_petsc_view_func!{ KSP, ksp_p, KSPView }

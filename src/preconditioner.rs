@@ -1,5 +1,5 @@
 //! The Scalable Linear Equations Solvers (KSP) component provides an easy-to-use interface to 
-//! the combination of a Krylov subspace iterative method and a preconditioner (in the [KSP](ksp) and [PC](pc) 
+//! the combination of a Krylov subspace iterative method and a preconditioner (in the [KSP](crate::ksp) and [PC](crate::pc) 
 //! components, respectively) or a sequential direct solver. 
 //!
 //! KSP users can set various preconditioning options at runtime via the options database 
@@ -66,7 +66,7 @@ static PCTYPE_TABLE: &'static [&str] = &[
     "hara"
 ];
 
-/// This enum is from: https://petsc.org/release/docs/manualpages/PC/PCType.html#PCType
+/// This enum is from: <https://petsc.org/release/docs/manualpages/PC/PCType.html#PCType>
 pub enum PCType {
     PCNONE = 0,
     PCJACOBI,
