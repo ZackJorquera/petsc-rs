@@ -1,3 +1,6 @@
+#![warn(rustdoc::broken_intra_doc_links)]
+#![warn(missing_docs)]
+
 //! # petsc-rs: PETSc rust bindings
 //!
 //! read <https://petsc.org/release/documentation/manual/getting_started>
@@ -24,8 +27,8 @@ pub mod prelude {
         PetscErrorKind,
         InsertMode,
         petsc_println,
-        vector::{Vector, NormType, },
-        mat::{Mat, MatAssemblyType, MatOption, },
+        vector::{Vector, NormType, VecOption, },
+        mat::{Mat, MatAssemblyType, MatOption, MatDuplicateOption, },
         ksp::{KSP, },
         pc::{PC, PCType, },
         viewer::{Viewer, PetscViewerFormat, },
@@ -199,13 +202,13 @@ impl PetscBuilder
         self
     }
 
-    // TODO: https://petsc.org/release/docs/manualpages/Sys/PETSC_COMM_WORLD.html
-    pub fn world(self, _world: mpi::topology::SystemCommunicator) -> Self
-    {
-        todo!()
-        // TODO: https://petsc.org/release/docs/manualpages/Sys/PETSC_COMM_WORLD.html
-        // idk if this is possible the way it is set up
-    }
+    // // TODO: https://petsc.org/release/docs/manualpages/Sys/PETSC_COMM_WORLD.html
+    // pub fn world(self, _world: mpi::topology::SystemCommunicator) -> Self
+    // {
+    //     todo!()
+    //     // TODO: https://petsc.org/release/docs/manualpages/Sys/PETSC_COMM_WORLD.html
+    //     // idk if this is possible the way it is set up
+    // }
 
     /// Help message to print
     pub fn help_msg<T: ToString>(mut self, help_msg: T) -> Self

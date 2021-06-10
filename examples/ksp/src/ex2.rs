@@ -14,7 +14,7 @@
 //! Norm of error 2.28509e-3, Iters 83
 //! ```
 
-static HELP_MSG: &'static str = "Solves a linear system in parallel with KSP.
+static HELP_MSG: &str = "Solves a linear system in parallel with KSP.
 Input parameters include:\n\n";
 
 use petsc_rs::prelude::*;
@@ -104,28 +104,21 @@ fn main() -> petsc_rs::Result<()> {
         all the unknowns for x = h then for x = 2h etc; Hence you see J = Ii +- n
         instead of J = I +- m as you might expect. The more standard ordering
         would first do all variables for y = h, then y = 2h etc.
-    */
 
-    for ii in mat_ownership_range {
-        let mut v = [-1.0];
-        let i = ii/n;
-        let j = ii - i*n;
-        let mut jj: i32;
-        if i > 0   { jj = ii - n; A.set_values(1, &[ii], 1, &[jj], &v, InsertMode::ADD_VALUES)?; }
-        if i < m-1 { jj = ii + n; A.set_values(1, &[ii], 1, &[jj], &v, InsertMode::ADD_VALUES)?; }
-        if j > 0   { jj = ii - 1; A.set_values(1, &[ii], 1, &[jj], &v, InsertMode::ADD_VALUES)?; }
-        if j < n-1 { jj = ii + 1; A.set_values(1, &[ii], 1, &[jj], &v, InsertMode::ADD_VALUES)?; }
-        v = [4.0]; A.set_values(1, &[ii], 1, &[ii], &v, InsertMode::ADD_VALUES)?;
-    }
-    
-    /*
-        Assemble matrix, using the 2-step process:
-            MatAssemblyBegin(), MatAssemblyEnd()
-        Computations can be done while messages are in transition
-        by placing code between these two statements.
+        Note MatAssemblyBegin(), MatAssemblyEnd() are automatically call by `assemble_with()`.
     */
-    A.assembly_begin(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
-    A.assembly_end(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
+    A.assemble_with(mat_ownership_range.map(|ii| {
+            let mut data_vec = vec![];
+            let i = ii/n;
+            let j = ii - i*n;
+            if i > 0   { let jj = ii - n; data_vec.push((ii, jj, -1.0)); }
+            if i < m-1 { let jj = ii + n; data_vec.push((ii, jj, -1.0)); }
+            if j > 0   { let jj = ii - 1; data_vec.push((ii, jj, -1.0)); }
+            if j < n-1 { let jj = ii + 1; data_vec.push((ii, jj, -1.0)); }
+            data_vec.push((ii, ii, 4.0));
+            data_vec
+        }).flatten(), 
+        InsertMode::ADD_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
 
     /* A is symmetric. Set symmetric flag to enable ICC/Cholesky preconditioner */
     A.set_option(MatOption::MAT_SYMMETRIC, true)?;

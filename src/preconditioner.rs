@@ -12,112 +12,7 @@
 
 use crate::prelude::*;
 
-// TODO: should this table and the following enum be in petsc-sys
-/// This table is from: https://petsc.org/release/docs/manualpages/PC/PCType.html#PCType
-static PCTYPE_TABLE: &'static [&str] = &[
-    "none",
-    "jacobi",
-    "sor",
-    "lu",
-    "shell",
-    "bjacobi",
-    "mg",
-    "eisenstat",
-    "ilu",
-    "icc",
-    "asm",
-    "gasm",
-    "ksp",
-    "composite",
-    "redundant",
-    "spai",
-    "nn",
-    "cholesky",
-    "pbjacobi",
-    "vpbjacobi",
-    "mat",
-    "hypre",
-    "parms",
-    "fieldsplit",
-    "tfs",
-    "ml",
-    "galerkin",
-    "exotic",
-    "cp",
-    "bfbt",
-    "lsc",
-    "python",
-    "pfmg",
-    "syspfmg",
-    "redistribute",
-    "svd",
-    "gamg",
-    "chowiluviennacl",
-    "rowscalingviennacl",
-    "saviennacl",
-    "bddc",
-    "kaczmarz",
-    "telescope",
-    "patch",
-    "lmvm",
-    "hmg",
-    "deflation",
-    "hpddm",
-    "hara"
-];
-
-/// This enum is from: <https://petsc.org/release/docs/manualpages/PC/PCType.html#PCType>
-pub enum PCType {
-    PCNONE = 0,
-    PCJACOBI,
-    PCSOR,
-    PCLU,
-    PCSHELL,
-    PCBJACOBI,
-    PCMG,
-    PCEISENSTAT,
-    PCILU,
-    PCICC,
-    PCASM,
-    PCGASM,
-    PCKSP,
-    PCCOMPOSITE,
-    PCREDUNDANT,
-    PCSPAI,
-    PCNN,
-    PCCHOLESKY,
-    PCPBJACOBI,
-    PCVPBJACOBI,
-    PCMAT,
-    PCHYPRE,
-    PCPARMS,
-    PCFIELDSPLIT,
-    PCTFS,
-    PCML,
-    PCGALERKIN,
-    PCEXOTIC,
-    PCCP,
-    PCBFBT,
-    PCLSC,
-    PCPYTHON,
-    PCPFMG,
-    PCSYSPFMG,
-    PCREDISTRIBUTE,
-    PCSVD,
-    PCGAMG,
-    PCCHOWILUVIENNACL,
-    PCROWSCALINGVIENNACL,
-    PCSAVIENNACL,
-    PCBDDC,
-    PCKACZMARZ,
-    PCTELESCOPE,
-    PCPATCH,
-    PCLMVM,
-    PCHMG,
-    PCDEFLATION,
-    PCHPDDM,
-    PCHARA,
-}
+pub use crate::petsc_raw::PCTypeEnum as PCType;
 
 /// Abstract PETSc object that manages all preconditioners including direct solvers such as PCLU
 pub struct PC<'a> {
@@ -144,8 +39,6 @@ impl<'a> Drop for PC<'a> {
     }
 }
 
-impl_petsc_object_funcs!{ PC, pc_p }
-
 impl<'a> PC<'a> {
     /// Same as `PC { ... }` but sets all optional params to `None`
     pub(crate) fn new(petsc: &'a crate::Petsc, pc_p: *mut petsc_raw::_p_PC) -> Self {
@@ -166,15 +59,10 @@ impl<'a> PC<'a> {
         Ok(PC::new(petsc, unsafe { pc_p.assume_init() }))
     }
 
-    wrap_simple_petsc_member_funcs! {
-        PCSetFromOptions, set_from_options, pc_p, #[doc = "Sets PC options from the options database. This routine must be called before PCSetUp() if the user is to be allowed to set the preconditioner method."];
-        PCSetUp, set_up, pc_p, #[doc = "Prepares for the use of a preconditioner."];
-    }
-
     /// Builds PC for a particular preconditioner type
     pub fn set_type(&mut self, pc_type: PCType) -> Result<()>
     {
-        let option_str = PCTYPE_TABLE[pc_type as usize];
+        let option_str = petsc_raw::PCTYPE_TABLE[pc_type as usize];
         let cstring = CString::new(option_str).expect("`CString::new` failed");
         let ierr = unsafe { petsc_raw::PCSetType(self.pc_p, cstring.as_ptr()) };
         self.petsc.check_error(ierr)
@@ -212,3 +100,13 @@ impl<'a> PC<'a> {
         Ok(())
     }
 }
+
+// Macro impls
+impl<'a> PC<'a> {
+    wrap_simple_petsc_member_funcs! {
+        PCSetFromOptions, set_from_options, pc_p, #[doc = "Sets PC options from the options database. This routine must be called before PCSetUp() if the user is to be allowed to set the preconditioner method."];
+        PCSetUp, set_up, pc_p, #[doc = "Prepares for the use of a preconditioner."];
+    }
+}
+
+impl_petsc_object_funcs!{ PC, pc_p }

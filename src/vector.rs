@@ -21,9 +21,8 @@ impl<'a> Drop for Vector<'a> {
     }
 }
 
-impl_petsc_object_funcs!{ Vector, vec_p }
-
 pub use petsc_raw::NormType;
+pub use petsc_raw::VecOption;
 
 impl<'a> Vector<'a> {
     /// Creates an empty vector object. The type can then be set with [`Vector::set_type`](#), or [`Vector::set_from_options`].
@@ -52,22 +51,6 @@ impl<'a> Vector<'a> {
         self.petsc.check_error(ierr)?;
 
         Ok(Vector { petsc: &self.petsc, vec_p: unsafe { vec2_p.assume_init() } })
-    }
-
-    wrap_simple_petsc_member_funcs! {
-        VecSetFromOptions, set_from_options, vec_p, #[doc = "Configures the vector from the options database."];
-        VecSetUp, set_up, vec_p, #[doc = "Sets up the internal vector data structures for the later use."];
-        VecAssemblyBegin, assembly_begin, vec_p, #[doc = "Begins assembling the vector. This routine should be called after completing all calls to VecSetValues()."];
-        VecAssemblyEnd, assembly_end, vec_p, #[doc = "Completes assembling the vector. This routine should be called after VecAssemblyBegin()."];
-    }
-
-    wrap_simple_petsc_member_funcs! {
-        VecSet, set_all, vec_p, alpha, f64, #[doc = "Sets all components of a vector to a single scalar value.\n\nYou CANNOT call this after you have called [`Vector::set_values()`]."];
-    }
-
-    wrap_simple_petsc_member_funcs! {
-        VecGetLocalSize, get_local_size, vec_p, i32, #[doc = "Returns the number of elements of the vector stored in local memory."];
-        VecGetSize, get_global_size, vec_p, i32, #[doc = "Returns the global number of elements of the vector."];
     }
 
     ///  Assembling the vector by calling [`Vector::assembly_begin()`] then [`Vector::assembly_end()`]
@@ -106,13 +89,32 @@ impl<'a> Vector<'a> {
         Ok(unsafe { res.assume_init() })
     }
 
+    /// Sets an option for controling a vector's behavior.
+    pub fn set_option(&mut self, option: VecOption, flg: bool) -> Result<()>
+    {
+        let ierr = unsafe { petsc_raw::VecSetOption(self.vec_p, 
+            option, if flg {petsc_raw::PetscBool::PETSC_TRUE} else {petsc_raw::PetscBool::PETSC_FALSE}) };
+        self.petsc.check_error(ierr)
+    }
+
     /// Inserts or adds values into certain locations of a vector.
-    /// `ix` and `v` must be the same length or `set_values` will panic
+    ///
+    /// `ix` and `v` must be the same length or `set_values` will panic.
+    ///
+    /// If you call `x.set_option(VecOption::VEC_IGNORE_NEGATIVE_INDICES, true)`, negative indices
+    /// may be passed in ix. These rows are simply ignored. This allows easily inserting element
+    /// load matrices with homogeneous Dirchlet boundary conditions that you don't want represented
+    /// in the vector.
+    ///
+    /// These values may be cached, so [`Vector::assembly_begin()`] and [`Vector::assembly_end()`] MUST be
+    /// called after all calls to [`Vector::set_values()`] have been completed.
+    ///
+    /// You might find [`Vector::assemble_with()`] more useful and more idiomatic.
     ///
     /// Parameters.
     /// 
-    /// * `ix` - The relative convergence tolerance, relative decrease in the (possibly preconditioned) residual norm
-    /// * `v` - The absolute convergence tolerance absolute size of the (possibly preconditioned) residual norm
+    /// * `ix` - indices where to add
+    /// * `v` - array of values to be added
     /// * `iora` - Either [`INSERT_VALUES`](InsertMode::INSERT_VALUES) or [`ADD_VALUES`](InsertMode::ADD_VALUES), 
     /// where [`ADD_VALUES`](InsertMode::ADD_VALUES) adds values to any existing entries, and 
     /// [`INSERT_VALUES`](InsertMode::INSERT_VALUES) replaces existing entries with new values.
@@ -127,9 +129,16 @@ impl<'a> Vector<'a> {
     /// v.set_from_options().unwrap();
     ///
     /// v.set_values(&[0, 3, 7, 9], &[1.1, 2.2, 3.3, 4.4], InsertMode::INSERT_VALUES).unwrap();
+    /// // You MUST assemble before you can use 
+    /// v.assembly_begin().unwrap();
+    /// v.assembly_end().unwrap();
+    ///
     /// assert_eq!(&v.get_values(0..10).unwrap()[..], &[1.1,0.0,0.0,2.2,0.0,0.0,0.0,3.3,0.0,4.4]);
     ///
     /// v.set_values(&vec![0, 2, 8, 9], &vec![1.0, 2.0, 3.0, 4.0], InsertMode::ADD_VALUES).unwrap();
+    /// // You MUST assemble before you can use 
+    /// v.assembly_begin().unwrap();
+    /// v.assembly_end().unwrap();
     /// assert_eq!(&v.get_values(0..10).unwrap()[..], &[2.1,0.0,2.0,2.2,0.0,0.0,0.0,3.3,3.0,8.4]);
     /// ```
     pub fn set_values(&mut self, ix: &[i32], v: &[f64], iora: InsertMode) -> Result<()>
@@ -141,6 +150,49 @@ impl<'a> Vector<'a> {
         let ni = ix.len() as i32;
         let ierr = unsafe { petsc_raw::VecSetValues(self.vec_p, ni, ix.as_ptr(), v.as_ptr(), iora) };
         self.petsc.check_error(ierr)
+    }
+
+    /// Allows you to give an iter that will be use to make a series of calls to [`Vector::set_values()`].
+    /// Then is followed by both [`Vector::assembly_begin()`] and [`Vector::assembly_end()`].
+    ///
+    /// [`assemble_with()`](Vector::assemble_with()) will short circuit on the first error
+    /// from [`Vector::set_values()`], returning it.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use petsc_rs::prelude::*;
+    /// # use std::slice::from_ref;
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// # let petsc = Petsc::init_no_args()?;
+    /// let mut v = petsc.vec_create()?;
+    /// v.set_sizes(None, Some(10))?; // create vector of size 10
+    /// v.set_from_options()?;
+    ///
+    /// v.assemble_with([0, 3, 7, 9].iter().cloned()
+    ///         .zip([1.1, 2.2, 3.3, 4.4]), InsertMode::INSERT_VALUES)?;
+    /// assert_eq!(&v.get_values(0..10)?[..], &[1.1,0.0,0.0,2.2,0.0,0.0,0.0,3.3,0.0,4.4]);
+    ///
+    /// v.assemble_with([(0, 1.0), (2, 2.0), (8, 3.0), (9, 4.0)], InsertMode::ADD_VALUES)?;
+    /// assert_eq!(&v.get_values(0..10)?[..], &[2.1,0.0,2.0,2.2,0.0,0.0,0.0,3.3,3.0,8.4]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn assemble_with<I>(&mut self, iter_builder: I, iora: InsertMode) -> Result<()>
+    where
+        I: IntoIterator<Item = (i32, f64)>
+    {
+        // We don't actually care about the num_inserts value, we just need something that
+        // implements `Sum` so we can use the sum method and `()` does not.
+        let _num_inserts = iter_builder.into_iter().map(|(ix, v)| {
+            // TODO: check the arrays are valid
+            self.set_values(std::slice::from_ref(&ix),
+                std::slice::from_ref(&v), iora).map(|_| 1)
+        }).sum::<Result<i32>>()?;
+        // Note, `sum()` will short-circuit the iterator if an error is encountered.
+
+        self.assembly_begin()?;
+        self.assembly_end()
     }
 
     /// Gets values from certain locations of a vector. Currently can only get values on the same processor
@@ -219,5 +271,26 @@ impl<'a> Vector<'a> {
 
     // TODO: add `from_array`/`from_slice` and maybe also `set_slice`
 }
+
+// macro impls
+impl<'a> Vector<'a> {
+    wrap_simple_petsc_member_funcs! {
+        VecSetFromOptions, set_from_options, vec_p, #[doc = "Configures the vector from the options database."];
+        VecSetUp, set_up, vec_p, #[doc = "Sets up the internal vector data structures for the later use."];
+        VecAssemblyBegin, assembly_begin, vec_p, #[doc = "Begins assembling the vector. This routine should be called after completing all calls to VecSetValues()."];
+        VecAssemblyEnd, assembly_end, vec_p, #[doc = "Completes assembling the vector. This routine should be called after VecAssemblyBegin()."];
+    }
+
+    wrap_simple_petsc_member_funcs! {
+        VecSet, set_all, vec_p, alpha, f64, #[doc = "Sets all components of a vector to a single scalar value.\n\nYou CANNOT call this after you have called [`Vector::set_values()`]."];
+    }
+
+    wrap_simple_petsc_member_funcs! {
+        VecGetLocalSize, get_local_size, vec_p, i32, #[doc = "Returns the number of elements of the vector stored in local memory."];
+        VecGetSize, get_global_size, vec_p, i32, #[doc = "Returns the global number of elements of the vector."];
+    }
+}
+
+impl_petsc_object_funcs!{ Vector, vec_p }
 
 impl_petsc_view_func!{ Vector, vec_p, VecView }

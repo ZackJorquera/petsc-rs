@@ -28,10 +28,11 @@ impl<'a> Drop for Mat<'a> {
 
 pub use petsc_raw::MatAssemblyType;
 pub use petsc_raw::MatOption;
-
-impl_petsc_object_funcs!{ Mat, mat_p }
+pub use petsc_raw::MatDuplicateOption;
 
 impl<'a> Mat<'a> {
+    // TODO: maybe add simple builder type
+
     /// Same at [`Petsc::mat_create()`].
     pub fn create(petsc: &'a crate::Petsc) -> Result<Self> {
         let mut mat_p = MaybeUninit::uninit();
@@ -39,6 +40,17 @@ impl<'a> Mat<'a> {
         petsc.check_error(ierr)?;
 
         Ok(Mat { petsc, mat_p: unsafe { mat_p.assume_init() } })
+    }
+
+    /// Duplicates a matrix including the non-zero structure.
+    ///
+    /// See the manual page for [`MatDuplicateOption`](https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Mat/MatDuplicateOption.html#MatDuplicateOption) for an explanation of these options.
+    pub fn duplicate(&self, op: MatDuplicateOption) -> Result<Self> {
+        let mut mat2_p = MaybeUninit::uninit();
+        let ierr = unsafe { petsc_raw::MatDuplicate(self.mat_p, op, mat2_p.as_mut_ptr()) };
+        self.petsc.check_error(ierr)?;
+
+        Ok(Mat { petsc: &self.petsc, mat_p: unsafe { mat2_p.assume_init() } })
     }
 
     /// Sets the local and global sizes, and checks to determine compatibility
@@ -54,23 +66,83 @@ impl<'a> Mat<'a> {
         self.petsc.check_error(ierr)
     }
 
-    wrap_simple_petsc_member_funcs! {
-        MatSetFromOptions, set_from_options, mat_p, #[doc = "Configures the Mat from the options database."];
-        MatSetUp, set_up, mat_p, #[doc = "Sets up the internal matrix data structures for later use"];
-    }
-    
-    // TODO: maybe these two functions should be combined with a lambda to run in between
-    wrap_simple_petsc_member_funcs! {
-        MatAssemblyBegin, assembly_begin, mat_p, assembly_type, MatAssemblyType, #[doc = "Begins assembling the matrix. This routine should be called after completing all calls to MatSetValues()."];
-        MatAssemblyEnd, assembly_end, mat_p, assembly_type, MatAssemblyType, #[doc = "Completes assembling the matrix. This routine should be called after MatAssemblyBegin()."];
-    }
-
-    /// Inserts or adds a block of values into a matrix. These values may be cached, so [`Mat::assembly_begin()`]
-    /// and [`Mat::assembly_end()`] MUST be called after all calls to [`Mat::set_values()`] have been completed.
-    /// Read: <https://petsc.org/release/docs/manualpages/Mat/MatSetValues.html>
-    pub fn set_values(&mut self, m: i32, idxm: &[i32], n: i32, idxn: &[i32], v: &[f64], addv: InsertMode) -> Result<()> {
-        // TODO: I feel like most of the inputs are redundant and only will cause errors
-        let ierr = unsafe { petsc_raw::MatSetValues(self.mat_p, m, idxm.as_ptr(), n, idxn.as_ptr(), v.as_ptr(), addv) };
+    /// Inserts or adds a block of values into a matrix. 
+    ///
+    /// These values may be cached, so [`Mat::assembly_begin()`] and [`Mat::assembly_end()`] MUST 
+    /// be called after all calls to [`Mat::set_values()`] have been completed.
+    /// For more info read: <https://petsc.org/release/docs/manualpages/Mat/MatSetValues.html>
+    ///
+    /// If you create the matrix yourself (that is not with a call to DMCreateMatrix()) then you 
+    /// MUST call some `set_preallocation()` (such as [`Mat::seq_aij_set_preallocation()`]) or 
+    /// [`Mat::set_up`] before using this routine.
+    ///
+    /// Negative indices may be passed in idxm and idxn, these rows and columns are simply ignored.
+    /// This allows easily inserting element stiffness matrices with homogeneous Dirchlet boundary
+    /// conditions that you don't want represented in the matrix.
+    ///
+    /// You might find [`Mat::assemble_with()`] more useful and more idiomatic.
+    ///
+    /// # Parameters
+    ///
+    /// * `idxm` - the row indices to add values to
+    /// * `idxn` - the column indices to add values to
+    /// * `v` - a logivally two-dimensional array of values (of size `idxm.len() * idxn.len()`)
+    /// * `addv` - Either [`INSERT_VALUES`](InsertMode::INSERT_VALUES) or [`ADD_VALUES`](InsertMode::ADD_VALUES), 
+    /// where [`ADD_VALUES`](InsertMode::ADD_VALUES) adds values to any existing entries, and 
+    /// [`INSERT_VALUES`](InsertMode::INSERT_VALUES) replaces existing entries with new values.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use petsc_rs::prelude::*;
+    /// # use std::slice::from_ref;
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// # let petsc = Petsc::init_no_args().unwrap();
+    /// let n = 3;
+    /// let mut mat = petsc.mat_create()?;
+    /// mat.set_sizes(None, None, Some(n), Some(n))?;
+    /// mat.set_from_options()?;
+    /// mat.set_up()?;
+    /// let mut mat2 = mat.duplicate(MatDuplicateOption::MAT_DO_NOT_COPY_VALUES)?;
+    ///
+    /// // We will create two matrices that look like the following:
+    /// //  0  1  2
+    /// //  3  4  5
+    /// //  6  7  8
+    /// for i in 0..n {
+    ///     let v = [i as f64 * 3.0, i as f64 * 3.0+1.0, i as f64 * 3.0+2.0];
+    ///     mat.set_values(&[i], &[0,1,2], &v, InsertMode::INSERT_VALUES)?;
+    /// }
+    /// // You MUST assemble before you can use 
+    /// mat.assembly_begin(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
+    /// mat.assembly_end(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
+    /// # // for debugging
+    /// # let viewer = Viewer::ascii_get_stdout(&petsc)?;
+    /// # mat.view(&viewer)?;
+    ///
+    /// for i in 0..n {
+    ///     let v = [i as f64 , i as f64 + 3.0, i as f64 + 6.0];
+    ///     mat2.set_values(&[0,1,2], &[i], &v, InsertMode::INSERT_VALUES)?;
+    /// }
+    /// // You MUST assemble before you can use 
+    /// mat2.assembly_begin(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
+    /// mat2.assembly_end(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
+    /// # // for debugging
+    /// # mat2.view(&viewer)?;
+    /// 
+    /// assert_eq!(&mat.get_values(0..n, 0..n).unwrap()[..], &mat2.get_values(0..n, 0..n).unwrap()[..]);
+    /// assert_eq!(&mat.get_values(0..n, 0..n).unwrap()[..], &[ 0.0,  1.0,  2.0,
+    ///                                                         3.0,  4.0,  5.0,
+    ///                                                         6.0,  7.0,  8.0,]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn set_values(&mut self, idxm: &[i32], idxn: &[i32], v: &[f64], addv: InsertMode) -> Result<()> {
+        let m = idxm.len();
+        let n = idxn.len();
+        assert_eq!(v.len(), m*n);
+        let ierr = unsafe { petsc_raw::MatSetValues(self.mat_p, m as i32, idxm.as_ptr(), n as i32,
+            idxn.as_ptr(), v.as_ptr(), addv) };
         self.petsc.check_error(ierr)
     }
 
@@ -132,6 +204,209 @@ impl<'a> Mat<'a> {
         self.petsc.check_error(ierr)
     }
 
+    // This doesn't work, TODO: make it work or get rid of it
+    // I think i would have to use vecs
+    // /// Allows you to give an iter that will be use to make a series of calls to [`Mat::set_values`].
+    // /// Then is followed by both [`Mat::assembly_begin()`] and [`Mat::assembly_end()`].
+    // ///
+    // /// The iterator is an iterator of tuples of `(idxm, idxn, v)` that are used as input to the function
+    // /// [`Mat::set_values()`], read docs for information on inputs.
+    // ///
+    // /// # Example
+    // ///
+    // /// ```
+    // /// # use petsc_rs::prelude::*;
+    // /// # use std::slice::from_ref;
+    // /// # fn main() -> petsc_rs::Result<()> {
+    // /// # let petsc = Petsc::init_no_args().unwrap();
+    // /// let n = 5;
+    // /// let mut mat = petsc.mat_create()?;
+    // /// mat.set_sizes(None, None, Some(n), Some(n))?;
+    // /// mat.set_from_options()?;
+    // /// mat.set_up()?;
+    // ///
+    // /// // We will create a matrix that look like the following:
+    // /// //  2 -1  0  0  0
+    // /// // -1  2 -1  0  0
+    // /// //  0 -1  2 -1  0
+    // /// //  0  0 -1  2 -1
+    // /// //  0  0  0 -1  2
+    // /// let v = [-1.0, 2.0, -1.0];
+    // /// let inds = (0..n).collect::<Vec<_>>();
+    // /// mat.assemble_with(inds..map(|i| {
+    // ///     if i == 0 {
+    // ///         (from_ref(&i), &vec![1, 0][..], &v as &[f64])
+    // ///     } else if i == n {
+    // ///         (from_ref(&i), &vec![n-2, n-1][..], &v as &[f64])
+    // ///     } else {
+    // ///         (from_ref(&i), &vec![i-1, i, i+1][..], &v as &[f64])
+    // ///     }
+    // /// }), InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY);
+    // /// 
+    // /// # let viewer = Viewer::ascii_get_stdout(&petsc)?;
+    // /// # mat.view(&viewer)?;
+    // /// panic!();
+    // /// # Ok(())
+    // /// # }
+    // /// ```
+    // // TODO: do we want `assembly_type` if it is just going to be MAT_FINAL_ASSEMBLY most of the time
+    // pub fn assemble_with<'b, I>(&mut self, iter_builder: I, addv: InsertMode, assembly_type: MatAssemblyType) -> Result<()>
+    // where
+    //     I: Iterator<Item = (&'b [i32], &'b [i32], &'b [f64])>
+    // {
+    //     // We don't actually care about the num_inserts value, we just need something that
+    //     // implements `Sum` so we can use the sum method and `()` does not.
+    //     let _num_inserts = iter_builder.map(|(idxm, idxn, v)| {
+    //         // TODO: check the arrays are valid
+    //         self.set_values(idxm.len() as i32, idxm, idxn.len() as i32, idxn, v, addv).map(|_| 1)
+    //     }).sum::<Result<i32>>()?;
+    //     // Note, `sum()` will short-circuit the iterator if an error is encountered.
+    //
+    //     self.assembly_begin(assembly_type)?;
+    //     self.assembly_end(assembly_type)
+    // }
+
+    /// Allows you to give an iter that will be use to make a series of calls to [`Mat::set_values`].
+    /// Then is followed by both [`Mat::assembly_begin()`] and [`Mat::assembly_end()`].
+    ///
+    /// [`assemble_with()`](Mat::assemble_with()) will short circuit on the first error
+    /// from [`Mat::set_values`], returning it.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use petsc_rs::prelude::*;
+    /// # use std::slice::from_ref;
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// # let petsc = Petsc::init_no_args().unwrap();
+    /// let n = 5;
+    /// let mut mat = petsc.mat_create()?;
+    /// mat.set_sizes(None, None, Some(n), Some(n))?;
+    /// mat.set_from_options()?;
+    /// mat.set_up()?;
+    ///
+    /// // We will create a matrix that look like the following:
+    /// //  2 -1  0  0  0
+    /// // -1  2 -1  0  0
+    /// //  0 -1  2 -1  0
+    /// //  0  0 -1  2 -1
+    /// //  0  0  0 -1  2
+    /// mat.assemble_with((0..n).map(|i| (0..n).map(move |j| (i,j))).flatten()
+    ///         .map(|(i,j)| if i == j { (i,j,2.0) } 
+    ///                      else if (i - j).abs() == 1 {(i,j,-1.0)}
+    ///                      else {(i,j,0.0)})
+    ///         .filter(|(_,_,v)| *v != 0.0 ), 
+    ///     InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY);
+    /// # // for debugging
+    /// # let viewer = Viewer::ascii_get_stdout(&petsc)?;
+    /// # mat.view(&viewer)?;
+    /// 
+    /// assert_eq!(&mat.get_values(0..n, 0..n).unwrap()[..], &[ 2.0, -1.0,  0.0,  0.0,  0.0,
+    ///                                                        -1.0,  2.0, -1.0,  0.0,  0.0,
+    ///                                                         0.0, -1.0,  2.0, -1.0,  0.0,
+    ///                                                         0.0,  0.0, -1.0,  2.0, -1.0,
+    ///                                                         0.0,  0.0,  0.0, -1.0,  2.0]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn assemble_with<I>(&mut self, iter_builder: I, addv: InsertMode, assembly_type: MatAssemblyType) -> Result<()>
+    where
+        I: Iterator<Item = (i32, i32, f64)>
+    {
+        // We don't actually care about the num_inserts value, we just need something that
+        // implements `Sum` so we can use the sum method and `()` does not.
+        let _num_inserts = iter_builder.map(|(idxm, idxn, v)| {
+            // TODO: check the arrays are valid
+            self.set_values(std::slice::from_ref(&idxm), std::slice::from_ref(&idxn),
+                std::slice::from_ref(&v), addv).map(|_| 1)
+        }).sum::<Result<i32>>()?;
+        // Note, `sum()` will short-circuit the iterator if an error is encountered.
+
+        self.assembly_begin(assembly_type)?;
+        self.assembly_end(assembly_type)
+    }
+
+    /// Gets values from certain locations of a Matrix. Currently can only get values on the same processor.
+    ///
+    /// # Example
+    /// 
+    /// ```
+    /// # use petsc_rs::prelude::*;
+    /// # use std::slice::from_ref;
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// # let petsc = Petsc::init_no_args().unwrap();
+    /// let n = 3;
+    /// let mut mat = petsc.mat_create()?;
+    /// mat.set_sizes(None, None, Some(n), Some(n))?;
+    /// mat.set_from_options()?;
+    /// mat.set_up()?;
+    ///
+    /// // We will create a matrix that look like the following:
+    /// //  0  1  2
+    /// //  3  4  5
+    /// //  6  7  8
+    /// mat.assemble_with((0..n).map(|i| (0..n).map(move |j| (i,j))).flatten().enumerate()
+    ///         .map(|(v, (i,j))| (i,j,v as f64)),
+    ///     InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY);
+    /// # // for debugging
+    /// # let viewer = Viewer::ascii_get_stdout(&petsc)?;
+    /// # mat.view(&viewer)?;
+    /// 
+    /// assert_eq!(&mat.get_values(0..n, 0..n).unwrap()[..], &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+    /// assert_eq!(&mat.get_values(0..n, [0]).unwrap()[..], &[0.0, 3.0, 6.0]);
+    /// assert_eq!(&mat.get_values([1], 0..2).unwrap()[..], &[3.0, 4.0]);
+    /// assert_eq!(&mat.get_values([1,2], [0,2]).unwrap()[..], &[3.0, 5.0, 6.0, 8.0]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn get_values<T1, T2>(&self, idxm: T1, idxn: T2) -> Result<Vec<f64>>
+    where
+        T1: IntoIterator<Item = i32>,
+        <T1 as IntoIterator>::IntoIter: ExactSizeIterator,
+        T2: IntoIterator<Item = i32>,
+        <T2 as IntoIterator>::IntoIter: ExactSizeIterator,
+    {
+        // TODO: idxm/idxn can't be a &[i32; N] because it impl IntoIterator with Item=&i32 (same with &Vec<i32>)
+        // This might not be an issue because [i32; N] implements copy.
+
+        // TODO: make this return a slice (like how libceed has the VectorView type)
+        // For now im going to return a vector because this is a temporary testing function
+        // Really we need to use `MatView` which can get data from the whole matrix
+
+        // TODO: is this good, it feels like it would be better to just accept &[i32] and then we dont 
+        // need to do the collect. Although, it is nice to accept ranges or iters as input.
+
+        let idxm_iter = idxm.into_iter();
+        let mi = idxm_iter.len();
+        let idxm_array = idxm_iter.collect::<Vec<_>>();
+
+        let idxn_iter = idxn.into_iter();
+        let ni = idxn_iter.len();
+        let idxn_array = idxn_iter.collect::<Vec<_>>();
+        
+        let mut out_vec = vec![f64::default(); mi * ni];
+
+        let ierr = unsafe { petsc_raw::MatGetValues(self.mat_p, mi as i32, idxm_array.as_ptr(),
+            ni as i32, idxn_array.as_ptr(), out_vec[..].as_mut_ptr()) };
+        self.petsc.check_error(ierr)?;
+
+        Ok(out_vec)
+    }
+}
+
+// Macro impls
+impl<'a> Mat<'a> {
+    wrap_simple_petsc_member_funcs! {
+        MatSetFromOptions, set_from_options, mat_p, #[doc = "Configures the Mat from the options database."];
+        MatSetUp, set_up, mat_p, #[doc = "Sets up the internal matrix data structures for later use"];
+    }
+    
+    // TODO: maybe these two functions should be combined with a lambda to run in between
+    wrap_simple_petsc_member_funcs! {
+        MatAssemblyBegin, assembly_begin, mat_p, assembly_type, MatAssemblyType, #[doc = "Begins assembling the matrix. This routine should be called after completing all calls to MatSetValues()."];
+        MatAssemblyEnd, assembly_end, mat_p, assembly_type, MatAssemblyType, #[doc = "Completes assembling the matrix. This routine should be called after MatAssemblyBegin()."];
+    }
+
     // TODO: there is more to each of these allocations that i should add support for
     wrap_prealloc_petsc_member_funcs! {
         MatSeqAIJSetPreallocation, seq_aij_set_preallocation, mat_p, nz, nzz, #[doc = "For good matrix assembly \
@@ -139,14 +414,14 @@ impl<'a> Mat<'a> {
             By setting these parameters accurately, performance during matrix assembly can be increased by more than a \
             factor of 50.\n\n\
             Petsc C Docs: <https://petsc.org/release/docs/manualpages/Mat/MatSeqAIJSetPreallocation.html#MatSeqAIJSetPreallocation>\n\n\
-            Parameters.\n\n\
+            # Parameters.\n\n\
             * `nz` - number of nonzeros per row (same for all rows)\n\
             * `nnz` - slice containing the number of nonzeros in the various rows (possibly different for each row) or `None`"];
         MatSeqSELLSetPreallocation, seq_sell_set_preallocation, mat_p, nz, nnz, #[doc = "For good matrix assembly \
             performance the user should preallocate the matrix storage by setting the parameter nz (or the array nnz). \
             By setting these parameters accurately, performance during matrix assembly can be increased significantly.\n\n\
             Petsc C Docs: <https://petsc.org/release/docs/manualpages/Mat/MatSeqSELLSetPreallocation.html#MatSeqSELLSetPreallocation>\n\n\
-            Parameters.\n\n\
+            # Parameters.\n\n\
             * `nz` - number of nonzeros per row (same for all rows)\n\
             * `nnz` - slice containing the number of nonzeros in the various rows (possibly different for each row) or `None`"];
     }
@@ -157,7 +432,7 @@ impl<'a> Mat<'a> {
         user should preallocate the matrix storage by setting the parameters d_nz (or d_nnz) and o_nz (or o_nnz). By setting \
         these parameters accurately, performance can be increased by more than a factor of 50.\n\n\
         Petsc C Docs: <https://petsc.org/release/docs/manualpages/Mat/MatMPIAIJSetPreallocation.html#MatMPIAIJSetPreallocation>\n\n\
-        Parameters.\n\n\
+        # Parameters.\n\n\
         * `d_nz` - number of nonzeros per row in DIAGONAL portion of local submatrix (same value is used for all local rows)\n\
         * `d_nnz` - array containing the number of nonzeros in the various rows of the DIAGONAL portion of the local submatrix \
         (possibly different for each row) or `None`, if `d_nz` is used to specify the nonzero structure. The size of this array \
@@ -171,14 +446,14 @@ impl<'a> Mat<'a> {
         sparse parallel matrix in sell format. For good matrix assembly performance the user should preallocate the matrix storage \
         by setting the parameters `d_nz` (or `d_nnz`) and `o_nz` (or `o_nnz`).\n\n\
         Petsc C Docs: <https://petsc.org/release/docs/manualpages/Mat/MatMPISELLSetPreallocation.html#MatMPISELLSetPreallocation>\n\n\
-        Parameters.\n\n\
+        # Parameters.\n\n\
         Read docs for [`Mat::mpi_aij_set_preallocation()`](Mat::mpi_aij_set_preallocation())"];
     }
 
     wrap_prealloc_petsc_member_funcs! {
         MatSeqSBAIJSetPreallocation, seq_sb_aij_set_preallocation, mat_p, bs, nz, nnz, #[doc = "Creates a sparse symmetric...\n\n\
         Petsc C Docs: <https://petsc.org/release/docs/manualpages/Mat/MatSeqSBAIJSetPreallocation.html#MatSeqSBAIJSetPreallocation>\n\n\
-        Parameters.\n\n\
+        # Parameters.\n\n\
         * `bs` - size of block, the blocks are ALWAYS square. One can use `MatSetBlockSizes()` to set a different row and column blocksize \
         but the row blocksize always defines the size of the blocks. The column blocksize sets the blocksize of the vectors obtained with `MatCreateVecs()`\n\
         * Read docs for [`Mat::seq_aij_set_preallocation()`](Mat::seq_aij_set_preallocation())"];
@@ -187,11 +462,13 @@ impl<'a> Mat<'a> {
     wrap_prealloc_petsc_member_funcs! {
         MatMPISBAIJSetPreallocation, mpi_sb_aij_set_preallocation, mat_p, bs, d_nz, d_nnz, o_nz, o_nnz, #[doc = "For good matrix...\n\n\
         Petsc C Docs: <https://petsc.org/release/docs/manualpages/Mat/MatMPISBAIJSetPreallocation.html#MatMPISBAIJSetPreallocation>\n\n\
-        Parameters.\n\n\
+        # Parameters.\n\n\
         * `bs` - size of block, the blocks are ALWAYS square. One can use `MatSetBlockSizes()` to set a different row and column blocksize \
         but the row blocksize always defines the size of the blocks. The column blocksize sets the blocksize of the vectors obtained with `MatCreateVecs()`\n\
         * Read docs for [`Mat::mpi_aij_set_preallocation()`](Mat::mpi_aij_set_preallocation())"];
     }
 }
+
+impl_petsc_object_funcs!{ Mat, mat_p }
 
 impl_petsc_view_func!{ Mat, mat_p, MatView }

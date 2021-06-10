@@ -14,7 +14,7 @@
 //!
 //! Note: The corresponding uniprocessor example is ex1.rs
 
-static HELP_MSG: &'static str = "Solves a tridiagonal linear system with KSP.\n\n";
+static HELP_MSG: &str = "Solves a tridiagonal linear system with KSP.\n\n";
 
 use petsc_rs::prelude::*;
 use structopt::StructOpt;
@@ -73,7 +73,7 @@ fn main() -> petsc_rs::Result<()> {
         above.
     */
 
-    let mut vec_ownership_range = x.get_ownership_range()?;
+    let vec_ownership_range = x.get_ownership_range()?;
     let local_size = x.get_local_size()?;
 
 
@@ -97,26 +97,11 @@ fn main() -> petsc_rs::Result<()> {
     /*
         Assemble matrix
     */
-    let value = vec![-1.0, 2.0, -1.0];
-    if vec_ownership_range.contains(&0)
-    {
-        let _ = vec_ownership_range.next();
-        let col = vec![1, 0];
-        A.set_values(1, &vec![0], 2, &col, &value, InsertMode::INSERT_VALUES)?;
-    }
-    if vec_ownership_range.contains(&(n-1))
-    {
-        let _ = vec_ownership_range.next_back();
-        let col = vec![n-2, n-1];
-        A.set_values(1, &vec![n-1], 2, &col, &value, InsertMode::INSERT_VALUES)?;
-    }
-    for i in vec_ownership_range
-    {
-        let col = vec![i-1, i, i+1];
-        A.set_values(1, &vec![i], 3, &col, &value, InsertMode::INSERT_VALUES)?;
-    }
-    A.assembly_begin(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
-    A.assembly_end(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
+    A.assemble_with(vec_ownership_range.map(|i| (-1..=1).map(move |j| (i,i+j))).flatten()
+            .filter(|&(i,j)| i < n || j < n) // we could also filter out negatives, but assemble_with does that for us
+            .map(|(i,j)| if i == j { (i, j, 2.0) }
+                         else { (i, j, -1.0) }),
+        InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
 
     /*
         Set exact solution; then compute right-hand-side vector.
@@ -137,7 +122,7 @@ fn main() -> petsc_rs::Result<()> {
     #[allow(non_snake_case)]
     let rc_A = std::rc::Rc::new(A);
     ksp.set_operators(Some(rc_A.clone()), Some(rc_A.clone()))?;
-
+    
     /*
         Set linear solver defaults for this problem (optional).
         - By extracting the KSP and PC contexts from the KSP context,

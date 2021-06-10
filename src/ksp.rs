@@ -34,8 +34,6 @@ impl<'a> Drop for KSP<'a> {
     }
 }
 
-impl_petsc_object_funcs!{ KSP, ksp_p }
-
 impl<'a> KSP<'a> {
     /// Same as `KSP { ... }` but sets all optional params to `None`
     pub(crate) fn new(petsc: &'a crate::Petsc, ksp_p: *mut petsc_raw::_p_KSP) -> Self {
@@ -62,16 +60,6 @@ impl<'a> KSP<'a> {
         // The source for KSPSetOperators basically just calls PCSetOperators but does something with 
         // `ksp->setupstage` so idk.
         self.get_pc_mut()?.set_operators(a_mat, p_mat)
-    }
-
-    wrap_simple_petsc_member_funcs! {
-        KSPSetFromOptions, set_from_options, ksp_p, #[doc = "Sets KSP options from the options database. This routine must be called before KSPSetUp() if the user is to be allowed to set the Krylov type."];
-        KSPSetUp, set_up, ksp_p, #[doc = "Sets up the internal data structures for the later use of an iterative solver."];
-    }
-
-    wrap_simple_petsc_member_funcs! {
-        KSPGetIterationNumber, get_iteration_number, ksp_p, i32, #[doc = "Gets the current iteration number; if the KSPSolve() is complete, returns the number of iterations used."];
-
     }
 
     /// Sets the preconditioner to be used to calculate the application of the preconditioner on a vector.
@@ -163,5 +151,20 @@ impl<'a> KSP<'a> {
     }
 
 }
+
+// macro impls
+impl<'a> KSP<'a> {
+    wrap_simple_petsc_member_funcs! {
+        KSPSetFromOptions, set_from_options, ksp_p, #[doc = "Sets KSP options from the options database. This routine must be called before KSPSetUp() if the user is to be allowed to set the Krylov type."];
+        KSPSetUp, set_up, ksp_p, #[doc = "Sets up the internal data structures for the later use of an iterative solver."];
+    }
+
+    wrap_simple_petsc_member_funcs! {
+        KSPGetIterationNumber, get_iteration_number, ksp_p, i32, #[doc = "Gets the current iteration number; if the KSPSolve() is complete, returns the number of iterations used."];
+
+    }
+}
+
+impl_petsc_object_funcs!{ KSP, ksp_p }
 
 impl_petsc_view_func!{ KSP, ksp_p, KSPView }
