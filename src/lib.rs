@@ -126,7 +126,7 @@ pub use petsc_raw::InsertMode;
 #[derive(Default)]
 pub struct PetscBuilder
 {
-    world: Option<mpi::topology::SystemCommunicator>,
+    world: Option<Box<dyn Communicator>>,
     args: Option<Vec<String>>,
     file: Option<String>,
     help_msg: Option<String>,
@@ -183,8 +183,11 @@ impl PetscBuilder
         let ierr = unsafe { petsc_raw::PetscInitialize(c_argc_p, c_args_p, file_c_str, help_c_str) };
         // We pass in the args data so that we can reconstruct the vec to free all the memory.
         let petsc = Petsc { world: match self.world { 
-            Some(world) => world, 
-            _ => mpi::topology::SystemCommunicator::world() 
+            Some(world) => {
+                unsafe { petsc_raw::PETSC_COMM_WORLD = world.as_raw(); }
+                world
+            }, 
+            _ => Box::new(mpi::topology::SystemCommunicator::world()) 
         }, raw_args_vec_data: self.args.map(|_| (c_args, argc as usize, vec_cap)) };
         petsc.check_error(ierr)?;
 
@@ -202,13 +205,17 @@ impl PetscBuilder
         self
     }
 
-    // // TODO: https://petsc.org/release/docs/manualpages/Sys/PETSC_COMM_WORLD.html
-    // pub fn world(self, _world: mpi::topology::SystemCommunicator) -> Self
-    // {
-    //     todo!()
-    //     // TODO: https://petsc.org/release/docs/manualpages/Sys/PETSC_COMM_WORLD.html
-    //     // idk if this is possible the way it is set up
-    // }
+    /// Sets the [`PETSC_COMM_WORLD`](https://petsc.org/release/docs/manualpages/Sys/PETSC_COMM_WORLD.html#PETSC_COMM_WORLD)
+    /// variable which represents all the processes that PETSc knows about.
+    ///
+    /// By default PETSC_COMM_WORLD and MPI_COMM_WORLD ([`mpi::topology::SystemCommunicator::world()`])
+    /// are identical unless you wish to run PETSc on ONLY a subset of MPI_COMM_WORLD. That is where this
+    /// method can be use. Note, you must initialize mpi (with [`mpi::initialize()`]).
+    pub fn world(mut self, world: Box<dyn Communicator>) -> Self
+    {
+        self.world = Some(world);
+        self
+    }
 
     /// Help message to print
     pub fn help_msg<T: ToString>(mut self, help_msg: T) -> Self
@@ -232,7 +239,7 @@ impl PetscBuilder
 /// Also stores a reference to the the `MPI_COMM_WORLD`/`PETSC_COMM_WORLD` variable.
 pub struct Petsc {
     // TODO: make world be of type AsRaw<Raw = mpi::ffi::MPI_Comm>
-    pub(crate) world: mpi::topology::SystemCommunicator,
+    pub(crate) world: Box<dyn Communicator>,
 
     // This is used to drop the args data
     raw_args_vec_data: Option<(*mut *mut c_char, usize, usize)>,
@@ -279,7 +286,7 @@ impl Petsc {
     /// [`Petsc::builder`]: Petsc::builder
     pub fn init_no_args() -> Result<Self> {
         let ierr = unsafe { petsc_raw::PetscInitializeNoArguments() };
-        let petsc = Self { world: mpi::topology::SystemCommunicator::world(), raw_args_vec_data: None };
+        let petsc = Self { world: Box::new(mpi::topology::SystemCommunicator::world()), raw_args_vec_data: None };
         petsc.check_error(ierr)?;
 
         Ok(petsc)
@@ -289,8 +296,8 @@ impl Petsc {
     /// mpi. Effectively equivalent to [`mpi::topology::SystemCommunicator::world`].
     ///
     /// [`mpi::topology::SystemCommunicator::world`]: mpi::topology::SystemCommunicator::world
-    pub fn world<'a>(&'a self) -> &'a mpi::topology::SystemCommunicator {
-        &self.world
+    pub fn world<'a>(&'a self) -> &'a dyn Communicator {
+        self.world.as_ref()
     }
 
     /// Internal error checker

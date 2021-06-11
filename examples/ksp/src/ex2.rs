@@ -48,10 +48,25 @@ fn main() -> petsc_rs::Result<()> {
     let petsc_args = PetscOpt::petsc_args(ext_args); // Is there an easier way to do this
 
     // optionally initialize mpi
-    // let _univ = mpi::initialize().unwrap();
+    let univ = mpi::initialize().unwrap();
+    let world = univ.world();
+
+    let odd = (0..world.size()).filter(|x| x % 2 != 0).collect::<Vec<_>>();
+    let odd_group = world.group().include(&odd[..]);
+    let even_group = world.group().difference(&odd_group);
+
+    let my_group = if odd_group.rank().is_some() {
+        &odd_group
+    } else {
+        &even_group
+    };
+
+    let comm = world.split_by_subgroup_collective(my_group).unwrap();
+
     // init with no options
     let petsc = Petsc::builder()
         .args(petsc_args)
+        .world(Box::new(comm))
         .help_msg(HELP_MSG)
         .init()?;
 

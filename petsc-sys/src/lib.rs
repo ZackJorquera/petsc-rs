@@ -122,3 +122,10 @@ pub enum PCTypeEnum {
     PCHPDDM,
     PCHARA,
 }
+
+// TODO: have bindgen create this
+// Also, is `petsc_real` right?
+#[link(name = "petsc_real")]
+extern "C" {
+    pub static mut PETSC_COMM_WORLD: mpi::ffi::MPI_Comm;
+}

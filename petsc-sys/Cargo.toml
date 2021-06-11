@@ -7,7 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-mpi = {git = "https://github.com/rsmpi/rsmpi.git", branch = "master"}
+mpi = {git = "https://github.com/ZackJorquera/rsmpi.git", branch = "master"}
 
 [build-dependencies]
 cc = "1.0"

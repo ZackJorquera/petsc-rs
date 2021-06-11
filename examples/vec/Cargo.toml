@@ -20,6 +20,6 @@ path = "src/ex2.rs"
 # issue with the "user-operations" feature for mpi (which is the default), but `default-features = false`
 # doesn't seem to work.
 libffi-sys = { version = "*", features = ["system"] }
-mpi = {git = "https://github.com/rsmpi/rsmpi.git", branch = "master", default-features = false }
+mpi = {git = "https://github.com/ZackJorquera/rsmpi.git", branch = "master", default-features = false }
 petsc-rs = { path = "../../" }
 structopt = { version = "0.3", default-features = false }
