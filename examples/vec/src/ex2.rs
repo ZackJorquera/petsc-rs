@@ -45,7 +45,7 @@ fn main() -> petsc_rs::Result<()> {
 
     x.assemble()?;
 
-    let viewer = Viewer::ascii_get_stdout(&petsc)?;
+    let viewer = Viewer::ascii_get_stdout(petsc.world())?;
     x.view(&viewer)?;
 
     // return

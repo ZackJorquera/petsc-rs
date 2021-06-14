@@ -14,7 +14,7 @@ use crate::prelude::*;
 /// Abstract PETSc object that manages all Krylov methods. This is the object that manages the linear
 /// solves in PETSc (even those such as direct solvers that do no use Krylov accelerators).
 pub struct KSP<'a> {
-    petsc: &'a crate::Petsc,
+    world: &'a dyn Communicator,
     pub(crate) ksp_p: *mut petsc_raw::_p_KSP, // I could use KSP which is the same thing, but i think using a pointer is more clear
 
     // As far as Petsc is concerned we own a reference to the PC as it is reference counted under the hood.
@@ -29,24 +29,24 @@ impl<'a> Drop for KSP<'a> {
     fn drop(&mut self) {
         unsafe {
             let ierr = petsc_raw::KSPDestroy(&mut self.ksp_p as *mut *mut petsc_raw::_p_KSP);
-            let _ = self.petsc.check_error(ierr); // TODO: should I unwrap or what idk?
+            let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
         }
     }
 }
 
 impl<'a> KSP<'a> {
     /// Same as `KSP { ... }` but sets all optional params to `None`
-    pub(crate) fn new(petsc: &'a crate::Petsc, ksp_p: *mut petsc_raw::_p_KSP) -> Self {
-        KSP { petsc, ksp_p, pc: None }
+    pub(crate) fn new(world: &'a dyn Communicator, ksp_p: *mut petsc_raw::_p_KSP) -> Self {
+        KSP { world, ksp_p, pc: None }
     }
 
     /// Same as [`Petsc::ksp_create()`].
-    pub fn create(petsc: &'a crate::Petsc) -> Result<Self> {
+    pub fn create(world: &'a dyn Communicator) -> Result<Self> {
         let mut ksp_p = MaybeUninit::uninit();
-        let ierr = unsafe { petsc_raw::KSPCreate(petsc.world.as_raw(), ksp_p.as_mut_ptr()) };
-        petsc.check_error(ierr)?;
+        let ierr = unsafe { petsc_raw::KSPCreate(world.as_raw(), ksp_p.as_mut_ptr()) };
+        Petsc::check_error(world, ierr)?;
 
-        Ok(KSP::new(petsc, unsafe { ksp_p.assume_init() }))
+        Ok(KSP::new(world, unsafe { ksp_p.assume_init() }))
     }
 
     /// Sets the matrix associated with the linear system and a (possibly)
@@ -68,7 +68,7 @@ impl<'a> KSP<'a> {
     {
         
         let ierr = unsafe { petsc_raw::KSPSetPC(self.ksp_p, pc.pc_p) };
-        self.petsc.check_error(ierr)?;
+        Petsc::check_error(self.world, ierr)?;
 
         let _ = self.pc.take();
         self.pc = Some(pc);
@@ -92,11 +92,11 @@ impl<'a> KSP<'a> {
         {
             let mut pc_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::KSPGetPC(self.ksp_p, pc_p.as_mut_ptr()) };
-            self.petsc.check_error(ierr)?;
+            Petsc::check_error(self.world, ierr)?;
             let ierr = unsafe { petsc_raw::PetscObjectReference(pc_p.assume_init() as *mut petsc_raw::_p_PetscObject) };
-            self.petsc.check_error(ierr)?;
+            Petsc::check_error(self.world, ierr)?;
 
-            self.pc = Some(PC::new(&self.petsc, unsafe { pc_p.assume_init() }));
+            self.pc = Some(PC::new(self.world, unsafe { pc_p.assume_init() }));
 
             Ok(self.pc.as_ref().unwrap())
         }
@@ -113,11 +113,11 @@ impl<'a> KSP<'a> {
         {
             let mut pc_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::KSPGetPC(self.ksp_p, pc_p.as_mut_ptr()) };
-            self.petsc.check_error(ierr)?;
+            Petsc::check_error(self.world, ierr)?;
             let ierr = unsafe { petsc_raw::PetscObjectReference(pc_p.assume_init() as *mut petsc_raw::_p_PetscObject) };
-            self.petsc.check_error(ierr)?;
+            Petsc::check_error(self.world, ierr)?;
 
-            self.pc = Some(PC::new(&self.petsc, unsafe { pc_p.assume_init() }));
+            self.pc = Some(PC::new(self.world, unsafe { pc_p.assume_init() }));
 
             Ok(self.pc.as_mut().unwrap())
         }
@@ -140,14 +140,14 @@ impl<'a> KSP<'a> {
         let ierr = unsafe { petsc_raw::KSPSetTolerances(
             self.ksp_p, rtol.unwrap_or(petsc_raw::PETSC_DEFAULT_REAL), atol.unwrap_or(petsc_raw::PETSC_DEFAULT_REAL),
             dtol.unwrap_or(petsc_raw::PETSC_DEFAULT_REAL), max_iters.unwrap_or(petsc_raw::PETSC_DEFAULT_INTEGER)) };
-        self.petsc.check_error(ierr)
+        Petsc::check_error(self.world, ierr)
     }
 
     /// Solves linear system.
     pub fn solve(&mut self, b: &Vector, x: &mut Vector) -> Result<()>
     {
         let ierr = unsafe { petsc_raw::KSPSolve(self.ksp_p, b.vec_p, x.vec_p) };
-        self.petsc.check_error(ierr)
+        Petsc::check_error(self.world, ierr)
     }
 
 }

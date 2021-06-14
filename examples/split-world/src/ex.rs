@@ -6,37 +6,66 @@
 //! To run:
 //! ```text
 //! $ cargo build --bin ex2
-//! $ mpiexec -n 1 target/debug/ex2
-//! Norm of error 1.56044e-4, Iters 6
-//! $ mpiexec -n 2 target/debug/ex2
-//! Norm of error 4.11674e-4, Iters 7
-//! $ mpiexec -n 5 target/debug/ex2 -m 80 -n 70
-//! Norm of error 2.28509e-3, Iters 83
+//! $ mpiexec -n 2 target/debug/ex
+//! (ex2) Norm of error 1.56044e-4, Iters 6
+//! (ex23) Norm of error 2.41202e-15, Iters 5
+//! $ mpiexec -n 3 target/debug/ex2
+//! (ex2) Norm of error 4.11674e-4, Iters 7
+//! (ex23) Norm of error 2.41202e-15, Iters 5
+//! $ mpiexec -n 5 target/debug/ex -m 80 -n 70 -k 100
+//! (ex2) Norm of error 1.48926e-3, Iters 70
+//! (ex23) Norm of error 1.14852e-2, Iters 318
 //! ```
 
 static HELP_MSG: &str = "Solves a linear system in parallel with KSP.
 Input parameters include:\n\n";
 
+use mpi;
+use mpi::topology::Color;
 use petsc_rs::prelude::*;
 use structopt::StructOpt;
 
-mod opt;
-use opt::*;
+#[derive(Debug, PartialEq, StructOpt)]
+pub enum PetscOpt {
+    /// use `-- -help` for petsc help
+    #[structopt(name = "Petsc Args", external_subcommand)]
+    PetscArgs(Vec<String>),
+}
+
+impl PetscOpt
+{
+    pub fn petsc_args(self_op: Option<Self>) -> Vec<String>
+    {
+        match self_op
+        {
+            Some(PetscOpt::PetscArgs(mut vec)) => {
+                vec.push(std::env::args().next().unwrap());
+                vec.rotate_right(1);
+                vec
+            },
+            _ => vec![std::env::args().next().unwrap()]
+        }
+    }
+}
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "ex2", about = HELP_MSG)]
 struct Opt {
-    /// number of mesh points in x-direction
+    /// number of mesh points in x-direction (for ex2)
     #[structopt(short, default_value = "8")]
     m: i32,
     
-    /// number of mesh points in y-direction
+    /// number of mesh points in y-direction (for ex2)
     #[structopt(short, default_value = "7")]
     n: i32,
 
-    /// write exact solution vector to stdout
+    /// write exact solution vector to stdout (for ex2)
     #[structopt(short, long)]
-    view_exact_sol: bool,
+    view_stuff: bool,
+
+    /// Size of the vector and matrix (for ex23)
+    #[structopt(short = "k", long, default_value = "10")]
+    num_elems: i32,
 
     /// use `-- -help` for petsc help
     #[structopt(subcommand)]
@@ -44,22 +73,46 @@ struct Opt {
 }
 
 fn main() -> petsc_rs::Result<()> {
-    let Opt {m, n, view_exact_sol, sub: ext_args} = Opt::from_args();
+    let Opt {m, n, view_stuff, num_elems, sub: ext_args} = Opt::from_args();
     let petsc_args = PetscOpt::petsc_args(ext_args); // Is there an easier way to do this
 
     // optionally initialize mpi
-    // let _univ = mpi::initialize().unwrap();
+    let univ = mpi::initialize().unwrap();
+    let world = univ.world();
+
+    if world.size() == 1
+    {
+        // We cant use Petsc::set_error because we haven't initialized PETSc yet
+        panic!("This is strictly not a uniprocessor example!");
+    }
+
+    // split world into two (off processes with even rank and processes odd rank).
+    let my_color = world.rank() % 2;
+    let comm = world.split_by_color(Color::with_value(my_color)).unwrap();
+
     // init with no options
     let petsc = Petsc::builder()
         .args(petsc_args)
+        .world(Box::new(comm))
         .help_msg(HELP_MSG)
         .init()?;
 
     // or init with no options
     // let petsc = Petsc::init_no_args()?;
 
-    petsc_println!(petsc.world(), "Hello parallel world of {} processes!", petsc.world().size() );
+    // This will print twice, by the odd comm and the even comm
+    petsc_println!(petsc.world(), "Hello parallel world (color: {}) of {} processes!", my_color, petsc.world().size() );
 
+    // Have the first process group do one thing and the second process group do another
+    if my_color == 0 {
+        do_ksp_ex2(&petsc, m, n, view_stuff)
+    } else {
+        do_ksp_ex23(&petsc, num_elems, view_stuff)
+    }
+}
+
+// TODO: make these be constructed better, right now we have two copies of this code
+fn do_ksp_ex2(petsc: &Petsc, m: i32, n: i32, view_exact_sol: bool) -> petsc_rs::Result<()> {
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
          Compute the matrix and right-hand-side vector that define
          the linear system, Ax = b.
@@ -91,7 +144,7 @@ fn main() -> petsc_rs::Result<()> {
         contiguous chunks of rows across the processors.  Determine which
         rows of the matrix are locally owned.
     */
-  let mat_ownership_range = A.get_ownership_range()?;
+    let mat_ownership_range = A.get_ownership_range()?;
 
     /*
         Set matrix elements for the 2-D, five-point stencil in parallel.
@@ -207,7 +260,133 @@ fn main() -> petsc_rs::Result<()> {
     x.axpy(-1.0, &u)?;
     let x_norm = x.norm(NormType::NORM_2)?;
     let iters = ksp.get_iteration_number()?;
-    petsc_println!(petsc.world(), "Norm of error {:.5e}, Iters {}", x_norm, iters);
+    petsc_println!(petsc.world(), "(ex2) Norm of error {:.5e}, Iters {}", x_norm, iters);
+
+    /*
+        All PETSc objects are automatically destroyed when they are no longer needed.
+        PetscFinalize() is also automatically called.
+    */
+
+    // return
+    Ok(())
+}
+
+fn do_ksp_ex23(petsc: &Petsc, n: i32, view_ksp: bool) -> petsc_rs::Result<()> {
+    /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+         Compute the matrix and right-hand-side vector that define
+         the linear system, Ax = b.
+     - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+
+    /*
+        Create vectors.  Note that we form 1 vector from scratch and
+        then duplicate as needed.
+    */
+    let mut x = petsc.vec_create()?;
+    x.set_name("Solution")?;
+    x.set_sizes(None, Some(n))?;
+    x.set_from_options()?;
+    let mut b = x.duplicate()?;
+    let mut u = x.duplicate()?;
+
+    /* 
+        Identify the starting and ending mesh points on each
+        processor for the interior part of the mesh. We let PETSc decide
+        above.
+    */
+
+    let vec_ownership_range = x.get_ownership_range()?;
+    let local_size = x.get_local_size()?;
+
+
+    /*
+        Create matrix.  When using MatCreate(), the matrix format can
+        be specified at runtime.
+
+        Performance tuning note:  For problems of substantial size,
+        preallocation of matrix memory is crucial for attaining good
+        performance. See the matrix chapter of the users manual for details.
+
+        We pass in nlocal as the "local" size of the matrix to force it
+        to have the same parallel layout as the vector created above.
+    */
+    #[allow(non_snake_case)]
+    let mut A = petsc.mat_create()?;
+    A.set_sizes(Some(local_size), Some(local_size), Some(n), Some(n))?;
+    A.set_from_options()?;
+    A.set_up()?;
+
+    /*
+        Assemble matrix
+    */
+    A.assemble_with(vec_ownership_range.map(|i| (-1..=1).map(move |j| (i,i+j))).flatten()
+            .filter(|&(i,j)| i < n && j < n) // we could also filter out negatives, but assemble_with does that for us
+            .map(|(i,j)| if i == j { (i, j, 2.0) }
+                         else { (i, j, -1.0) }),
+        InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
+
+    /*
+        Set exact solution; then compute right-hand-side vector.
+    */
+    u.set_all(1.0)?;
+    Mat::mult(&A, &u, &mut b)?;
+    // petsc_println!(petsc, "b: {:?}", b.get_values(0..n)?);
+
+    /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+                Create the linear solver and set various options
+     - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+    let mut ksp = petsc.ksp_create()?;
+
+    /*
+        Set operators. Here the matrix that defines the linear system
+        also serves as the matrix that defines the preconditioner.
+    */
+    #[allow(non_snake_case)]
+    let rc_A = std::rc::Rc::new(A);
+    ksp.set_operators(Some(rc_A.clone()), Some(rc_A.clone()))?;
+    
+    /*
+        Set linear solver defaults for this problem (optional).
+        - By extracting the KSP and PC contexts from the KSP context,
+          we can then directly call any KSP and PC routines to set
+          various options.
+        - The following four statements are optional; all of these
+          parameters could alternatively be specified at runtime via
+          KSPSetFromOptions();
+    */
+    let pc = ksp.get_pc_mut()?;
+    pc.set_type(PCType::PCJACOBI)?;
+    ksp.set_tolerances(Some(1.0e-5), None, None, None)?;
+
+    /*
+        Set runtime options, e.g.,
+            `-- -ksp_type <type> -pc_type <type> -ksp_monitor -ksp_rtol <rtol>`
+        These options will override those specified above as long as
+        KSPSetFromOptions() is called _after_ any other customization
+        routines.
+    */
+    ksp.set_from_options()?;
+
+    /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+                        Solve the linear system
+        - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+    ksp.solve(&b, &mut x)?;
+
+    /*
+        View solver info; we could instead use the option -ksp_view to
+        print this info to the screen at the conclusion of KSPSolve().
+    */
+    if view_ksp {
+        let viewer = Viewer::ascii_get_stdout(petsc.world())?;
+        ksp.view(&viewer)?;
+    }
+
+    /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+                      Check the solution and clean up
+     - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+    x.axpy(-1.0, &u)?;
+    let x_norm = x.norm(NormType::NORM_2)?;
+    let iters = ksp.get_iteration_number()?;
+    petsc_println!(petsc.world(), "(ex23) Norm of error {:.5e}, Iters {}", x_norm, iters);
 
     /*
         All PETSc objects are automatically destroyed when they are no longer needed.

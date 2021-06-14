@@ -16,7 +16,7 @@ pub use crate::petsc_raw::PCTypeEnum as PCType;
 
 /// Abstract PETSc object that manages all preconditioners including direct solvers such as PCLU
 pub struct PC<'a> {
-    pub(crate) petsc: &'a crate::Petsc,
+    pub(crate) world: &'a dyn Communicator,
     pub(crate) pc_p: *mut petsc_raw::_p_PC, // I could use petsc_raw::PC which is the same thing, but i think using a pointer is more clear
 
     // We take an `Rc` because we don't want ownership of the Mat. Under the hood, this is how the 
@@ -34,15 +34,15 @@ impl<'a> Drop for PC<'a> {
     fn drop(&mut self) {
         unsafe {
             let ierr = petsc_raw::PCDestroy(&mut self.pc_p as *mut *mut petsc_raw::_p_PC);
-            let _ = self.petsc.check_error(ierr); // TODO: should i unwrap or what idk?
+            let _ = Petsc::check_error(self.world, ierr); // TODO: should i unwrap or what idk?
         }
     }
 }
 
 impl<'a> PC<'a> {
     /// Same as `PC { ... }` but sets all optional params to `None`
-    pub(crate) fn new(petsc: &'a crate::Petsc, pc_p: *mut petsc_raw::_p_PC) -> Self {
-        PC { petsc, pc_p, ref_amat: None, ref_pmat: None }
+    pub(crate) fn new(world: &'a dyn Communicator, pc_p: *mut petsc_raw::_p_PC) -> Self {
+        PC { world, pc_p, ref_amat: None, ref_pmat: None }
     }
 
     /// Creates a preconditioner context.
@@ -51,12 +51,12 @@ impl<'a> PC<'a> {
     /// from a Krylov solver, [`KSP`], using the [`KSP::get_pc()`] method.
     ///
     /// [`KSP::get_pc`]: KSP::get_pc
-    pub fn create(petsc: &'a crate::Petsc) -> Result<Self> {
+    pub fn create(world: &'a dyn Communicator) -> Result<Self> {
         let mut pc_p = MaybeUninit::uninit();
-        let ierr = unsafe { petsc_raw::PCCreate(petsc.world.as_raw(), pc_p.as_mut_ptr()) };
-        petsc.check_error(ierr)?;
+        let ierr = unsafe { petsc_raw::PCCreate(world.as_raw(), pc_p.as_mut_ptr()) };
+        Petsc::check_error(world, ierr)?;
 
-        Ok(PC::new(petsc, unsafe { pc_p.assume_init() }))
+        Ok(PC::new(world, unsafe { pc_p.assume_init() }))
     }
 
     /// Builds PC for a particular preconditioner type
@@ -65,7 +65,7 @@ impl<'a> PC<'a> {
         let option_str = petsc_raw::PCTYPE_TABLE[pc_type as usize];
         let cstring = CString::new(option_str).expect("`CString::new` failed");
         let ierr = unsafe { petsc_raw::PCSetType(self.pc_p, cstring.as_ptr()) };
-        self.petsc.check_error(ierr)
+        Petsc::check_error(self.world, ierr)
     }
     
     /// Sets the matrix associated with the linear system and a (possibly)
@@ -86,7 +86,7 @@ impl<'a> PC<'a> {
         let ierr = unsafe { petsc_raw::PCSetOperators(self.pc_p,
             a_mat.as_ref().map_or(std::ptr::null_mut(), |m| m.mat_p), 
             p_mat.as_ref().map_or(std::ptr::null_mut(), |m| m.mat_p)) };
-        self.petsc.check_error(ierr)?;
+        Petsc::check_error(self.world, ierr)?;
 
         // drop everything as it is getting replaced. (note under the hood MatDestroy is called on both of them).
         // let _ = self.owned_amat.take();

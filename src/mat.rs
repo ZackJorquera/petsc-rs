@@ -12,7 +12,7 @@ use crate::prelude::*;
 /// Abstract PETSc matrix object used to manage all linear operators in PETSc, even those
 /// without an explicit sparse representation (such as matrix-free operators).
 pub struct Mat<'a> {
-    petsc: &'a crate::Petsc,
+    world: &'a dyn Communicator,
     pub(crate) mat_p: *mut petsc_raw::_p_Mat, // I could use Mat which is the same thing, but i think using a pointer is more clear
 }
 
@@ -21,7 +21,7 @@ impl<'a> Drop for Mat<'a> {
         // TODO: if the mat has more that one reference, than the object isn't really destroyed
         unsafe {
             let ierr = petsc_raw::MatDestroy(&mut self.mat_p as *mut *mut petsc_raw::_p_Mat);
-            let _ = self.petsc.check_error(ierr); // TODO: should i unwrap or what idk?
+            let _ = Petsc::check_error(self.world, ierr); // TODO: should i unwrap or what idk?
         }
     }
 }
@@ -34,12 +34,12 @@ impl<'a> Mat<'a> {
     // TODO: maybe add simple builder type
 
     /// Same at [`Petsc::mat_create()`].
-    pub fn create(petsc: &'a crate::Petsc) -> Result<Self> {
+    pub fn create(world: &'a dyn Communicator,) -> Result<Self> {
         let mut mat_p = MaybeUninit::uninit();
-        let ierr = unsafe { petsc_raw::MatCreate(petsc.world.as_raw(), mat_p.as_mut_ptr()) };
-        petsc.check_error(ierr)?;
+        let ierr = unsafe { petsc_raw::MatCreate(world.as_raw(), mat_p.as_mut_ptr()) };
+        Petsc::check_error(world, ierr)?;
 
-        Ok(Mat { petsc, mat_p: unsafe { mat_p.assume_init() } })
+        Ok(Mat { world, mat_p: unsafe { mat_p.assume_init() } })
     }
 
     /// Duplicates a matrix including the non-zero structure.
@@ -48,9 +48,9 @@ impl<'a> Mat<'a> {
     pub fn duplicate(&self, op: MatDuplicateOption) -> Result<Self> {
         let mut mat2_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::MatDuplicate(self.mat_p, op, mat2_p.as_mut_ptr()) };
-        self.petsc.check_error(ierr)?;
+        Petsc::check_error(self.world, ierr)?;
 
-        Ok(Mat { petsc: &self.petsc, mat_p: unsafe { mat2_p.assume_init() } })
+        Ok(Mat { world: self.world, mat_p: unsafe { mat2_p.assume_init() } })
     }
 
     /// Sets the local and global sizes, and checks to determine compatibility
@@ -63,7 +63,7 @@ impl<'a> Mat<'a> {
             local_cols.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
             global_rows.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
             global_cols.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER)) };
-        self.petsc.check_error(ierr)
+        Petsc::check_error(self.world, ierr)
     }
 
     /// Inserts or adds a block of values into a matrix. 
@@ -98,6 +98,12 @@ impl<'a> Mat<'a> {
     /// # use std::slice::from_ref;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args().unwrap();
+    /// if petsc.world().size() != 1 {
+    ///     // note, cargo wont run tests with mpi so this will never be reached,
+    ///     // but this example will only work in a uniprocessor comm world
+    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
+    /// }
+    ///
     /// let n = 3;
     /// let mut mat = petsc.mat_create()?;
     /// mat.set_sizes(None, None, Some(n), Some(n))?;
@@ -117,7 +123,7 @@ impl<'a> Mat<'a> {
     /// mat.assembly_begin(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
     /// mat.assembly_end(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
     /// # // for debugging
-    /// # let viewer = Viewer::ascii_get_stdout(&petsc)?;
+    /// # let viewer = Viewer::ascii_get_stdout(petsc.world())?;
     /// # mat.view(&viewer)?;
     ///
     /// for i in 0..n {
@@ -143,13 +149,13 @@ impl<'a> Mat<'a> {
         assert_eq!(v.len(), m*n);
         let ierr = unsafe { petsc_raw::MatSetValues(self.mat_p, m as i32, idxm.as_ptr(), n as i32,
             idxn.as_ptr(), v.as_ptr(), addv) };
-        self.petsc.check_error(ierr)
+        Petsc::check_error(self.world, ierr)
     }
 
     /// Computes the matrix-vector product, y = Ax
     pub fn mult(&self, x: &Vector, y: &mut Vector) -> Result<()> {
         let ierr = unsafe { petsc_raw::MatMult(self.mat_p, x.vec_p, y.vec_p) };
-        self.petsc.check_error(ierr)
+        Petsc::check_error(self.world, ierr)
     }
 
     /// Returns the range of matrix rows owned by this processor, assuming that the matrix is laid
@@ -159,7 +165,7 @@ impl<'a> Mat<'a> {
         let mut low = MaybeUninit::<i32>::uninit();
         let mut high = MaybeUninit::<i32>::uninit();
         let ierr = unsafe { petsc_raw::MatGetOwnershipRange(self.mat_p, low.as_mut_ptr(), high.as_mut_ptr()) };
-        self.petsc.check_error(ierr)?;
+        Petsc::check_error(self.world, ierr)?;
 
         Ok(unsafe { low.assume_init()..high.assume_init() })
     }
@@ -170,11 +176,11 @@ impl<'a> Mat<'a> {
     pub fn get_ownership_ranges(&self) -> Result<Vec<std::ops::Range<i32>>> {
         let mut array = MaybeUninit::<*const i32>::uninit();
         let ierr = unsafe { petsc_raw::MatGetOwnershipRanges(self.mat_p, array.as_mut_ptr()) };
-        self.petsc.check_error(ierr)?;
+        Petsc::check_error(self.world, ierr)?;
 
         // SAFETY: Petsc says it is an array of length size+1
         let slice_from_array = unsafe { 
-            std::slice::from_raw_parts(array.assume_init(), self.petsc.world.size() as usize + 1) };
+            std::slice::from_raw_parts(array.assume_init(), self.world.size() as usize + 1) };
         let array_iter = slice_from_array.iter();
         let mut slice_iter_p1 = slice_from_array.iter();
         let _ = slice_iter_p1.next();
@@ -189,7 +195,7 @@ impl<'a> Mat<'a> {
         let mut res1 = MaybeUninit::<i32>::uninit();
         let mut res2 = MaybeUninit::<i32>::uninit();
         let ierr = unsafe { petsc_raw::MatGetLocalSize(self.mat_p, res1.as_mut_ptr(), res2.as_mut_ptr()) };
-        self.petsc.check_error(ierr)?;
+        Petsc::check_error(self.world, ierr)?;
 
         Ok(unsafe { (res1.assume_init(), res2.assume_init()) })
     }
@@ -201,70 +207,8 @@ impl<'a> Mat<'a> {
     {
         let ierr = unsafe { petsc_raw::MatSetOption(self.mat_p, 
             option, if flg {petsc_raw::PetscBool::PETSC_TRUE} else {petsc_raw::PetscBool::PETSC_FALSE}) };
-        self.petsc.check_error(ierr)
+        Petsc::check_error(self.world, ierr)
     }
-
-    // This doesn't work, TODO: make it work or get rid of it
-    // I think i would have to use vecs
-    // /// Allows you to give an iter that will be use to make a series of calls to [`Mat::set_values`].
-    // /// Then is followed by both [`Mat::assembly_begin()`] and [`Mat::assembly_end()`].
-    // ///
-    // /// The iterator is an iterator of tuples of `(idxm, idxn, v)` that are used as input to the function
-    // /// [`Mat::set_values()`], read docs for information on inputs.
-    // ///
-    // /// # Example
-    // ///
-    // /// ```
-    // /// # use petsc_rs::prelude::*;
-    // /// # use std::slice::from_ref;
-    // /// # fn main() -> petsc_rs::Result<()> {
-    // /// # let petsc = Petsc::init_no_args().unwrap();
-    // /// let n = 5;
-    // /// let mut mat = petsc.mat_create()?;
-    // /// mat.set_sizes(None, None, Some(n), Some(n))?;
-    // /// mat.set_from_options()?;
-    // /// mat.set_up()?;
-    // ///
-    // /// // We will create a matrix that look like the following:
-    // /// //  2 -1  0  0  0
-    // /// // -1  2 -1  0  0
-    // /// //  0 -1  2 -1  0
-    // /// //  0  0 -1  2 -1
-    // /// //  0  0  0 -1  2
-    // /// let v = [-1.0, 2.0, -1.0];
-    // /// let inds = (0..n).collect::<Vec<_>>();
-    // /// mat.assemble_with(inds..map(|i| {
-    // ///     if i == 0 {
-    // ///         (from_ref(&i), &vec![1, 0][..], &v as &[f64])
-    // ///     } else if i == n {
-    // ///         (from_ref(&i), &vec![n-2, n-1][..], &v as &[f64])
-    // ///     } else {
-    // ///         (from_ref(&i), &vec![i-1, i, i+1][..], &v as &[f64])
-    // ///     }
-    // /// }), InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY);
-    // /// 
-    // /// # let viewer = Viewer::ascii_get_stdout(&petsc)?;
-    // /// # mat.view(&viewer)?;
-    // /// panic!();
-    // /// # Ok(())
-    // /// # }
-    // /// ```
-    // // TODO: do we want `assembly_type` if it is just going to be MAT_FINAL_ASSEMBLY most of the time
-    // pub fn assemble_with<'b, I>(&mut self, iter_builder: I, addv: InsertMode, assembly_type: MatAssemblyType) -> Result<()>
-    // where
-    //     I: Iterator<Item = (&'b [i32], &'b [i32], &'b [f64])>
-    // {
-    //     // We don't actually care about the num_inserts value, we just need something that
-    //     // implements `Sum` so we can use the sum method and `()` does not.
-    //     let _num_inserts = iter_builder.map(|(idxm, idxn, v)| {
-    //         // TODO: check the arrays are valid
-    //         self.set_values(idxm.len() as i32, idxm, idxn.len() as i32, idxn, v, addv).map(|_| 1)
-    //     }).sum::<Result<i32>>()?;
-    //     // Note, `sum()` will short-circuit the iterator if an error is encountered.
-    //
-    //     self.assembly_begin(assembly_type)?;
-    //     self.assembly_end(assembly_type)
-    // }
 
     /// Allows you to give an iter that will be use to make a series of calls to [`Mat::set_values`].
     /// Then is followed by both [`Mat::assembly_begin()`] and [`Mat::assembly_end()`].
@@ -279,6 +223,12 @@ impl<'a> Mat<'a> {
     /// # use std::slice::from_ref;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args().unwrap();
+    /// if petsc.world().size() != 1 {
+    ///     // note, cargo wont run tests with mpi so this will never be reached,
+    ///     // but this example will only work in a uniprocessor comm world
+    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
+    /// }
+    ///
     /// let n = 5;
     /// let mut mat = petsc.mat_create()?;
     /// mat.set_sizes(None, None, Some(n), Some(n))?;
@@ -298,7 +248,7 @@ impl<'a> Mat<'a> {
     ///         .filter(|(_,_,v)| *v != 0.0 ), 
     ///     InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY);
     /// # // for debugging
-    /// # let viewer = Viewer::ascii_get_stdout(&petsc)?;
+    /// # let viewer = Viewer::ascii_get_stdout(petsc.world())?;
     /// # mat.view(&viewer)?;
     /// 
     /// assert_eq!(&mat.get_values(0..n, 0..n).unwrap()[..], &[ 2.0, -1.0,  0.0,  0.0,  0.0,
@@ -311,11 +261,11 @@ impl<'a> Mat<'a> {
     /// ```
     pub fn assemble_with<I>(&mut self, iter_builder: I, addv: InsertMode, assembly_type: MatAssemblyType) -> Result<()>
     where
-        I: Iterator<Item = (i32, i32, f64)>
+        I: IntoIterator<Item = (i32, i32, f64)>
     {
         // We don't actually care about the num_inserts value, we just need something that
         // implements `Sum` so we can use the sum method and `()` does not.
-        let _num_inserts = iter_builder.map(|(idxm, idxn, v)| {
+        let _num_inserts = iter_builder.into_iter().map(|(idxm, idxn, v)| {
             // TODO: check the arrays are valid
             self.set_values(std::slice::from_ref(&idxm), std::slice::from_ref(&idxn),
                 std::slice::from_ref(&v), addv).map(|_| 1)
@@ -335,6 +285,12 @@ impl<'a> Mat<'a> {
     /// # use std::slice::from_ref;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args().unwrap();
+    /// if petsc.world().size() != 1 {
+    ///     // note, cargo wont run tests with mpi so this will never be reached,
+    ///     // but this example will only work in a uniprocessor comm world
+    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
+    /// }
+    ///
     /// let n = 3;
     /// let mut mat = petsc.mat_create()?;
     /// mat.set_sizes(None, None, Some(n), Some(n))?;
@@ -349,7 +305,7 @@ impl<'a> Mat<'a> {
     ///         .map(|(v, (i,j))| (i,j,v as f64)),
     ///     InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY);
     /// # // for debugging
-    /// # let viewer = Viewer::ascii_get_stdout(&petsc)?;
+    /// # let viewer = Viewer::ascii_get_stdout(petsc.world())?;
     /// # mat.view(&viewer)?;
     /// 
     /// assert_eq!(&mat.get_values(0..n, 0..n).unwrap()[..], &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
@@ -388,7 +344,7 @@ impl<'a> Mat<'a> {
 
         let ierr = unsafe { petsc_raw::MatGetValues(self.mat_p, mi as i32, idxm_array.as_ptr(),
             ni as i32, idxn_array.as_ptr(), out_vec[..].as_mut_ptr()) };
-        self.petsc.check_error(ierr)?;
+        Petsc::check_error(self.world, ierr)?;
 
         Ok(out_vec)
     }

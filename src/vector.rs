@@ -7,7 +7,7 @@ use crate::prelude::*;
 // TODO: should we add a builder type so that you have to call set_type or set_from_options in order to use the vector
 /// Abstract PETSc vector object
 pub struct Vector<'a> {
-    petsc: &'a crate::Petsc,
+    world: &'a dyn Communicator,
 
     pub(crate) vec_p: *mut petsc_raw::_p_Vec, // I could use Vec which is the same thing, but i think using a pointer is more clear
 }
@@ -16,7 +16,7 @@ impl<'a> Drop for Vector<'a> {
     fn drop(&mut self) {
         unsafe {
             let ierr = petsc_raw::VecDestroy(&mut self.vec_p as *mut *mut petsc_raw::_p_Vec);
-            let _ = self.petsc.check_error(ierr); // TODO should i unwrap or what idk?
+            let _ = Petsc::check_error(self.world, ierr); // TODO should i unwrap or what idk?
         }
     }
 }
@@ -32,14 +32,14 @@ impl<'a> Vector<'a> {
     /// # use petsc_rs::prelude::*;
     /// let petsc = Petsc::init_no_args().unwrap();
     ///
-    /// Vector::create(&petsc).unwrap();
+    /// Vector::create(petsc.world()).unwrap();
     /// ```
-    pub fn create(petsc: &'a crate::Petsc) -> Result<Self> {
+    pub fn create(world: &'a dyn Communicator) -> Result<Self> {
         let mut vec_p = MaybeUninit::uninit();
-        let ierr = unsafe { petsc_raw::VecCreate(petsc.world.as_raw(), vec_p.as_mut_ptr()) };
-        petsc.check_error(ierr)?;
+        let ierr = unsafe { petsc_raw::VecCreate(world.as_raw(), vec_p.as_mut_ptr()) };
+        Petsc::check_error(world, ierr)?;
 
-        Ok(Vector { petsc, vec_p: unsafe { vec_p.assume_init() } })
+        Ok(Vector { world, vec_p: unsafe { vec_p.assume_init() } })
     }
 
     /// Creates a new vector of the same type as an existing vector.
@@ -48,9 +48,9 @@ impl<'a> Vector<'a> {
     pub fn duplicate(&self) -> Result<Self> {
         let mut vec2_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::VecDuplicate(self.vec_p, vec2_p.as_mut_ptr()) };
-        self.petsc.check_error(ierr)?;
+        Petsc::check_error(self.world, ierr)?;
 
-        Ok(Vector { petsc: &self.petsc, vec_p: unsafe { vec2_p.assume_init() } })
+        Ok(Vector { world: self.world, vec_p: unsafe { vec2_p.assume_init() } })
     }
 
     ///  Assembling the vector by calling [`Vector::assembly_begin()`] then [`Vector::assembly_end()`]
@@ -69,14 +69,14 @@ impl<'a> Vector<'a> {
         let ierr = unsafe { petsc_raw::VecSetSizes(
             self.vec_p, local_size.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
             global_size.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER)) };
-        self.petsc.check_error(ierr)
+        Petsc::check_error(self.world, ierr)
     }
 
     /// Computes self += alpha * other
     pub fn axpy(&mut self, alpha: f64, other: &Vector) -> Result<()>
     {
         let ierr = unsafe { petsc_raw::VecAXPY(self.vec_p, alpha, other.vec_p) };
-        self.petsc.check_error(ierr)
+        Petsc::check_error(self.world, ierr)
     }
 
     /// Computes the vector norm.
@@ -84,7 +84,7 @@ impl<'a> Vector<'a> {
     {
         let mut res = MaybeUninit::<f64>::uninit();
         let ierr = unsafe { petsc_raw::VecNorm(self.vec_p, norm_type, res.as_mut_ptr()) };
-        self.petsc.check_error(ierr)?;
+        Petsc::check_error(self.world, ierr)?;
 
         Ok(unsafe { res.assume_init() })
     }
@@ -94,7 +94,7 @@ impl<'a> Vector<'a> {
     {
         let ierr = unsafe { petsc_raw::VecSetOption(self.vec_p, 
             option, if flg {petsc_raw::PetscBool::PETSC_TRUE} else {petsc_raw::PetscBool::PETSC_FALSE}) };
-        self.petsc.check_error(ierr)
+        Petsc::check_error(self.world, ierr)
     }
 
     /// Inserts or adds values into certain locations of a vector.
@@ -124,6 +124,12 @@ impl<'a> Vector<'a> {
     /// ```
     /// # use petsc_rs::prelude::*;
     /// # let petsc = Petsc::init_no_args().unwrap();
+    /// if petsc.world().size() != 1 {
+    ///     // note, cargo wont run tests with mpi so this will never be reached,
+    ///     // but this example will only work in a uniprocessor comm world
+    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!").unwrap();
+    /// }
+    ///
     /// let mut v = petsc.vec_create().unwrap();
     /// v.set_sizes(None, Some(10)).unwrap(); // create vector of size 10
     /// v.set_from_options().unwrap();
@@ -149,7 +155,7 @@ impl<'a> Vector<'a> {
 
         let ni = ix.len() as i32;
         let ierr = unsafe { petsc_raw::VecSetValues(self.vec_p, ni, ix.as_ptr(), v.as_ptr(), iora) };
-        self.petsc.check_error(ierr)
+        Petsc::check_error(self.world, ierr)
     }
 
     /// Allows you to give an iter that will be use to make a series of calls to [`Vector::set_values()`].
@@ -165,6 +171,12 @@ impl<'a> Vector<'a> {
     /// # use std::slice::from_ref;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
+    /// if petsc.world().size() != 1 {
+    ///     // note, cargo wont run tests with mpi so this will never be reached,
+    ///     // but this example will only work in a uniprocessor comm world
+    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
+    /// }
+    ///
     /// let mut v = petsc.vec_create()?;
     /// v.set_sizes(None, Some(10))?; // create vector of size 10
     /// v.set_from_options()?;
@@ -202,6 +214,12 @@ impl<'a> Vector<'a> {
     /// ```
     /// # use petsc_rs::prelude::*;
     /// # let petsc = Petsc::init_no_args().unwrap();
+    /// if petsc.world().size() != 1 {
+    ///     // note, cargo wont run tests with mpi so this will never be reached,
+    ///     // but this example will only work in a uniprocessor comm world
+    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!").unwrap();
+    /// }
+    ///
     /// let mut v = petsc.vec_create().unwrap();
     /// v.set_sizes(None, Some(10)).unwrap(); // create vector of size 10
     /// v.set_from_options().unwrap();
@@ -235,7 +253,7 @@ impl<'a> Vector<'a> {
         let mut out_vec = vec![f64::default();ni];
 
         let ierr = unsafe { petsc_raw::VecGetValues(self.vec_p, ni as i32, ix_array.as_ptr(), out_vec[..].as_mut_ptr()) };
-        self.petsc.check_error(ierr)?;
+        Petsc::check_error(self.world, ierr)?;
 
         Ok(out_vec)
     }
@@ -247,7 +265,7 @@ impl<'a> Vector<'a> {
         let mut low = MaybeUninit::<i32>::uninit();
         let mut high = MaybeUninit::<i32>::uninit();
         let ierr = unsafe { petsc_raw::VecGetOwnershipRange(self.vec_p, low.as_mut_ptr(), high.as_mut_ptr()) };
-        self.petsc.check_error(ierr)?;
+        Petsc::check_error(self.world, ierr)?;
 
         Ok(unsafe { low.assume_init()..high.assume_init() })
     }
@@ -258,11 +276,11 @@ impl<'a> Vector<'a> {
     pub fn get_ownership_ranges(&self) -> Result<Vec<std::ops::Range<i32>>> {
         let mut array = MaybeUninit::<*const i32>::uninit();
         let ierr = unsafe { petsc_raw::VecGetOwnershipRanges(self.vec_p, array.as_mut_ptr()) };
-        self.petsc.check_error(ierr)?;
+        Petsc::check_error(self.world, ierr)?;
 
         // SAFETY: Petsc says it is an array of length size+1
         let slice_from_array = unsafe { 
-            std::slice::from_raw_parts(array.assume_init(), self.petsc.world.size() as usize + 1) };
+            std::slice::from_raw_parts(array.assume_init(), self.world.size() as usize + 1) };
         let array_iter = slice_from_array.iter();
         let mut slice_iter_p1 = slice_from_array.iter();
         let _ = slice_iter_p1.next();

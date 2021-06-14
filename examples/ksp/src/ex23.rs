@@ -49,7 +49,7 @@ fn main() -> petsc_rs::Result<()> {
     // or init with no options
     // let petsc = Petsc::init_no_args()?;
 
-    petsc_println!(petsc, "(petsc_println!) Hello parallel world of {} processes!", petsc.world().size() );
+    petsc_println!(petsc.world(), "(petsc_println!) Hello parallel world of {} processes!", petsc.world().size() );
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
          Compute the matrix and right-hand-side vector that define
@@ -98,7 +98,7 @@ fn main() -> petsc_rs::Result<()> {
         Assemble matrix
     */
     A.assemble_with(vec_ownership_range.map(|i| (-1..=1).map(move |j| (i,i+j))).flatten()
-            .filter(|&(i,j)| i < n || j < n) // we could also filter out negatives, but assemble_with does that for us
+            .filter(|&(i,j)| i < n && j < n) // we could also filter out negatives, but assemble_with does that for us
             .map(|(i,j)| if i == j { (i, j, 2.0) }
                          else { (i, j, -1.0) }),
         InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
@@ -154,7 +154,7 @@ fn main() -> petsc_rs::Result<()> {
         View solver info; we could instead use the option -ksp_view to
         print this info to the screen at the conclusion of KSPSolve().
     */
-    let viewer = Viewer::ascii_get_stdout(&petsc)?;
+    let viewer = Viewer::ascii_get_stdout(petsc.world())?;
     ksp.view(&viewer)?;
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -163,7 +163,7 @@ fn main() -> petsc_rs::Result<()> {
     x.axpy(-1.0, &u)?;
     let x_norm = x.norm(NormType::NORM_2)?;
     let iters = ksp.get_iteration_number()?;
-    petsc_println!(petsc, "Norm of error {:.5e}, Iters {}", x_norm, iters);
+    petsc_println!(petsc.world(), "Norm of error {:.5e}, Iters {}", x_norm, iters);
 
     /*
         All PETSc objects are automatically destroyed when they are no longer needed.

@@ -13,7 +13,7 @@ pub use petsc_sys::PetscViewerFormat;
 // This would work more nicely with things like display and debug, also the file system.
 // for now we will just use the C api.
 pub struct Viewer<'a> {
-    petsc: &'a crate::Petsc,
+    world: &'a dyn Communicator,
 
     pub(crate) viewer_p: *mut petsc_raw::_p_PetscViewer,
 }
@@ -32,13 +32,13 @@ impl_petsc_object_funcs!{ Viewer, viewer_p }
 
 impl<'a> Viewer<'a> {
     /// Creates a ASCII PetscViewer shared by all processors in a communicator.
-    pub fn ascii_get_stdout(petsc: &'a crate::Petsc) -> Result<Self>
+    pub fn ascii_get_stdout(world: &'a dyn Communicator) -> Result<Self>
     {
         let mut viewer_p = MaybeUninit::uninit();
-        let ierr = unsafe { petsc_sys::PetscViewerASCIIGetStdout(petsc.world.as_raw(), viewer_p.as_mut_ptr()) };
-        petsc.check_error(ierr)?;
+        let ierr = unsafe { petsc_sys::PetscViewerASCIIGetStdout(world.as_raw(), viewer_p.as_mut_ptr()) };
+        Petsc::check_error(world, ierr)?;
         
-        Ok(Viewer { petsc, viewer_p: unsafe { viewer_p.assume_init() } })
+        Ok(Viewer { world, viewer_p: unsafe { viewer_p.assume_init() } })
     }
 
     wrap_simple_petsc_member_funcs! {

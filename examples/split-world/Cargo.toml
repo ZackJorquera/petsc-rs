@@ -1,22 +1,13 @@
 [package]
-name = "ksp"
+name = "split-world"
 version = "0.1.0"
-authors = ["ZackJorquera <jorquerazack@gmail.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [[bin]]
-name = "ex1"
-path = "src/ex1.rs"
-
-[[bin]]
-name = "ex2"
-path = "src/ex2.rs"
-
-[[bin]]
-name = "ex23"
-path = "src/ex23.rs"
+name = "ex"
+path = "src/ex.rs"
 
 [dependencies]
 # adding libffi-sys is a work around, mpi requeres libffi which will fail to compile on WSL2 without 

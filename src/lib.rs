@@ -46,8 +46,6 @@ use prelude::*;
 
 // https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Sys/index.html
 
-// TODO: add viewer type https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Viewer/PetscViewer.html#PetscViewer
-
 // TODO: Would it make sense to only have PetscInitializeNoArguments and have rust deal with all the 
 // options database.
 
@@ -75,16 +73,18 @@ use prelude::*;
 /// # fn main() -> petsc_rs::Result<()> {
 /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
 ///
-/// petsc_println!(petsc, "Hello parallel world of {} processes!", petsc.world().size());
+/// petsc_println!(petsc.world(), "Hello parallel world of {} processes!", petsc.world().size());
+/// // This will print just a new line
+/// petsc_println!(petsc.world());
 /// # Ok(())
 /// # }
 /// ```
 #[macro_export]
 macro_rules! petsc_println {
-    ($petsc:ident) => ($petsc.print("\n")?);
-    ($petsc:ident, $($arg:tt)*) => ({
-        $petsc.print(format_args!($($arg)*))?;
-        $petsc.print("\n")?;
+    ($world:expr) => (Petsc::print($world, "\n")?);
+    ($world:expr, $($arg:tt)*) => ({
+        Petsc::print($world, format_args!($($arg)*))?;
+        Petsc::print($world, "\n")?;
     })
 }
 
@@ -114,8 +114,12 @@ pub use petsc_raw::InsertMode;
 ///
 /// ```
 /// # use petsc_rs::prelude::*;
+/// let univ = mpi::initialize().unwrap();
 /// let petsc = Petsc::builder()
 ///     .args(std::env::args())
+///     // Note, if we don't split the comm world and just use the default world
+///     // then there is no need to use the world method as we do here.
+///     .world(Box::new(univ.world()))
 ///     .help_msg("Hello, this is a help message\n")
 ///     .init().unwrap();
 /// ```
@@ -189,7 +193,7 @@ impl PetscBuilder
             }, 
             _ => Box::new(mpi::topology::SystemCommunicator::world()) 
         }, raw_args_vec_data: self.args.map(|_| (c_args, argc as usize, vec_cap)) };
-        petsc.check_error(ierr)?;
+        Petsc::check_error(petsc.world(), ierr)?;
 
         Ok(petsc)
     }
@@ -208,9 +212,11 @@ impl PetscBuilder
     /// Sets the [`PETSC_COMM_WORLD`](https://petsc.org/release/docs/manualpages/Sys/PETSC_COMM_WORLD.html#PETSC_COMM_WORLD)
     /// variable which represents all the processes that PETSc knows about.
     ///
-    /// By default PETSC_COMM_WORLD and MPI_COMM_WORLD ([`mpi::topology::SystemCommunicator::world()`])
-    /// are identical unless you wish to run PETSc on ONLY a subset of MPI_COMM_WORLD. That is where this
+    /// By default `PETSC_COMM_WORLD` and `MPI_COMM_WORLD` ([`mpi::topology::SystemCommunicator::world()`])
+    /// are identical unless you wish to run PETSc on ONLY a subset of `MPI_COMM_WORLD`. That is where this
     /// method can be use. Note, you must initialize mpi (with [`mpi::initialize()`]).
+    ///
+    /// After you call [`PetscBuilder::init()`], the value returned by [`Petsc::world()`] is the value set here.
     pub fn world(mut self, world: Box<dyn Communicator>) -> Self
     {
         self.world = Some(world);
@@ -224,7 +230,9 @@ impl PetscBuilder
         self
     }
 
-    /// PETSc database file, append ":yaml" to filename to specify YAML options format. 
+    /// PETSc database file.
+    ///
+    /// Append ":yaml" to filename to specify YAML options format. 
     /// Use empty string (or don't call this method) to not check for code specific file.
     /// Also checks ~/.petscrc, .petscrc and petscrc. Use -skip_petscrc in the code specific
     /// file (or command line) to skip ~/.petscrc, .petscrc and petscrc files
@@ -238,7 +246,7 @@ impl PetscBuilder
 /// A Petsc is a wrapper around PETSc initialization and Finalization.
 /// Also stores a reference to the the `MPI_COMM_WORLD`/`PETSC_COMM_WORLD` variable.
 pub struct Petsc {
-    // TODO: make world be of type AsRaw<Raw = mpi::ffi::MPI_Comm>
+    // This is functionally the same as `PETSC_COMM_WORLD` in the C api
     pub(crate) world: Box<dyn Communicator>,
 
     // This is used to drop the args data
@@ -287,23 +295,31 @@ impl Petsc {
     pub fn init_no_args() -> Result<Self> {
         let ierr = unsafe { petsc_raw::PetscInitializeNoArguments() };
         let petsc = Self { world: Box::new(mpi::topology::SystemCommunicator::world()), raw_args_vec_data: None };
-        petsc.check_error(ierr)?;
+        Petsc::check_error(petsc.world(), ierr)?;
 
         Ok(petsc)
     }
 
-    /// Gets a reference to the MPI comm world. This can be used when Petsc initializes
-    /// mpi. Effectively equivalent to [`mpi::topology::SystemCommunicator::world`].
+    /// Gets a reference to the PETSc comm world. 
+    ///
+    /// This is effectively equivalent to  [`mpi::topology::SystemCommunicator::world()`]
+    /// if you haven't set the comm world to something other that the system communicator 
+    /// during petsc initialization using a [`PetscBuilder`].
+    ///
+    /// The value is functionally the same as the `PETSC_COMM_WORLD` global in the C
+    /// API. If you want to use a different comm world, then you have to define that outside
+    /// of the [`Petsc`] object. Read docs for [`PetscBuilder::world()`] for more information.
     ///
     /// [`mpi::topology::SystemCommunicator::world`]: mpi::topology::SystemCommunicator::world
     pub fn world<'a>(&'a self) -> &'a dyn Communicator {
         self.world.as_ref()
     }
 
+    // TODO: move out of `Petsc` maybe
     /// Internal error checker
     /// replacement for the CHKERRQ macro in the C api
     #[doc(hidden)]
-    fn check_error(&self, ierr: petsc_raw::PetscErrorCode) -> Result<()> {
+    pub(crate) fn check_error(world: &dyn Communicator, ierr: petsc_raw::PetscErrorCode) -> Result<()> {
         // Return early if code is clean
         if ierr == 0 {
             return Ok(());
@@ -323,7 +339,7 @@ impl Petsc {
         // TODO: add file macro and line macro if possible
         // might not matter because in debug rust will give stack trace
         unsafe {
-            let _ = petsc_raw::PetscError(self.world.as_raw(), -1, std::ptr::null(), 
+            let _ = petsc_raw::PetscError(world.as_raw(), -1, std::ptr::null(), 
                 std::ptr::null(), ierr, PetscErrorType::PETSC_ERROR_REPEAT,
                 c_s_r.as_ref().map(|s| s.as_ptr()).unwrap_or(std::ptr::null()));
         }
@@ -331,6 +347,7 @@ impl Petsc {
         return Err(error);
     }
 
+    // TODO: move out of `Petsc` maybe
     /// Function to call when an error has been detected.
     /// replacement for the SETERRQ macro in the C api.
     /// Will always return an `Err`.
@@ -340,11 +357,11 @@ impl Petsc {
     /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
     /// if petsc.world().size() != 1 {
     ///     // note, cargo wont run tests with mpi so this will never be reached
-    ///     assert!(petsc.set_error(PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!").is_err());
+    ///     assert!(Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!").is_err());
     /// }
     /// ```
     ///
-    pub fn set_error<E>(&self, error_kind: PetscErrorKind, err_msg: E) -> Result<()>
+    pub fn set_error<E>(world: &dyn Communicator, error_kind: PetscErrorKind, err_msg: E) -> Result<()>
     where
         E: Into<Box<dyn std::error::Error + Send + Sync>>
     {
@@ -355,7 +372,7 @@ impl Petsc {
         // TODO: add file petsc func, and line if possible
         // might not matter because in debug rust will give stack trace
         unsafe {
-            let _ = petsc_raw::PetscError(self.world.as_raw(), -1, std::ptr::null(), 
+            let _ = petsc_raw::PetscError(world.as_raw(), -1, std::ptr::null(), 
                 std::ptr::null(), error_kind as petsc_raw::PetscErrorCode,
                 PetscErrorType::PETSC_ERROR_INITIAL,
                 c_s_r.as_ref().map(|s| s.as_ptr()).unwrap_or(std::ptr::null()));
@@ -364,6 +381,7 @@ impl Petsc {
         return Err(error);
     }
 
+    // TODO: move out of `Petsc` maybe
     /// replacement for the `PetscPrintf` function in the C api. You can also use the [`petsc_println`] macro
     /// to have string formatting.
     /// Prints to standard out, only from the first processor in the communicator. Calls from other processes are ignored.
@@ -375,27 +393,30 @@ impl Petsc {
     /// # fn main() -> petsc_rs::Result<()> {
     /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
     ///
-    /// petsc.print(format!("Hello parallel world of {} processes!\n", petsc.world().size()))?;
+    /// Petsc::print(petsc.world(), format!("Hello parallel world of {} processes!\n", petsc.world().size()))?;
     /// // or use:
-    /// petsc_println!(petsc, "Hello parallel world of {} processes!", petsc.world().size());
+    /// petsc_println!(petsc.world(), "Hello parallel world of {} processes!", petsc.world().size());
     /// # Ok(())
     /// # }
     /// ```
     ///
     /// [`petsc_println`]: petsc_println
     //#[doc(hidden)]
-    pub fn print<T: ToString>(&self, msg: T) -> Result<()> {
+    pub fn print<T: ToString>(world: &dyn Communicator, msg: T) -> Result<()> {
         let msg_cs = ::std::ffi::CString::new(msg.to_string()).expect("`CString::new` failed");
 
         // The first entry needs to be `%s` so that this function is not susceptible to printf injections.
         let ps = CString::new("%s").unwrap();
 
-        // TODO: add file petsc func, and line if possible
-        let ierr = unsafe { petsc_raw::PetscPrintf(self.world.as_raw(), ps.as_ptr(), msg_cs.as_ptr()) };
-        self.check_error(ierr)
+        let ierr = unsafe { petsc_raw::PetscPrintf(world.as_raw(), ps.as_ptr(), msg_cs.as_ptr()) };
+        Petsc::check_error(world, ierr)
     }
 
-    /// Creates an empty vector object. The type can then be set with [`Vector::set_type`](#), or [`Vector::set_from_options`].
+    /// Creates an empty vector object.
+    ///
+    /// Note, it will use the default comm world from [`Petsc::world()`].
+    ///
+    /// The type can then be set with [`Vector::set_type`](#), or [`Vector::set_from_options`].
     /// Same as [`Vector::create`].
     ///
     /// # Example
@@ -406,10 +427,12 @@ impl Petsc {
     /// let vec = petsc.vec_create().unwrap();
     /// ```
     pub fn vec_create(&self) -> Result<crate::Vector> {
-        crate::Vector::create(self)
+        crate::Vector::create(self.world())
     }
 
     /// Creates an empty matrix object. 
+    ///
+    /// Note, it will use the default comm world from [`Petsc::world()`].
     ///
     /// # Example
     ///
@@ -419,10 +442,12 @@ impl Petsc {
     /// let mat = petsc.mat_create().unwrap();
     /// ```
     pub fn mat_create(&self) -> Result<crate::Mat> {
-        crate::Mat::create(self)
+        crate::Mat::create(self.world())
     }
 
     /// Creates the default KSP context.
+    ///
+    /// Note, it will use the default comm world from [`Petsc::world()`].
     ///
     /// # Example
     ///
@@ -432,6 +457,6 @@ impl Petsc {
     /// let ksp = petsc.ksp_create().unwrap();
     /// ```
     pub fn ksp_create(&self) -> Result<crate::KSP> {
-        crate::KSP::create(self)
+        crate::KSP::create(self.world())
     }
 }
