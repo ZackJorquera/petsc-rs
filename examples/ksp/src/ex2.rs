@@ -158,7 +158,7 @@ fn main() -> petsc_rs::Result<()> {
     if view_exact_sol
     {
         let viewer = Viewer::ascii_get_stdout(petsc.world())?;
-        u.view(&viewer)?;
+        u.view_with(&viewer)?;
     }
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -

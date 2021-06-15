@@ -76,6 +76,10 @@ impl<'a> PC<'a> {
     // or we could do `Rc<RefCell<Mat>>` so that when you remove the mats we can give mut access back.
     pub fn set_operators(&mut self, a_mat: Option<Rc<Mat<'a>>>, p_mat: Option<Rc<Mat<'a>>>) -> Result<()>
     {
+        // TODO: should we make a_mat an `Rc<RefCell<Mat>>`
+
+        // TODO: make `set_operators_single_mat` (if this consumes a_mat and p_mat)
+
         // Should this function consume the mats? Right now once call this function you can not edit the mats with
         // out first removing them.
 

@@ -2,14 +2,28 @@
 //!
 //! PETSc C API docs: <https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Vec/index.html>
 
+use std::ops::{Deref, DerefMut};
+
 use crate::prelude::*;
 
 // TODO: should we add a builder type so that you have to call set_type or set_from_options in order to use the vector
 /// Abstract PETSc vector object
 pub struct Vector<'a> {
-    world: &'a dyn Communicator,
+    pub(crate) world: &'a dyn Communicator,
 
     pub(crate) vec_p: *mut petsc_raw::_p_Vec, // I could use Vec which is the same thing, but i think using a pointer is more clear
+}
+
+/// A immutable view of a Vector with Deref to slice.
+pub struct VectorView<'a, 'b> {
+    vec: &'b Vector<'a>,
+    array: *const f64,
+}
+
+/// A mutable view of a Vector with Deref to slice.
+pub struct VectorViewMut<'a, 'b> {
+    vec: &'b mut Vector<'a>,
+    array: *mut f64,
 }
 
 impl<'a> Drop for Vector<'a> {
@@ -43,6 +57,7 @@ impl<'a> Vector<'a> {
     }
 
     /// Creates a new vector of the same type as an existing vector.
+    ///
     /// [`duplicate`](Vector::duplicate) DOES NOT COPY the vector entries, but rather 
     /// allocates storage for the new vector. Use [`Vector::copy_values`](#) to copy a vector.
     pub fn duplicate(&self) -> Result<Self> {
@@ -53,7 +68,7 @@ impl<'a> Vector<'a> {
         Ok(Vector { world: self.world, vec_p: unsafe { vec2_p.assume_init() } })
     }
 
-    ///  Assembling the vector by calling [`Vector::assembly_begin()`] then [`Vector::assembly_end()`]
+    ///  Assembles the vector by calling [`Vector::assembly_begin()`] then [`Vector::assembly_end()`]
     pub fn assemble(&mut self) -> Result<()>
     {
         self.assembly_begin()?;
@@ -62,6 +77,7 @@ impl<'a> Vector<'a> {
     }
 
     /// Sets the local and global sizes, and checks to determine compatibility
+    ///
     /// The inputs can be `None` to have PETSc decide the size.
     /// `local_size` and `global_size` cannot be both `None`. If one processor calls this with
     /// `global_size` of `None` then all processors must, otherwise the program will hang.
@@ -77,16 +93,6 @@ impl<'a> Vector<'a> {
     {
         let ierr = unsafe { petsc_raw::VecAXPY(self.vec_p, alpha, other.vec_p) };
         Petsc::check_error(self.world, ierr)
-    }
-
-    /// Computes the vector norm.
-    pub fn norm(&self, norm_type: NormType) -> Result<f64>
-    {
-        let mut res = MaybeUninit::<f64>::uninit();
-        let ierr = unsafe { petsc_raw::VecNorm(self.vec_p, norm_type, res.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
-
-        Ok(unsafe { res.assume_init() })
     }
 
     /// Sets an option for controling a vector's behavior.
@@ -207,7 +213,11 @@ impl<'a> Vector<'a> {
         self.assembly_end()
     }
 
-    /// Gets values from certain locations of a vector. Currently can only get values on the same processor
+    /// Gets values from certain locations of a vector.
+    ///
+    /// Currently can only get values on the same processor.
+    ///
+    /// Most of the time creating a vector view will be more useful: [`Vector::view()`] or [`Vector::view_mut()`].
     ///
     /// # Example
     ///
@@ -247,6 +257,8 @@ impl<'a> Vector<'a> {
         // TODO: is this good, it feels like it would be better to just accept &[i32] and then we dont 
         // need to do the collect. Although, it is nice to accept ranges or iters as input.
 
+        // TODO: i added Vector::view which returns a slice, do we still need this method?
+
         let ix_iter = ix.into_iter();
         let ni = ix_iter.len();
         let ix_array = ix_iter.collect::<Vec<_>>();
@@ -258,7 +270,9 @@ impl<'a> Vector<'a> {
         Ok(out_vec)
     }
 
-    /// Returns the range of indices owned by this processor, assuming that the vectors are laid
+    /// Returns the range of indices owned by this processor.
+    ///
+    /// This method assumes that the vectors are laid
     /// out with the first n1 elements on the first processor, next n2 elements on the second, etc.
     /// For certain parallel layouts this range may not be well defined.
     pub fn get_ownership_range(&self) -> Result<std::ops::Range<i32>> {
@@ -270,7 +284,9 @@ impl<'a> Vector<'a> {
         Ok(unsafe { low.assume_init()..high.assume_init() })
     }
 
-    /// Returns the range of indices owned by EACH processor, assuming that the vectors are laid
+    /// Returns the range of indices owned by EACH processor.
+    ///
+    /// This method assumes that the vectors are laid
     /// out with the first n1 elements on the first processor, next n2 elements on the second, etc.
     /// For certain parallel layouts this range may not be well defined.
     pub fn get_ownership_ranges(&self) -> Result<Vec<std::ops::Range<i32>>> {
@@ -287,7 +303,147 @@ impl<'a> Vector<'a> {
         Ok(array_iter.zip(slice_iter_p1).map(|(s,e)| *s..*e).collect())
     }
 
+    /// Create an immutable view of the vector.
+    ///
+    /// # Implementation Note
+    ///
+    /// Standard PETSc vectors use contiguous storage so that this routine does not copy the data.
+    /// Other vector implementations may require to copy the data, but must such implementations
+    /// should cache the contiguous representation so that only one copy is performed when this routine
+    /// is called multiple times in sequence.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use petsc_rs::prelude::*;
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// # let petsc = Petsc::init_no_args()?;
+    /// let mut v = petsc.vec_create()?;
+    /// v.set_sizes(None, Some(10))?; // create vector of size 10
+    /// v.set_from_options()?;
+    /// 
+    /// v.assemble_with([0, 3, 7, 9].iter().cloned()
+    ///         .zip([1.1, 2.2, 3.3, 4.4]), InsertMode::INSERT_VALUES)?;
+    /// assert_eq!(&v.get_values(0..10)?[..], &[1.1,0.0,0.0,2.2,0.0,0.0,0.0,3.3,0.0,4.4]);
+    ///
+    /// {
+    ///     let mut v_view = v.view()?;
+    ///     assert_eq!(&v_view[..], &[1.1,0.0,0.0,2.2,0.0,0.0,0.0,3.3,0.0,4.4]);
+    /// }
+    ///
+    /// v.assemble_with([(0, 1.0), (2, 2.0), (8, 3.0), (9, 4.0)], InsertMode::ADD_VALUES)?;
+    ///
+    /// // It is valid to have multiple immutable views
+    /// let v_view = v.view()?;
+    /// let v_view2 = v.view()?;
+    /// assert_eq!(&v_view[..], &v_view2[..]);
+    /// assert_eq!(&v_view2[..], &[2.1,0.0,2.0,2.2,0.0,0.0,0.0,3.3,3.0,8.4]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn view<'b>(&'b self) -> Result<VectorView<'a, 'b>>
+    {
+        VectorView::new(self)
+    }
+
+    /// Create an mutable view of the vector.
+    ///
+    /// # Implementation Note
+    ///
+    /// Returns a slice to a contiguous array that contains this processor's portion of the vector data. 
+    /// For the standard PETSc vectors, [`view_mut()`](Vector::view_mut()) returns a pointer to the local
+    /// data array and does not use any copies. If the underlying vector data is not stored in a contiguous
+    /// array this routine will copy the data to a contiguous array and return a slice to that. You MUST
+    /// drop the returned [`VectorViewMut`] when you no longer need access to the slice.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use petsc_rs::prelude::*;
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// # let petsc = Petsc::init_no_args()?;
+    /// let mut v = petsc.vec_create()?;
+    /// v.set_sizes(None, Some(10))?; // create vector of size 10
+    /// v.set_from_options()?;
+    /// v.set_all(1.5)?;
+    ///
+    /// {
+    ///     let mut v_view = v.view_mut()?;
+    ///     assert_eq!(&v_view[..], &[1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5]);
+    ///     v_view[2] = 9.0;
+    /// }
+    ///
+    /// let v_view = v.view()?;
+    /// assert_eq!(&v_view[..], &[1.5, 1.5, 9.0, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn view_mut<'b>(&'b mut self) -> Result<VectorViewMut<'a, 'b>>
+    {
+        VectorViewMut::new(self)
+    }
+
     // TODO: add `from_array`/`from_slice` and maybe also `set_slice`
+}
+
+impl Drop for VectorViewMut<'_, '_> {
+    fn drop(&mut self) {
+        unsafe {
+            let ierr = petsc_raw::VecRestoreArray(self.vec.vec_p, &mut self.array as *mut _);
+            let _ = Petsc::check_error(self.vec.world, ierr); // TODO should i unwrap or what idk?
+        }
+    }
+}
+
+impl Drop for VectorView<'_, '_> {
+    fn drop(&mut self) {
+        unsafe {
+            let ierr = petsc_raw::VecRestoreArrayRead(self.vec.vec_p, &mut self.array as *mut _);
+            let _ = Petsc::check_error(self.vec.world, ierr); // TODO should i unwrap or what idk?
+        }
+    }
+}
+
+impl<'a, 'b> VectorViewMut<'a, 'b> {
+    /// Constructs a VectorViewMut from a Vector reference
+    fn new(vec: &'b mut Vector<'a>) -> Result<Self> {
+        let mut array = MaybeUninit::<*mut f64>::uninit();
+        let ierr = unsafe { petsc_raw::VecGetArray(vec.vec_p, array.as_mut_ptr()) };
+        Petsc::check_error(vec.world, ierr)?;
+
+        Ok(Self { vec, array: unsafe { array.assume_init() } })
+    }
+}
+
+impl<'a, 'b> VectorView<'a, 'b> {
+    /// Constructs a VectorViewMut from a Vector reference
+    fn new(vec: &'b Vector<'a>) -> Result<Self> {
+        let mut array = MaybeUninit::<*const f64>::uninit();
+        let ierr = unsafe { petsc_raw::VecGetArrayRead(vec.vec_p, array.as_mut_ptr()) };
+        Petsc::check_error(vec.world, ierr)?;
+
+        Ok(Self { vec, array: unsafe { array.assume_init() } })
+    }
+}
+
+impl Deref for VectorViewMut<'_, '_> {
+    type Target = [f64];
+    fn deref(&self) -> &[f64] {
+        unsafe { std::slice::from_raw_parts(self.array, self.vec.get_global_size().unwrap() as usize) }
+    }
+}
+
+impl DerefMut for VectorViewMut<'_, '_> {
+    fn deref_mut(&mut self) -> &mut [f64] {
+        unsafe { std::slice::from_raw_parts_mut(self.array, self.vec.get_global_size().unwrap() as usize) }
+    }
+}
+
+impl Deref for VectorView<'_, '_> {
+    type Target = [f64];
+    fn deref(&self) -> &[f64] {
+        unsafe { std::slice::from_raw_parts(self.array, self.vec.get_global_size().unwrap() as usize) }
+    }
 }
 
 // macro impls
@@ -306,6 +462,10 @@ impl<'a> Vector<'a> {
     wrap_simple_petsc_member_funcs! {
         VecGetLocalSize, get_local_size, vec_p, i32, #[doc = "Returns the number of elements of the vector stored in local memory."];
         VecGetSize, get_global_size, vec_p, i32, #[doc = "Returns the global number of elements of the vector."];
+    }
+
+    wrap_simple_petsc_member_funcs! {
+        VecNorm, norm, vec_p, input NormType, norm_type, output f64, tmp1, #[doc = "Computes the vector norm."];
     }
 }
 

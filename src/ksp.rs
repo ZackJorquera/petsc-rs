@@ -144,7 +144,7 @@ impl<'a> KSP<'a> {
     }
 
     /// Solves linear system.
-    pub fn solve(&mut self, b: &Vector, x: &mut Vector) -> Result<()>
+    pub fn solve(&self, b: &Vector, x: &mut Vector) -> Result<()>
     {
         let ierr = unsafe { petsc_raw::KSPSolve(self.ksp_p, b.vec_p, x.vec_p) };
         Petsc::check_error(self.world, ierr)
@@ -156,7 +156,7 @@ impl<'a> KSP<'a> {
 impl<'a> KSP<'a> {
     wrap_simple_petsc_member_funcs! {
         KSPSetFromOptions, set_from_options, ksp_p, #[doc = "Sets KSP options from the options database. This routine must be called before KSPSetUp() if the user is to be allowed to set the Krylov type."];
-        KSPSetUp, set_up, ksp_p, #[doc = "Sets up the internal data structures for the later use of an iterative solver."];
+        KSPSetUp, set_up, ksp_p, #[doc = "Sets up the internal data structures for the later use of an iterative solver. . This will be automatically called with [`KSP::solve()`]."];
     }
 
     wrap_simple_petsc_member_funcs! {

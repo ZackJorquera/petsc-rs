@@ -19,6 +19,7 @@ pub mod mat;
 pub mod ksp;
 #[path = "preconditioner.rs"] pub mod pc; // TODO: or should i just rename the file
 pub mod viewer;
+pub mod snes;
 
 pub mod prelude {
     //! Commonly used items.
@@ -30,6 +31,7 @@ pub mod prelude {
         vector::{Vector, NormType, VecOption, },
         mat::{Mat, MatAssemblyType, MatOption, MatDuplicateOption, },
         ksp::{KSP, },
+        snes::{SNES, },
         pc::{PC, PCType, },
         viewer::{Viewer, PetscViewerFormat, },
     };
@@ -458,5 +460,20 @@ impl Petsc {
     /// ```
     pub fn ksp_create(&self) -> Result<crate::KSP> {
         crate::KSP::create(self.world())
+    }
+
+    /// Creates the default SNES context.
+    ///
+    /// Note, it will use the default comm world from [`Petsc::world()`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use petsc_rs::prelude::*;
+    /// let petsc = Petsc::init_no_args().unwrap();
+    /// let snes = petsc.snes_create().unwrap();
+    /// ```
+    pub fn snes_create(&self) -> Result<crate::SNES> {
+        crate::SNES::create(self.world())
     }
 }

@@ -1,7 +1,7 @@
-//! Concepts: KSP^basic parallel example;
+//! Concepts: MPI^split world;
+//! Concepts: KSP^solving a system of linear equations
 //! Concepts: KSP^Laplacian, 2d
-//! Concepts: Laplacian, 2d
-//! Processors: n
+//! Processors: 2+
 //!
 //! To run:
 //! ```text
@@ -211,7 +211,7 @@ fn do_ksp_ex2(petsc: &Petsc, m: i32, n: i32, view_exact_sol: bool) -> petsc_rs::
     if view_exact_sol
     {
         let viewer = Viewer::ascii_get_stdout(petsc.world())?;
-        u.view(&viewer)?;
+        u.view_with(&viewer)?;
     }
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -377,7 +377,7 @@ fn do_ksp_ex23(petsc: &Petsc, n: i32, view_ksp: bool) -> petsc_rs::Result<()> {
     */
     if view_ksp {
         let viewer = Viewer::ascii_get_stdout(petsc.world())?;
-        ksp.view(&viewer)?;
+        ksp.view_with(&viewer)?;
     }
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
