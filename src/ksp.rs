@@ -155,13 +155,9 @@ impl<'a> KSP<'a> {
 // macro impls
 impl<'a> KSP<'a> {
     wrap_simple_petsc_member_funcs! {
-        KSPSetFromOptions, set_from_options, ksp_p, #[doc = "Sets KSP options from the options database. This routine must be called before KSPSetUp() if the user is to be allowed to set the Krylov type."];
-        KSPSetUp, set_up, ksp_p, #[doc = "Sets up the internal data structures for the later use of an iterative solver. . This will be automatically called with [`KSP::solve()`]."];
-    }
-
-    wrap_simple_petsc_member_funcs! {
-        KSPGetIterationNumber, get_iteration_number, ksp_p, i32, #[doc = "Gets the current iteration number; if the KSPSolve() is complete, returns the number of iterations used."];
-
+        KSPSetFromOptions, set_from_options, ksp_p, takes mut, #[doc = "Sets KSP options from the options database. This routine must be called before KSPSetUp() if the user is to be allowed to set the Krylov type."];
+        KSPSetUp, set_up, ksp_p, takes mut, #[doc = "Sets up the internal data structures for the later use of an iterative solver. . This will be automatically called with [`KSP::solve()`]."];
+        KSPGetIterationNumber, get_iteration_number, ksp_p, output i32, iter_num, #[doc = "Gets the current iteration number; if the KSPSolve() is complete, returns the number of iterations used."];
     }
 }
 

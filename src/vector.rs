@@ -449,22 +449,13 @@ impl Deref for VectorView<'_, '_> {
 // macro impls
 impl<'a> Vector<'a> {
     wrap_simple_petsc_member_funcs! {
-        VecSetFromOptions, set_from_options, vec_p, #[doc = "Configures the vector from the options database."];
-        VecSetUp, set_up, vec_p, #[doc = "Sets up the internal vector data structures for the later use."];
-        VecAssemblyBegin, assembly_begin, vec_p, #[doc = "Begins assembling the vector. This routine should be called after completing all calls to VecSetValues()."];
-        VecAssemblyEnd, assembly_end, vec_p, #[doc = "Completes assembling the vector. This routine should be called after VecAssemblyBegin()."];
-    }
-
-    wrap_simple_petsc_member_funcs! {
-        VecSet, set_all, vec_p, alpha, f64, #[doc = "Sets all components of a vector to a single scalar value.\n\nYou CANNOT call this after you have called [`Vector::set_values()`]."];
-    }
-
-    wrap_simple_petsc_member_funcs! {
-        VecGetLocalSize, get_local_size, vec_p, i32, #[doc = "Returns the number of elements of the vector stored in local memory."];
-        VecGetSize, get_global_size, vec_p, i32, #[doc = "Returns the global number of elements of the vector."];
-    }
-
-    wrap_simple_petsc_member_funcs! {
+        VecSetFromOptions, set_from_options, vec_p, takes mut, #[doc = "Configures the vector from the options database."];
+        VecSetUp, set_up, vec_p, takes mut, #[doc = "Sets up the internal vector data structures for the later use."];
+        VecAssemblyBegin, assembly_begin, vec_p, takes mut, #[doc = "Begins assembling the vector. This routine should be called after completing all calls to VecSetValues()."];
+        VecAssemblyEnd, assembly_end, vec_p, takes mut, #[doc = "Completes assembling the vector. This routine should be called after VecAssemblyBegin()."];
+        VecSet, set_all, vec_p, input f64, alpha, takes mut, #[doc = "Sets all components of a vector to a single scalar value.\n\nYou CANNOT call this after you have called [`Vector::set_values()`]."];
+        VecGetLocalSize, get_local_size, vec_p, output i32, ls, #[doc = "Returns the number of elements of the vector stored in local memory."];
+        VecGetSize, get_global_size, vec_p, output i32, gs, #[doc = "Returns the global number of elements of the vector."];
         VecNorm, norm, vec_p, input NormType, norm_type, output f64, tmp1, #[doc = "Computes the vector norm."];
     }
 }

@@ -2,63 +2,65 @@
 #![macro_use]
 
 // TODO: make macro use `::std::*` or `crate::*` for everything
+
+/// Internal macro used to make wrappers of "simple" Petsc function
+///
+/// This macro wraps a "simple" PETSc function that takes any number of inputs and returns any number of outputs.
+/// You can also set if the function takes a mutable reference to self or immutable.
+/// These can be repeated multiple times to define multiple methods in one macro call.
+/// Also supports doc strings
+/// It is "simple" if it no type conversion is need between the petsc-rs types and the ones used by petsc-raw (or petsc-sys)
+/// 
+/// # Usage
+///
+/// Say we have a petsc function like `VecNorm` which is defined to be `pub unsafe fn VecNorm(arg1: Vec, arg2: NormType, arg3: *mut PetscReal) -> PetscErrorCode`
+/// and we want our rust wrapper to be `pub fn norm(&self, norm_type: NormType) -> crate::Result<f64>`.
+/// We can then use this macro in the following way:
+///
+/// ```ignore
+/// wrap_simple_petsc_member_funcs! {
+///     VecNorm, norm, vec_p, input NormType, norm_type, output f64, tmp1, #[doc = "Computes the vector norm."];
+/// }
+/// ```
+///
+/// For a more general case lets say we have a Petsc function called `TestSetABRetCD`
+/// that is defined as follows: 
+/// `pub unsafe fn TestSetABRetCD(arg1: Test, arg2: PetscInt, arg3: PetscReal, arg4: *mut PetscReal, arg5: *mut PetscInt) -> PetscErrorCode`
+/// It takes in two inputs `arg2` and `arg3` and returns two outputs with `arg4` and
+/// `arg5`. It acts on the made-up Petsc type `Test` that in rust we define as follows:
+/// ```ignore
+/// pub struct Test<'a> {
+///     pub(crate) world: &'a dyn Communicator,
+///     pub(crate) test_p: petsc_raw::Test,
+/// }
+/// ```
+/// Note, you need to have a member `world: &'a dyn Communicator` for this macro to work.
+///
+/// We can then using the macro in the following way to create the function 
+/// `pub fn set_ab_ret_cd(&mut self, a: i32, b: f64) -> crate::Result<(f64, i32)>`
+/// 
+/// ```ignore
+/// impl<'a> Test<'a> {
+///     wrap_simple_petsc_member_funcs! {
+///         TestSetABRetCD, set_ab_ret_cd, test_p, input i32, a, input f64, b, 
+/// //         ^                  ^          ^        ^
+/// //      Petsc func name       |   pointer member  |- Then for each input
+/// //                       rust func name          put `input type, param_name,`
+///             output f64, c, output i32, d, takes mut, #[doc = "doc-string"];
+/// //           ^                              ^
+/// //           |- for each output             |- If you want the method to take
+/// //          put `output type, tmp_name`     a `&mut self` put `takes mut,`
+///     }
+/// }
+/// ```
+/// Note, the number of input, the number of outputs, and if it takes a mutable
+/// reference to self is all variable/optional and can be set to what even you need.
 macro_rules! wrap_simple_petsc_member_funcs {
-    // This is the most simple of the wrapper macros; it is for a PETSc function that takes no input
-    // and has no outputs. These can be repeated multiple times to define multiple like methods.
-    // `$new_func` will take a mutable reference to self
-    // Note, we always return a result, but this returns a `Result<()>`.
-    {$(
-        $raw_func:ident, $new_func:ident, $raw_ptr_var:ident, #[$doc:meta];
-    )*} => {
-$(
-    #[$doc]
-    pub fn $new_func(&mut self) -> crate::Result<()> {
-        let ierr = unsafe { crate::petsc_raw::$raw_func(self.$raw_ptr_var) };
-        Petsc::check_error(self.world, ierr)
-    }
-)*
-    };
-
-    // This wrapper macro is used for a PETSc function that takes a single input and have no outputs.
-    // It also takes mutable access of the PETSc object
-    // `$new_func` will take a mutable reference to self
-    // These can be repeated multiple times to define multiple like methods.
-    {$(
-        $raw_func:ident, $new_func:ident, $raw_ptr_var:ident, $param_name:ident, $param_type:ty, #[$doc:meta];
-    )*} => {
-$(
-    #[$doc]
-    pub fn $new_func(&mut self, $param_name: $param_type) -> crate::Result<()>
-    {
-        let ierr = unsafe { crate::petsc_raw::$raw_func(self.$raw_ptr_var, $param_name) };
-        Petsc::check_error(self.world, ierr)
-    }
-)*
-    };
-
-    // This wrapper macro is used for a PETSc function that take no input and has one output.
-    // These can be repeated multiple times to define multiple like methods.
-    // `$new_func` will take an immutable reference to self
-    // Note, it return `Result<$ret_type>`
-    {$(
-        $raw_func:ident, $new_func:ident, $raw_ptr_var:ident, $ret_type:ty, #[$doc:meta];
-    )*} => {
-$(
-    #[$doc]
-    pub fn $new_func(&self) -> crate::Result<$ret_type>
-    {
-        let mut res = ::std::mem::MaybeUninit::<$ret_type>::uninit();
-        let ierr = unsafe { crate::petsc_raw::$raw_func(self.$raw_ptr_var, res.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
-
-        crate::Result::Ok(unsafe { res.assume_init() })
-    }
-)*
-    };
     // This is the most general case for the wrapper macro. It wraps a PETSc function that takes any number of input
     // and returns any number one output. You can also set if the function takes a mutable reference or not
     // These can be repeated multiple times to define multiple methods.
-    // TODO: Make everything use this
+    // TODO: should i switch the order of input out put to take `input $param_name:ident: $param_type:ty,`
+    // There are couple of ways to make this macro more readable, I could also add for parentheses.
     {$(
         $raw_func:ident, $new_func:ident, $raw_ptr_var:ident, $(input $param_type:ty, $param_name:ident,)* $(output $ret_type:ty, $tmp_ident:ident,)* $(takes $mut_tag:tt,)? #[$doc:meta];
     )*} => {
@@ -78,13 +80,13 @@ $(
     }
 )*
     };
-    // TODO: add simple return type one
 }
 
 
 /// This macro is used specifically to wrap PETSc preallocate functions. It cover all the different 
 /// input patterns for that. 
 /// These can be repeated multiple times to define multiple like methods.
+// TODO: make into one case like `wrap_simple_petsc_member_funcs!` if we can
 macro_rules! wrap_prealloc_petsc_member_funcs {
     {$(
         $raw_func:ident, $new_func:ident, $raw_ptr_var:ident, $arg1:ident, $arg2:ident, #[$doc:meta];

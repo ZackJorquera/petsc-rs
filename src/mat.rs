@@ -351,16 +351,12 @@ impl<'a> Mat<'a> {
 }
 
 // Macro impls
-impl<'a> Mat<'a> {
+impl<'a> Mat<'a> {    
     wrap_simple_petsc_member_funcs! {
-        MatSetFromOptions, set_from_options, mat_p, #[doc = "Configures the Mat from the options database."];
-        MatSetUp, set_up, mat_p, #[doc = "Sets up the internal matrix data structures for later use"];
-    }
-    
-    // TODO: maybe these two functions should be combined with a lambda to run in between
-    wrap_simple_petsc_member_funcs! {
-        MatAssemblyBegin, assembly_begin, mat_p, assembly_type, MatAssemblyType, #[doc = "Begins assembling the matrix. This routine should be called after completing all calls to MatSetValues()."];
-        MatAssemblyEnd, assembly_end, mat_p, assembly_type, MatAssemblyType, #[doc = "Completes assembling the matrix. This routine should be called after MatAssemblyBegin()."];
+        MatSetFromOptions, set_from_options, mat_p, takes mut, #[doc = "Configures the Mat from the options database."];
+        MatSetUp, set_up, mat_p, takes mut, #[doc = "Sets up the internal matrix data structures for later use"];
+        MatAssemblyBegin, assembly_begin, mat_p, input MatAssemblyType, assembly_type, takes mut, #[doc = "Begins assembling the matrix. This routine should be called after completing all calls to MatSetValues()."];
+        MatAssemblyEnd, assembly_end, mat_p, input MatAssemblyType, assembly_type, takes mut, #[doc = "Completes assembling the matrix. This routine should be called after MatAssemblyBegin()."];
     }
 
     // TODO: there is more to each of these allocations that i should add support for
