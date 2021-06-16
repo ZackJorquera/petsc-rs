@@ -157,7 +157,7 @@ fn main() -> petsc_rs::Result<()> {
     // View the exact solution vector if desired
     if view_exact_sol
     {
-        let viewer = Viewer::ascii_get_stdout(petsc.world())?;
+        let viewer = Viewer::create_ascii_stdout(petsc.world())?;
         u.view_with(&viewer)?;
     }
 

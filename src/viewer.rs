@@ -32,8 +32,7 @@ impl_petsc_object_funcs!{ Viewer, viewer_p }
 
 impl<'a> Viewer<'a> {
     /// Creates a ASCII PetscViewer shared by all processors in a communicator.
-    // TODO: create `Petsc::viewer_ascii_get_stdout()`
-    pub fn ascii_get_stdout(world: &'a dyn Communicator) -> Result<Self>
+    pub fn create_ascii_stdout(world: &'a dyn Communicator) -> Result<Self>
     {
         let mut viewer_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_sys::PetscViewerASCIIGetStdout(world.as_raw(), viewer_p.as_mut_ptr()) };

@@ -133,7 +133,7 @@ fn main() -> petsc_rs::Result<()> {
     snes.solve(None, &mut x)?;
     if hard_flg {
         //todo!();
-        let viewer = Viewer::ascii_get_stdout(petsc.world())?;
+        let viewer = Viewer::create_ascii_stdout(petsc.world())?;
         x.view_with(&viewer)?;
         //r.view_with(&viewer)?;
         // TODO: view x, r, and f (f is from SNESGetFunction)

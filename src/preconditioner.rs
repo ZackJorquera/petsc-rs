@@ -1,6 +1,4 @@
-//! The Scalable Linear Equations Solvers (KSP) component provides an easy-to-use interface to 
-//! the combination of a Krylov subspace iterative method and a preconditioner (in the [KSP](crate::ksp) and [PC](crate::pc) 
-//! components, respectively) or a sequential direct solver. 
+//! The preconditioner used by the [KSP](crate::ksp).
 //!
 //! KSP users can set various preconditioning options at runtime via the options database 
 //! (e.g., -pc_type jacobi ). KSP users can also set PC options directly in application codes by 
@@ -76,25 +74,21 @@ impl<'a> PC<'a> {
     // or we could do `Rc<RefCell<Mat>>` so that when you remove the mats we can give mut access back.
     pub fn set_operators(&mut self, a_mat: Option<Rc<Mat<'a>>>, p_mat: Option<Rc<Mat<'a>>>) -> Result<()>
     {
-        // TODO: should we make a_mat an `Rc<RefCell<Mat>>`
+        // TODO: should we make a_mat an `Rc<RefCell<Mat>>`, `Rc<Mat>`, or just a `Mat`
 
-        // TODO: make `set_operators_single_mat` (if this consumes a_mat and p_mat)
+        // TODO: make `set_operators_single_mat` (if this consumes a_mat and p_mat) so that you can set
+        // them to be the same.
 
-        // Should this function consume the mats? Right now once call this function you can not edit the mats with
-        // out first removing them.
+        // Should this function consume the mats? Right now you have to turn the mats into `Rc`s which
+        // means you loose mutable access, even if you remove them.
 
-        // TODO: i am 100% not doing this correctly. This is might be unsafe, here are the docs:
-        // https://petsc.org/release/docs/manualpages/KSP/KSPSetOperators.html#KSPSetOperators
-        // TODO: if you set a_mat and p_mat to be the same, under the hood they are refrenc counted. Does our current setup
-        // account for that? idk, i think it does, but idk
         let ierr = unsafe { petsc_raw::PCSetOperators(self.pc_p,
             a_mat.as_ref().map_or(std::ptr::null_mut(), |m| m.mat_p), 
             p_mat.as_ref().map_or(std::ptr::null_mut(), |m| m.mat_p)) };
         Petsc::check_error(self.world, ierr)?;
 
-        // drop everything as it is getting replaced. (note under the hood MatDestroy is called on both of them).
-        // let _ = self.owned_amat.take();
-        // let _ = self.owned_pmat.take();
+        // drop everything as it is getting replaced. (note under the hood MatDestroy is called on both of
+        // them each time `PCSetOperators` is called).
         let _ = self.ref_amat.take();
         let _ = self.ref_pmat.take();
 
@@ -103,6 +97,36 @@ impl<'a> PC<'a> {
 
         Ok(())
     }
+
+    // /// Sets the matrix associated with the linear system and a (possibly)
+    // /// different one associated with the preconditioner.
+    // ///
+    // /// Note, this method will borrow `a_mat` and `p_mat` as mutable until they are dropped.
+    // /// Passing a `None` for `a_mat` or `p_mat` removes the matrix that is currently used.
+    // /// This will drop the mutable borrows taken from the `RefCells` giving mutable access
+    // /// back to the caller.
+    // pub fn set_operators(&mut self, a_mat: Option<Rc<RefCell<Mat<'a>>>>, p_mat: Option<Rc<RefCell<Mat<'a>>>>) -> Result<()>
+    // {
+    //     // drop everything as it is getting replaced. (note under the hood MatDestroy is called on both of
+    //     // them each time `PCSetOperators` is called).
+    //     // let _ = self.ref_amat.take();
+    //     // let _ = self.ref_pmat.take();
+    //
+    //     let ierr = unsafe { petsc_raw::PCSetOperators(self.pc_p,
+    //         a_mat.as_ref().map_or(std::ptr::null_mut(), |m| m.borrow().mat_p), 
+    //         p_mat.as_ref().map_or(std::ptr::null_mut(), |m| m.borrow().mat_p)) };
+    //     Petsc::check_error(self.world, ierr)?;
+    //
+    //     let _ = self.a_mat.take();
+    //     let _ = self.p_mat.take();
+    //
+    //     self.a_mat = a_mat;
+    //     self.p_mat = p_mat;
+    //     // self.ref_amat = self.a_mat.map(|m| m.borrow_mut());
+    //     // self.ref_pmat = self.p_mat.map(|m| m.borrow_mut());
+    //
+    //     Ok(())
+    // }
 }
 
 // Macro impls

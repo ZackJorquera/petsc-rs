@@ -5,16 +5,8 @@
 #![allow(missing_docs)]
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
-// Redefined some stuff from `petscsys.h`
-// Im creating variables with the fortran binding names when I can
-// I would like to have these defined in the petsc_wrapper.h file, but 
-// bindgen seems to not be able to turn them into rust equivalents like bellow.
-// https://github.com/rust-lang/rust-bindgen/issues/316
-pub const PETSC_DECIDE_INTEGER: PetscInt = -1;
-pub const PETSC_DETERMINE_INTEGER: PetscInt = PETSC_DECIDE_INTEGER;
-
-pub const PETSC_DEFAULT_INTEGER: PetscInt = -2;
-pub const PETSC_DEFAULT_REAL: PetscReal = -2.0;
+pub const PETSC_DEFAULT_INTEGER: PetscInt = PETSC_DEFAULT;
+pub const PETSC_DEFAULT_REAL: PetscReal = PETSC_DEFAULT as PetscReal;
 
 // Redefined stuff from `petscpctypes.h`
 /// This table is from: <https://petsc.org/release/docs/manualpages/PC/PCType.html#PCType>
