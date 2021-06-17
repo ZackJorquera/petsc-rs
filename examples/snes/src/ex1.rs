@@ -6,6 +6,8 @@
 //! $ cargo build --bin ex1
 //! $ mpiexec -n 1 target/debug/ex1
 //! ```
+//!
+//! Note, this example does not support complex numbers
 
 static HELP_MSG: &str = "Newton's method for a two-variable system, sequential.\n\n";
 
@@ -147,7 +149,7 @@ fn from_function2(_snes: &SNES, x: &Vector, f: &mut Vector) -> petsc_rs::Result<
     let x_view = x.view()?;
     let mut f_view = f.view_mut()?;
 
-    f_view[0] = f64::sin(3.0 * x_view[0]) + x_view[0];
+    f_view[0] = PetscScalar::sin(3.0 * x_view[0]) + x_view[0];
     f_view[1] = x_view[1];
 
     Ok(())
@@ -156,7 +158,7 @@ fn from_function2(_snes: &SNES, x: &Vector, f: &mut Vector) -> petsc_rs::Result<
 fn from_jacobian2(_snes: &SNES, x: &Vector, jac: &mut Mat) -> petsc_rs::Result<()> {
     let x_view = x.view()?;
 
-    jac.assemble_with([(0,0,3.0*f64::cos(3.0*x_view[0])+1.0), (1,1,1.0)],
+    jac.assemble_with([(0,0,3.0*PetscScalar::cos(3.0*x_view[0])+1.0), (1,1,1.0)],
         InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
 
     Ok(())

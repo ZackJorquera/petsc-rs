@@ -27,6 +27,10 @@ pub mod prelude {
         Petsc,
         PetscErrorKind,
         InsertMode,
+        PetscInt,
+        PetscScalar,
+        PetscReal,
+        PetscComplex,
         petsc_println,
         vector::{Vector, NormType, VecOption, },
         mat::{Mat, MatAssemblyType, MatOption, MatDuplicateOption, },
@@ -497,3 +501,33 @@ impl Petsc {
         Viewer::create_ascii_stdout(self.world())
     }
 }
+
+// ----------------------------------------------------
+// This is a test, I want to find the best way to do it
+// ----------------------------------------------------
+//pub use petsc_raw::{PetscInt, PetscScalar2 as PetscScalar, PetscReal, PetscComplex2 as PetscComplex};
+
+// TODO: when PetscScalar is complex it uses the __BindgenComplex type which doesn't really have
+// anything implemented for it. It would be way better to use the num_complex::Complex type as it
+// has the same layout, but has the num trait implemented for it and everything we would want.
+
+/// PETSc scalar type.
+///
+/// Can represent either a real or complex number in varying levels of precision. The specific 
+/// representation can be set by features for [`petsc-sys`](#).
+///
+/// Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
+/// float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
+/// call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
+/// but if `PetscScalar` is complex it will construct a complex value which the imaginary part being
+/// the default value (i.e. the underling type must implement `Default`).
+///
+/// # Example
+///
+/// ```
+/// # use petsc_rs::prelude::*;
+/// // This will always work
+/// let a = PetscScalar::from(1.5);
+/// ```
+pub type PetscScalar = petsc_raw::PetscScalar;
+pub use petsc_raw::{PetscInt, PetscReal, PetscComplex};

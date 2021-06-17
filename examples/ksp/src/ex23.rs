@@ -27,7 +27,7 @@ use opt::*;
 struct Opt {
     /// Size of the vector and matrix
     #[structopt(short, long, default_value = "10")]
-    num_elems: i32,
+    num_elems: PetscInt,
 
     /// use `-- -help` for petsc help
     #[structopt(subcommand)]
@@ -97,16 +97,21 @@ fn main() -> petsc_rs::Result<()> {
     /*
         Assemble matrix
     */
+    // Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
+    // float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
+    // call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
+    // but if `PetscScalar` is complex it will construct a complex value which the imaginary part being
+    // the default value (i.e. the underling type must implement `Default`).
     A.assemble_with(vec_ownership_range.map(|i| (-1..=1).map(move |j| (i,i+j))).flatten()
             .filter(|&(i,j)| i < n && j < n) // we could also filter out negatives, but assemble_with does that for us
-            .map(|(i,j)| if i == j { (i, j, 2.0) }
-                         else { (i, j, -1.0) }),
+            .map(|(i,j)| { if i == j { (i, j, PetscScalar::from(2.0)) }
+                           else { (i, j, PetscScalar::from(-1.0)) } }),
         InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
 
     /*
         Set exact solution; then compute right-hand-side vector.
     */
-    u.set_all(1.0)?;
+    u.set_all(PetscScalar::from(1.0))?;
     Mat::mult(&A, &u, &mut b)?;
     // petsc_println!(petsc, "b: {:?}", b.get_values(0..n)?);
 
@@ -160,7 +165,7 @@ fn main() -> petsc_rs::Result<()> {
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
                       Check the solution and clean up
      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
-    x.axpy(-1.0, &u)?;
+    x.axpy(PetscScalar::from(-1.0), &u)?;
     let x_norm = x.norm(NormType::NORM_2)?;
     let iters = ksp.get_iteration_number()?;
     petsc_println!(petsc.world(), "Norm of error {:.5e}, Iters {}", x_norm, iters);

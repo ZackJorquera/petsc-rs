@@ -134,8 +134,8 @@ impl<'a> KSP<'a> {
     /// * `atol` - The absolute convergence tolerance absolute size of the (possibly preconditioned) residual norm
     /// * `dtol` - the divergence tolerance, amount (possibly preconditioned) residual norm can increase before KSPConvergedDefault() concludes that the method is diverging
     /// * `max_iters` - Maximum number of iterations to use
-    pub fn set_tolerances(&mut self, rtol: Option<f64>, atol: Option<f64>, 
-            dtol: Option<f64>, max_iters: Option<i32>) -> Result<()>
+    pub fn set_tolerances(&mut self, rtol: Option<PetscReal>, atol: Option<PetscReal>, 
+            dtol: Option<PetscReal>, max_iters: Option<PetscInt>) -> Result<()>
     {
         let ierr = unsafe { petsc_raw::KSPSetTolerances(
             self.ksp_p, rtol.unwrap_or(petsc_raw::PETSC_DEFAULT_REAL), atol.unwrap_or(petsc_raw::PETSC_DEFAULT_REAL),
@@ -157,7 +157,7 @@ impl<'a> KSP<'a> {
     wrap_simple_petsc_member_funcs! {
         KSPSetFromOptions, set_from_options, ksp_p, takes mut, #[doc = "Sets KSP options from the options database. This routine must be called before KSPSetUp() if the user is to be allowed to set the Krylov type."];
         KSPSetUp, set_up, ksp_p, takes mut, #[doc = "Sets up the internal data structures for the later use of an iterative solver. . This will be automatically called with [`KSP::solve()`]."];
-        KSPGetIterationNumber, get_iteration_number, ksp_p, output i32, iter_num, #[doc = "Gets the current iteration number; if the KSPSolve() is complete, returns the number of iterations used."];
+        KSPGetIterationNumber, get_iteration_number, ksp_p, output PetscInt, iter_num, #[doc = "Gets the current iteration number; if the KSPSolve() is complete, returns the number of iterations used."];
     }
 }
 

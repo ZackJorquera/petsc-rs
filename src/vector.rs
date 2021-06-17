@@ -16,13 +16,13 @@ pub struct Vector<'a> {
 /// A immutable view of a Vector with Deref to slice.
 pub struct VectorView<'a, 'b> {
     vec: &'b Vector<'a>,
-    array: *const f64,
+    array: *const PetscScalar,
 }
 
 /// A mutable view of a Vector with Deref to slice.
 pub struct VectorViewMut<'a, 'b> {
     vec: &'b mut Vector<'a>,
-    array: *mut f64,
+    array: *mut PetscScalar,
 }
 
 impl<'a> Drop for Vector<'a> {
@@ -80,15 +80,15 @@ impl<'a> Vector<'a> {
     /// The inputs can be `None` to have PETSc decide the size.
     /// `local_size` and `global_size` cannot be both `None`. If one processor calls this with
     /// `global_size` of `None` then all processors must, otherwise the program will hang.
-    pub fn set_sizes(&mut self, local_size: Option<i32>, global_size: Option<i32>) -> Result<()> {
+    pub fn set_sizes(&mut self, local_size: Option<PetscInt>, global_size: Option<PetscInt>) -> Result<()> {
         let ierr = unsafe { petsc_raw::VecSetSizes(
-            self.vec_p, local_size.unwrap_or(petsc_raw::PETSC_DECIDE), 
-            global_size.unwrap_or(petsc_raw::PETSC_DECIDE)) };
+            self.vec_p, local_size.unwrap_or(petsc_raw::PETSC_DECIDE as PetscInt), 
+            global_size.unwrap_or(petsc_raw::PETSC_DECIDE as PetscInt)) };
         Petsc::check_error(self.world, ierr)
     }
 
     /// Computes self += alpha * other
-    pub fn axpy(&mut self, alpha: f64, other: &Vector) -> Result<()>
+    pub fn axpy(&mut self, alpha: PetscScalar, other: &Vector) -> Result<()>
     {
         let ierr = unsafe { petsc_raw::VecAXPY(self.vec_p, alpha, other.vec_p) };
         Petsc::check_error(self.world, ierr)
@@ -152,13 +152,13 @@ impl<'a> Vector<'a> {
     /// v.assembly_end().unwrap();
     /// assert_eq!(&v.get_values(0..10).unwrap()[..], &[2.1,0.0,2.0,2.2,0.0,0.0,0.0,3.3,3.0,8.4]);
     /// ```
-    pub fn set_values(&mut self, ix: &[i32], v: &[f64], iora: InsertMode) -> Result<()>
+    pub fn set_values(&mut self, ix: &[PetscInt], v: &[PetscScalar], iora: InsertMode) -> Result<()>
     {
         // TODO: should I do these asserts?
         assert!(iora == InsertMode::INSERT_VALUES || iora == InsertMode::ADD_VALUES);
         assert_eq!(ix.len(), v.len());
 
-        let ni = ix.len() as i32;
+        let ni = ix.len() as PetscInt;
         let ierr = unsafe { petsc_raw::VecSetValues(self.vec_p, ni, ix.as_ptr(), v.as_ptr(), iora) };
         Petsc::check_error(self.world, ierr)
     }
@@ -197,14 +197,14 @@ impl<'a> Vector<'a> {
     /// ```
     pub fn assemble_with<I>(&mut self, iter_builder: I, iora: InsertMode) -> Result<()>
     where
-        I: IntoIterator<Item = (i32, f64)>
+        I: IntoIterator<Item = (PetscInt, PetscScalar)>
     {
         // We don't actually care about the num_inserts value, we just need something that
         // implements `Sum` so we can use the sum method and `()` does not.
         let _num_inserts = iter_builder.into_iter().map(|(ix, v)| {
             self.set_values(std::slice::from_ref(&ix),
                 std::slice::from_ref(&v), iora).map(|_| 1)
-        }).sum::<Result<i32>>()?;
+        }).sum::<Result<PetscInt>>()?;
         // Note, `sum()` will short-circuit the iterator if an error is encountered.
 
         self.assembly_begin()?;
@@ -240,9 +240,9 @@ impl<'a> Vector<'a> {
     /// assert_eq!(&v.get_values(0..10).unwrap()[..], &[1.1,0.0,2.2,0.0,0.0,0.0,0.0,3.3,0.0,4.4]);
     /// assert_eq!(&v.get_values((0..5).map(|v| v*2)).unwrap()[..], &[1.1,2.2,0.0,0.0,0.0]);
     /// ```
-    pub fn get_values<T>(&self, ix: T) -> Result<Vec<f64>>
+    pub fn get_values<T>(&self, ix: T) -> Result<Vec<PetscScalar>>
     where
-        T: IntoIterator<Item = i32>,
+        T: IntoIterator<Item = PetscInt>,
         <T as IntoIterator>::IntoIter: ExactSizeIterator
     {
         // TODO: i added Vector::view which returns a slice, do we still need this method?
@@ -250,9 +250,9 @@ impl<'a> Vector<'a> {
         let ix_iter = ix.into_iter();
         let ni = ix_iter.len();
         let ix_array = ix_iter.collect::<Vec<_>>();
-        let mut out_vec = vec![f64::default();ni];
+        let mut out_vec = vec![PetscScalar::default();ni];
 
-        let ierr = unsafe { petsc_raw::VecGetValues(self.vec_p, ni as i32, ix_array.as_ptr(), out_vec[..].as_mut_ptr()) };
+        let ierr = unsafe { petsc_raw::VecGetValues(self.vec_p, ni as PetscInt, ix_array.as_ptr(), out_vec[..].as_mut_ptr()) };
         Petsc::check_error(self.world, ierr)?;
 
         Ok(out_vec)
@@ -275,7 +275,7 @@ impl<'a> Vector<'a> {
     /// // comm world.
     /// let values = [0.0,1.0,2.0,3.0,4.0,5.0,6.0];
     /// let mut v = petsc.vec_create()?;
-    /// v.set_sizes(None, Some(values.len() as i32))?;
+    /// v.set_sizes(None, Some(values.len() as PetscInt))?;
     /// v.set_from_options()?;
     ///
     /// let vec_ownership_range = v.get_ownership_range()?;
@@ -295,9 +295,9 @@ impl<'a> Vector<'a> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn get_ownership_range(&self) -> Result<std::ops::Range<i32>> {
-        let mut low = MaybeUninit::<i32>::uninit();
-        let mut high = MaybeUninit::<i32>::uninit();
+    pub fn get_ownership_range(&self) -> Result<std::ops::Range<PetscInt>> {
+        let mut low = MaybeUninit::<PetscInt>::uninit();
+        let mut high = MaybeUninit::<PetscInt>::uninit();
         let ierr = unsafe { petsc_raw::VecGetOwnershipRange(self.vec_p, low.as_mut_ptr(), high.as_mut_ptr()) };
         Petsc::check_error(self.world, ierr)?;
 
@@ -309,8 +309,8 @@ impl<'a> Vector<'a> {
     /// This method assumes that the vectors are laid
     /// out with the first n1 elements on the first processor, next n2 elements on the second, etc.
     /// For certain parallel layouts this range may not be well defined.
-    pub fn get_ownership_ranges(&self) -> Result<Vec<std::ops::Range<i32>>> {
-        let mut array = MaybeUninit::<*const i32>::uninit();
+    pub fn get_ownership_ranges(&self) -> Result<Vec<std::ops::Range<PetscInt>>> {
+        let mut array = MaybeUninit::<*const PetscInt>::uninit();
         let ierr = unsafe { petsc_raw::VecGetOwnershipRanges(self.vec_p, array.as_mut_ptr()) };
         Petsc::check_error(self.world, ierr)?;
 
@@ -438,14 +438,14 @@ impl<'a> Vector<'a> {
     /// let mut v = Vector::from_slice(petsc.world(), &values)?;
     ///
     /// let v_view = v.view()?;
-    /// assert_eq!(v.get_local_size()?, values.len() as i32);
+    /// assert_eq!(v.get_local_size()?, values.len() as PetscInt);
     /// assert_eq!(&v_view[..], &values);
     /// # Ok(())
     /// # }
     /// ```
-    pub fn from_slice(world: &'a dyn Communicator, slice: &[f64]) -> Result<Self> {
+    pub fn from_slice(world: &'a dyn Communicator, slice: &[PetscScalar]) -> Result<Self> {
         let mut v = Vector::create(world)?;
-        v.set_sizes(Some(slice.len() as i32), None)?; // create vector of size 10
+        v.set_sizes(Some(slice.len() as PetscInt), None)?; // create vector of size 10
         v.set_from_options()?;
         let ix = v.get_ownership_range()?.collect::<Vec<_>>();
         v.set_values(&ix, slice, InsertMode::INSERT_VALUES)?;
@@ -478,7 +478,7 @@ impl Drop for VectorView<'_, '_> {
 impl<'a, 'b> VectorViewMut<'a, 'b> {
     /// Constructs a VectorViewMut from a Vector reference
     fn new(vec: &'b mut Vector<'a>) -> Result<Self> {
-        let mut array = MaybeUninit::<*mut f64>::uninit();
+        let mut array = MaybeUninit::<*mut PetscScalar>::uninit();
         let ierr = unsafe { petsc_raw::VecGetArray(vec.vec_p, array.as_mut_ptr()) };
         Petsc::check_error(vec.world, ierr)?;
 
@@ -489,7 +489,7 @@ impl<'a, 'b> VectorViewMut<'a, 'b> {
 impl<'a, 'b> VectorView<'a, 'b> {
     /// Constructs a VectorViewMut from a Vector reference
     fn new(vec: &'b Vector<'a>) -> Result<Self> {
-        let mut array = MaybeUninit::<*const f64>::uninit();
+        let mut array = MaybeUninit::<*const PetscScalar>::uninit();
         let ierr = unsafe { petsc_raw::VecGetArrayRead(vec.vec_p, array.as_mut_ptr()) };
         Petsc::check_error(vec.world, ierr)?;
 
@@ -498,21 +498,21 @@ impl<'a, 'b> VectorView<'a, 'b> {
 }
 
 impl Deref for VectorViewMut<'_, '_> {
-    type Target = [f64];
-    fn deref(&self) -> &[f64] {
+    type Target = [PetscScalar];
+    fn deref(&self) -> &[PetscScalar] {
         unsafe { std::slice::from_raw_parts(self.array, self.vec.get_local_size().unwrap() as usize) }
     }
 }
 
 impl DerefMut for VectorViewMut<'_, '_> {
-    fn deref_mut(&mut self) -> &mut [f64] {
+    fn deref_mut(&mut self) -> &mut [PetscScalar] {
         unsafe { std::slice::from_raw_parts_mut(self.array, self.vec.get_local_size().unwrap() as usize) }
     }
 }
 
 impl Deref for VectorView<'_, '_> {
-    type Target = [f64];
-    fn deref(&self) -> &[f64] {
+    type Target = [PetscScalar];
+    fn deref(&self) -> &[PetscScalar] {
         unsafe { std::slice::from_raw_parts(self.array, self.vec.get_local_size().unwrap() as usize) }
     }
 }
@@ -524,10 +524,10 @@ impl<'a> Vector<'a> {
         VecSetUp, set_up, vec_p, takes mut, #[doc = "Sets up the internal vector data structures for the later use."];
         VecAssemblyBegin, assembly_begin, vec_p, takes mut, #[doc = "Begins assembling the vector. This routine should be called after completing all calls to VecSetValues()."];
         VecAssemblyEnd, assembly_end, vec_p, takes mut, #[doc = "Completes assembling the vector. This routine should be called after VecAssemblyBegin()."];
-        VecSet, set_all, vec_p, input f64, alpha, takes mut, #[doc = "Sets all components of a vector to a single scalar value.\n\nYou CANNOT call this after you have called [`Vector::set_values()`]."];
-        VecGetLocalSize, get_local_size, vec_p, output i32, ls, #[doc = "Returns the number of elements of the vector stored in local memory."];
-        VecGetSize, get_global_size, vec_p, output i32, gs, #[doc = "Returns the global number of elements of the vector."];
-        VecNorm, norm, vec_p, input NormType, norm_type, output f64, tmp1, #[doc = "Computes the vector norm."];
+        VecSet, set_all, vec_p, input PetscScalar, alpha, takes mut, #[doc = "Sets all components of a vector to a single scalar value.\n\nYou CANNOT call this after you have called [`Vector::set_values()`]."];
+        VecGetLocalSize, get_local_size, vec_p, output PetscInt, ls, #[doc = "Returns the number of elements of the vector stored in local memory."];
+        VecGetSize, get_global_size, vec_p, output PetscInt, gs, #[doc = "Returns the global number of elements of the vector."];
+        VecNorm, norm, vec_p, input NormType, norm_type, output PetscReal, tmp1, #[doc = "Computes the vector norm."];
     }
 }
 

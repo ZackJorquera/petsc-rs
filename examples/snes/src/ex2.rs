@@ -8,6 +8,8 @@
 //! $ mpiexec -n 1 target/debug/ex2
 //! Norm of error 1.49751e-10, Iters 3
 //! ```
+//!
+//! Note, this example does not support complex numbers
 
 static HELP_MSG: &str = "Newton method to solve u'' + u^{2} = f, sequentially.\n\
 This example employs a user-defined monitoring routine.\n\n";
@@ -34,7 +36,7 @@ fn main() -> petsc_rs::Result<()> {
         Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
     }
 
-    let h = 1.0/(n as f64 - 1.0);
+    let h = 1.0/(n as PetscScalar - 1.0);
 
     /*
         Note that we form 1 vector from scratch and then duplicate as needed.
@@ -54,12 +56,12 @@ fn main() -> petsc_rs::Result<()> {
         Store right-hand-side of PDE and exact solution
     - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
     u.assemble_with((0..n).map(|i| {
-        let xp = i as f64 * h;
-        (i, f64::powi(xp, 3))
+        let xp = i as PetscScalar * h;
+        (i, PetscScalar::powi(xp, 3))
     }), InsertMode::INSERT_VALUES)?;
     g.assemble_with((0..n).map(|i| {
-        let xp = i as f64 * h;
-        (i, 6.0*xp + f64::powi(xp+1.0e-12, 6)) // +1.e-12 is to prevent 0^6
+        let xp = i as PetscScalar * h;
+        (i, 6.0*xp + PetscScalar::powi(xp+1.0e-12, 6)) // +1.e-12 is to prevent 0^6
     }), InsertMode::INSERT_VALUES)?;
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -97,7 +99,7 @@ fn main() -> petsc_rs::Result<()> {
         let mut f_view = f.view_mut()?;
         let g_view = g.view()?;
 
-        let d = f64::powi(n as f64 - 1.0, 2);
+        let d = PetscScalar::powi(n as PetscScalar - 1.0, 2);
 
         f_view[0] = x_view[0];
         for i in 1..(n as usize - 1) {
@@ -141,7 +143,7 @@ fn main() -> petsc_rs::Result<()> {
 
         let x_view = x.view()?;
 
-        let d = f64::powi(n as f64 - 1.0, 2);
+        let d = PetscScalar::powi(n as PetscScalar - 1.0, 2);
 
         ap_mat.assemble_with((0..n).map(|i| if i == 0 || i == n-1{ vec![(i,i,1.0)] }
                                             else { vec![(i,i-1,d), (i,i,-2.0*d+2.0*x_view[i as usize]), (i,i+1,d)] })

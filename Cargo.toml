@@ -6,6 +6,9 @@ edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = ["petsc-sys/default"]
+
 [dependencies]
 # adding libffi-sys is a work around, mpi requeres libffi which will fail to compile on WSL2 without 
 # the `system` feature so we require libffi to be already be install everywhere. This seems to be an
@@ -13,4 +16,4 @@ edition = "2018"
 # doesn't seem to work.
 libffi-sys = { version = "*", features = ["system"] }
 mpi = {git = "https://github.com/ZackJorquera/rsmpi.git", branch = "trait_object_safety", default-features = false }
-petsc-sys = { path = "./petsc-sys/" }
+petsc-sys = { path = "./petsc-sys/", default-features = false }

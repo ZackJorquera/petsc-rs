@@ -10,33 +10,29 @@ use std::process::Command;
 
 use quote::ToTokens;
 
-// TODO: use types from rsmpi when i can over Petsc types
-// from: https://github.com/rsmpi/rsmpi/blob/master/mpi-sys/src/rsmpi.h
-
-// TODO: the `PetscScalar` type can be real or complex depending of compiler flags
-// We should account for that in the code, right now it just uses reals
-// https://petsc.org/release/docs/manualpages/Sys/PetscScalar.html#PetscScalar
-// it is all compile time so what we have will work
-
 fn main() {
     // TODO: get source and build petsc (idk, follow what rsmpi does maybe)
     // also look at libffi and how they do it with an external src
 
-    let features = ["CARGO_FEATURE_PETSC_SCALAR_REAL_F64",
-                    "CARGO_FEATURE_PETSC_SCALAR_COMPLEX_F64",
-                    "CARGO_FEATURE_PETSC_SCALAR_REAL_F32",
-                    "CARGO_FEATURE_PETSC_SCALAR_COMPLEX_F32",
+    let features = ["CARGO_FEATURE_PETSC_REAL_F64",
+                    "CARGO_FEATURE_PETSC_REAL_F32",
+                    "CARGO_FEATURE_PETSC_USE_COMPLEX",
                     "CARGO_FEATURE_PETSC_INT_I32",
                     "CARGO_FEATURE_PETSC_INT_I64"].iter()
         .map(|&x| env::var(x).ok().map(|o| if o == "1" { Some(x) } else { None }).flatten())
         .flatten().collect::<Vec<_>>();
 
-    let scalar_features = features.iter().filter(|a| a.contains("PETSC_SCALAR_"))
+    println!("cargo:rerun-if-env-changed=PETSC_DIR");
+    println!("cargo:rerun-if-env-changed=PETSC_ARCH");
+    println!("cargo:rerun-if-env-changed=PKG_CONFIG_PATH");
+
+    let real_features = features.iter().filter(|a| a.contains("PETSC_REAL_"))
         .copied().collect::<Vec<_>>();
+    let use_complex_feature = features.contains(&"CARGO_FEATURE_PETSC_USE_COMPLEX");
     let int_features = features.iter().filter(|a| a.contains("PETSC_INT_"))
         .copied().collect::<Vec<_>>();
     
-    assert!(scalar_features.len() == 1, "There must be exactly one \"petsc-scalar-*\" feature enabled");
+    assert!(real_features.len() == 1, "There must be exactly one \"petsc-real-*\" feature enabled");
     assert!(int_features.len() == 1, "There must be exactly one \"petsc-int-*\" feature enabled");
 
     // We do our best to find the PETSC install
@@ -61,8 +57,8 @@ fn main() {
     }
 
     let lib = match pkg_config::Config::new()
-        .atleast_version("3.10")
-        .probe("PETSc") { // case sensitive, but it should have to be maybe TODO: allow for lower case
+        .atleast_version("3.15")
+        .probe("PETSc") { // case sensitive, but it shouldn't have to be maybe TODO: allow for lower case
             Ok(lib) => lib,
             Err(err) => panic!("Could not find library \'PETSc\', Error: {:?}", err)
         };
@@ -105,10 +101,10 @@ fn main() {
         // bindings for.
         .header("src/petsc_wrapper.h")
 
-        .allowlist_function("[A-Z][a-zA-Z]*")
-        .allowlist_type("[A-Z][a-zA-Z]*")
+        .allowlist_function("[A-Z][a-zA-Z0-9]*")
+        .allowlist_type("[A-Z][a-zA-Z0-9]*")
         .allowlist_var("[A-Z][a-zA-Z]*")
-        .allowlist_var("[A-Z_]*")
+        .allowlist_var("[A-Z0-9_]*")
 
         .opaque_type("FILE")
 
@@ -156,21 +152,21 @@ fn main() {
         .collect::<Vec<_>>();
 
     // do asserts
-    match scalar_features[0]
+    match real_features[0]
     {
-        "CARGO_FEATURE_PETSC_SCALAR_REAL_F64" => assert!(petsc_use_idents.contains(&"PETSC_USE_REAL_DOUBLE".into()) &&
-                                                         !petsc_use_idents.contains(&"PETSC_USE_COMPLEX".into()),
-                                                         "PETSc is not compiled to use real `f64` for scalar"),
-        "CARGO_FEATURE_PETSC_SCALAR_REAL_F32" => assert!(petsc_use_idents.contains(&"PETSC_USE_REAL_SINGLE".into()) &&
-                                                         !petsc_use_idents.contains(&"PETSC_USE_COMPLEX".into()),
-                                                         "PETSc is not compiled to use real `f32` for scalar"),
-        "CARGO_FEATURE_PETSC_SCALAR_COMPLEX_F64" => assert!(petsc_use_idents.contains(&"PETSC_USE_REAL_DOUBLE".into()) &&
-                                                            petsc_use_idents.contains(&"PETSC_USE_COMPLEX".into()),
-                                                            "PETSc is not compiled to use complex `f64` for scalar"),
-        "CARGO_FEATURE_PETSC_SCALAR_COMPLEX_F32" => assert!(petsc_use_idents.contains(&"PETSC_USE_REAL_DOUBLE".into()) &&
-                                                            petsc_use_idents.contains(&"PETSC_USE_COMPLEX".into()),
-                                                            "PETSc is not compiled to use complex `f32` for scalar"),
-        _ => panic!("Invalid feature type for petsc scalar")
+        "CARGO_FEATURE_PETSC_REAL_F64" => assert!(petsc_use_idents.contains(&"PETSC_USE_REAL_DOUBLE".into()),
+                                                         "PETSc is not compiled to use `f64` for real"),
+        "CARGO_FEATURE_PETSC_REAL_F32" => assert!(petsc_use_idents.contains(&"PETSC_USE_REAL_SINGLE".into()),
+                                                         "PETSc is not compiled to use `f32` for real"),
+        _ => panic!("Invalid feature type for petsc real")
+    }
+
+    if use_complex_feature {
+        assert!(petsc_use_idents.contains(&"PETSC_USE_COMPLEX".into()),
+                "PETSc is not compiled to use complex for scalar");
+    } else {
+        assert!(!petsc_use_idents.contains(&"PETSC_USE_COMPLEX".into()),
+                "PETSc is not compiled to use real for scalar");
     }
     
     match int_features[0]
@@ -183,6 +179,8 @@ fn main() {
     }
 
     // TODO: allow different scalar and int types
-    assert_eq!(scalar_features[0], "CARGO_FEATURE_PETSC_SCALAR_REAL_F64", "petsc-sys currently only supports using `f64` as `PetscScalar`. Please use the `petsc-scalar-real-f64` feature.");
-    assert_eq!(int_features[0], "CARGO_FEATURE_PETSC_INT_I32", "petsc-sys currently only supports using `i32` as `PetscInt`. Please use the `petsc-int-i32` feature.");
+    // assert_eq!(real_features[0], "CARGO_FEATURE_PETSC_REAL_F64", "petsc-sys currently only supports using `f64` for reals. Please use the `petsc-real-f64` feature.");
+    // assert!(!use_complex_feature, "petsc-sys currently does not supports using complex for scalar. Please turn of the `petsc-use-complex` feature.");
+    // assert_eq!(int_features[0], "CARGO_FEATURE_PETSC_INT_I32", "petsc-sys currently only supports using `i32` as `PetscInt`. Please use the `petsc-int-i32` feature.");
+    // panic!();
 }

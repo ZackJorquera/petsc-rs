@@ -53,11 +53,11 @@ impl PetscOpt
 struct Opt {
     /// number of mesh points in x-direction (for ex2)
     #[structopt(short, default_value = "8")]
-    m: i32,
+    m: PetscInt,
     
     /// number of mesh points in y-direction (for ex2)
     #[structopt(short, default_value = "7")]
-    n: i32,
+    n: PetscInt,
 
     /// write exact solution vector to stdout (for ex2)
     #[structopt(short, long)]
@@ -65,7 +65,7 @@ struct Opt {
 
     /// Size of the vector and matrix (for ex23)
     #[structopt(short = "k", long, default_value = "10")]
-    num_elems: i32,
+    num_elems: PetscInt,
 
     /// use `-- -help` for petsc help
     #[structopt(subcommand)]
@@ -112,7 +112,7 @@ fn main() -> petsc_rs::Result<()> {
 }
 
 // TODO: make these be constructed better, right now we have two copies of this code
-fn do_ksp_ex2(petsc: &Petsc, m: i32, n: i32, view_exact_sol: bool) -> petsc_rs::Result<()> {
+fn do_ksp_ex2(petsc: &Petsc, m: PetscInt, n: PetscInt, view_exact_sol: bool) -> petsc_rs::Result<()> {
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
          Compute the matrix and right-hand-side vector that define
          the linear system, Ax = b.
@@ -164,11 +164,11 @@ fn do_ksp_ex2(petsc: &Petsc, m: i32, n: i32, view_exact_sol: bool) -> petsc_rs::
             let mut data_vec = vec![];
             let i = ii/n;
             let j = ii - i*n;
-            if i > 0   { let jj = ii - n; data_vec.push((ii, jj, -1.0)); }
-            if i < m-1 { let jj = ii + n; data_vec.push((ii, jj, -1.0)); }
-            if j > 0   { let jj = ii - 1; data_vec.push((ii, jj, -1.0)); }
-            if j < n-1 { let jj = ii + 1; data_vec.push((ii, jj, -1.0)); }
-            data_vec.push((ii, ii, 4.0));
+            if i > 0   { let jj = ii - n; data_vec.push((ii, jj, PetscScalar::from(-1.0))); }
+            if i < m-1 { let jj = ii + n; data_vec.push((ii, jj, PetscScalar::from(-1.0))); }
+            if j > 0   { let jj = ii - 1; data_vec.push((ii, jj, PetscScalar::from(-1.0))); }
+            if j < n-1 { let jj = ii + 1; data_vec.push((ii, jj, PetscScalar::from(-1.0))); }
+            data_vec.push((ii, ii, PetscScalar::from(4.0)));
             data_vec
         }).flatten(), 
         InsertMode::ADD_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
@@ -204,7 +204,7 @@ fn do_ksp_ex2(petsc: &Petsc, m: i32, n: i32, view_exact_sol: bool) -> petsc_rs::
         By default we use an exact solution of a vector with all
         elements of 1.0;
     */
-    u.set_all(1.0)?;
+    u.set_all(PetscScalar::from(1.0))?;
     Mat::mult(&A, &u, &mut b)?;
 
     // View the exact solution vector if desired
@@ -237,7 +237,7 @@ fn do_ksp_ex2(petsc: &Petsc, m: i32, n: i32, view_exact_sol: bool) -> petsc_rs::
           KSPSetFromOptions().  All of these defaults can be
           overridden at runtime, as indicated below.
     */
-    ksp.set_tolerances(Some(1.0e-2/(((m+1)*(n+1)) as f64)), Some(1.0e-50), None, None)?;
+    ksp.set_tolerances(Some(1.0e-2/(((m+1)*(n+1)) as PetscReal)), Some(1.0e-50), None, None)?;
 
     /*
         Set runtime options, e.g.,
@@ -257,7 +257,7 @@ fn do_ksp_ex2(petsc: &Petsc, m: i32, n: i32, view_exact_sol: bool) -> petsc_rs::
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
                       Check the solution and clean up
      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
-    x.axpy(-1.0, &u)?;
+    x.axpy(PetscScalar::from(-1.0), &u)?;
     let x_norm = x.norm(NormType::NORM_2)?;
     let iters = ksp.get_iteration_number()?;
     petsc_println!(petsc.world(), "(ex2) Norm of error {:.5e}, Iters {}", x_norm, iters);
@@ -271,7 +271,7 @@ fn do_ksp_ex2(petsc: &Petsc, m: i32, n: i32, view_exact_sol: bool) -> petsc_rs::
     Ok(())
 }
 
-fn do_ksp_ex23(petsc: &Petsc, n: i32, view_ksp: bool) -> petsc_rs::Result<()> {
+fn do_ksp_ex23(petsc: &Petsc, n: PetscInt, view_ksp: bool) -> petsc_rs::Result<()> {
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
          Compute the matrix and right-hand-side vector that define
          the linear system, Ax = b.
@@ -320,14 +320,14 @@ fn do_ksp_ex23(petsc: &Petsc, n: i32, view_ksp: bool) -> petsc_rs::Result<()> {
     */
     A.assemble_with(vec_ownership_range.map(|i| (-1..=1).map(move |j| (i,i+j))).flatten()
             .filter(|&(i,j)| i < n && j < n) // we could also filter out negatives, but assemble_with does that for us
-            .map(|(i,j)| if i == j { (i, j, 2.0) }
-                         else { (i, j, -1.0) }),
+            .map(|(i,j)| if i == j { (i, j, PetscScalar::from(2.0)) }
+                         else { (i, j, PetscScalar::from(-1.0)) }),
         InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
 
     /*
         Set exact solution; then compute right-hand-side vector.
     */
-    u.set_all(1.0)?;
+    u.set_all(PetscScalar::from(1.0))?;
     Mat::mult(&A, &u, &mut b)?;
     // petsc_println!(petsc, "b: {:?}", b.get_values(0..n)?);
 
@@ -383,7 +383,7 @@ fn do_ksp_ex23(petsc: &Petsc, n: i32, view_ksp: bool) -> petsc_rs::Result<()> {
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
                       Check the solution and clean up
      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
-    x.axpy(-1.0, &u)?;
+    x.axpy(PetscScalar::from(-1.0), &u)?;
     let x_norm = x.norm(NormType::NORM_2)?;
     let iters = ksp.get_iteration_number()?;
     petsc_println!(petsc.world(), "(ex23) Norm of error {:.5e}, Iters {}", x_norm, iters);

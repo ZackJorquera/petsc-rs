@@ -54,12 +54,12 @@ impl<'a> Mat<'a> {
     ///
     /// For rows and columns, local and global cannot be both None. If one processor calls this with a global of None then all processors must, otherwise the program will hang.
     /// If None is not used for the local sizes, then the user must ensure that they are chosen to be compatible with the vectors.
-    pub fn set_sizes(&mut self, local_rows: Option<i32>, local_cols: Option<i32>, global_rows: Option<i32>, global_cols: Option<i32>) -> Result<()> {
+    pub fn set_sizes(&mut self, local_rows: Option<PetscInt>, local_cols: Option<PetscInt>, global_rows: Option<PetscInt>, global_cols: Option<PetscInt>) -> Result<()> {
         let ierr = unsafe { petsc_raw::MatSetSizes(
-            self.mat_p, local_rows.unwrap_or(petsc_raw::PETSC_DECIDE), 
-            local_cols.unwrap_or(petsc_raw::PETSC_DECIDE), 
-            global_rows.unwrap_or(petsc_raw::PETSC_DECIDE), 
-            global_cols.unwrap_or(petsc_raw::PETSC_DECIDE)) };
+            self.mat_p, local_rows.unwrap_or(petsc_raw::PETSC_DECIDE as PetscInt), 
+            local_cols.unwrap_or(petsc_raw::PETSC_DECIDE as PetscInt), 
+            global_rows.unwrap_or(petsc_raw::PETSC_DECIDE as PetscInt), 
+            global_cols.unwrap_or(petsc_raw::PETSC_DECIDE as PetscInt)) };
         Petsc::check_error(self.world, ierr)
     }
 
@@ -113,7 +113,7 @@ impl<'a> Mat<'a> {
     /// //  3  4  5
     /// //  6  7  8
     /// for i in 0..n {
-    ///     let v = [i as f64 * 3.0, i as f64 * 3.0+1.0, i as f64 * 3.0+2.0];
+    ///     let v = [i as PetscScalar * 3.0, i as PetscScalar * 3.0+1.0, i as PetscScalar * 3.0+2.0];
     ///     mat.set_values(&[i], &[0,1,2], &v, InsertMode::INSERT_VALUES)?;
     /// }
     /// // You MUST assemble before you can use 
@@ -124,7 +124,7 @@ impl<'a> Mat<'a> {
     /// # mat.view_with(&viewer)?;
     ///
     /// for i in 0..n {
-    ///     let v = [i as f64 , i as f64 + 3.0, i as f64 + 6.0];
+    ///     let v = [i as PetscScalar, i as PetscScalar + 3.0, i as PetscScalar + 6.0];
     ///     mat2.set_values(&[0,1,2], &[i], &v, InsertMode::INSERT_VALUES)?;
     /// }
     /// // You MUST assemble before you can use 
@@ -140,11 +140,11 @@ impl<'a> Mat<'a> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn set_values(&mut self, idxm: &[i32], idxn: &[i32], v: &[f64], addv: InsertMode) -> Result<()> {
+    pub fn set_values(&mut self, idxm: &[PetscInt], idxn: &[PetscInt], v: &[PetscScalar], addv: InsertMode) -> Result<()> {
         let m = idxm.len();
         let n = idxn.len();
         assert_eq!(v.len(), m*n);
-        let ierr = unsafe { petsc_raw::MatSetValues(self.mat_p, m as i32, idxm.as_ptr(), n as i32,
+        let ierr = unsafe { petsc_raw::MatSetValues(self.mat_p, m as PetscInt, idxm.as_ptr(), n as PetscInt,
             idxn.as_ptr(), v.as_ptr(), addv) };
         Petsc::check_error(self.world, ierr)
     }
@@ -158,9 +158,9 @@ impl<'a> Mat<'a> {
     /// Returns the range of matrix rows owned by this processor, assuming that the matrix is laid
     /// out with the first n1 rows on the first processor, the next n2 rows on the second, etc.
     /// For certain parallel layouts this range may not be well defined.
-    pub fn get_ownership_range(&self) -> Result<std::ops::Range<i32>> {
-        let mut low = MaybeUninit::<i32>::uninit();
-        let mut high = MaybeUninit::<i32>::uninit();
+    pub fn get_ownership_range(&self) -> Result<std::ops::Range<PetscInt>> {
+        let mut low = MaybeUninit::<PetscInt>::uninit();
+        let mut high = MaybeUninit::<PetscInt>::uninit();
         let ierr = unsafe { petsc_raw::MatGetOwnershipRange(self.mat_p, low.as_mut_ptr(), high.as_mut_ptr()) };
         Petsc::check_error(self.world, ierr)?;
 
@@ -170,8 +170,8 @@ impl<'a> Mat<'a> {
     /// Returns the range of matrix rows owned by EACH processor, assuming that the matrix is laid
     /// out with the first n1 rows on the first processor, the next n2 rows on the second, etc.
     /// For certain parallel layouts this range may not be well defined.
-    pub fn get_ownership_ranges(&self) -> Result<Vec<std::ops::Range<i32>>> {
-        let mut array = MaybeUninit::<*const i32>::uninit();
+    pub fn get_ownership_ranges(&self) -> Result<Vec<std::ops::Range<PetscInt>>> {
+        let mut array = MaybeUninit::<*const PetscInt>::uninit();
         let ierr = unsafe { petsc_raw::MatGetOwnershipRanges(self.mat_p, array.as_mut_ptr()) };
         Petsc::check_error(self.world, ierr)?;
 
@@ -245,14 +245,14 @@ impl<'a> Mat<'a> {
     /// ```
     pub fn assemble_with<I>(&mut self, iter_builder: I, addv: InsertMode, assembly_type: MatAssemblyType) -> Result<()>
     where
-        I: IntoIterator<Item = (i32, i32, f64)>
+        I: IntoIterator<Item = (PetscInt, PetscInt, PetscScalar)>
     {
         // We don't actually care about the num_inserts value, we just need something that
         // implements `Sum` so we can use the sum method and `()` does not.
         let _num_inserts = iter_builder.into_iter().map(|(idxm, idxn, v)| {
             self.set_values(std::slice::from_ref(&idxm), std::slice::from_ref(&idxn),
                 std::slice::from_ref(&v), addv).map(|_| 1)
-        }).sum::<Result<i32>>()?;
+        }).sum::<Result<PetscInt>>()?;
         // Note, `sum()` will short-circuit the iterator if an error is encountered.
 
         self.assembly_begin(assembly_type)?;
@@ -285,7 +285,7 @@ impl<'a> Mat<'a> {
     /// //  3  4  5
     /// //  6  7  8
     /// mat.assemble_with((0..n).map(|i| (0..n).map(move |j| (i,j))).flatten().enumerate()
-    ///         .map(|(v, (i,j))| (i,j,v as f64)),
+    ///         .map(|(v, (i,j))| (i,j,PetscScalar::from(v as PetscReal))),
     ///     InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY);
     /// # // for debugging
     /// # let viewer = Viewer::create_ascii_stdout(petsc.world())?;
@@ -298,11 +298,11 @@ impl<'a> Mat<'a> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn get_values<T1, T2>(&self, idxm: T1, idxn: T2) -> Result<Vec<f64>>
+    pub fn get_values<T1, T2>(&self, idxm: T1, idxn: T2) -> Result<Vec<PetscScalar>>
     where
-        T1: IntoIterator<Item = i32>,
+        T1: IntoIterator<Item = PetscInt>,
         <T1 as IntoIterator>::IntoIter: ExactSizeIterator,
-        T2: IntoIterator<Item = i32>,
+        T2: IntoIterator<Item = PetscInt>,
         <T2 as IntoIterator>::IntoIter: ExactSizeIterator,
     {
         let idxm_iter = idxm.into_iter();
@@ -313,10 +313,10 @@ impl<'a> Mat<'a> {
         let ni = idxn_iter.len();
         let idxn_array = idxn_iter.collect::<Vec<_>>();
         
-        let mut out_vec = vec![f64::default(); mi * ni];
+        let mut out_vec = vec![PetscScalar::default(); mi * ni];
 
-        let ierr = unsafe { petsc_raw::MatGetValues(self.mat_p, mi as i32, idxm_array.as_ptr(),
-            ni as i32, idxn_array.as_ptr(), out_vec[..].as_mut_ptr()) };
+        let ierr = unsafe { petsc_raw::MatGetValues(self.mat_p, mi as PetscInt, idxm_array.as_ptr(),
+            ni as PetscInt, idxn_array.as_ptr(), out_vec[..].as_mut_ptr()) };
         Petsc::check_error(self.world, ierr)?;
 
         Ok(out_vec)
@@ -330,8 +330,8 @@ impl<'a> Mat<'a> {
         MatSetUp, set_up, mat_p, takes mut, #[doc = "Sets up the internal matrix data structures for later use"];
         MatAssemblyBegin, assembly_begin, mat_p, input MatAssemblyType, assembly_type, takes mut, #[doc = "Begins assembling the matrix. This routine should be called after completing all calls to MatSetValues()."];
         MatAssemblyEnd, assembly_end, mat_p, input MatAssemblyType, assembly_type, takes mut, #[doc = "Completes assembling the matrix. This routine should be called after MatAssemblyBegin()."];
-        MatGetLocalSize, get_local_size, mat_p, output i32, res1, output i32, res2, #[doc = "Returns the number of local rows and local columns of a matrix.\n\nThat is the local size of the left and right vectors as returned by `MatCreateVecs()`"];
-        MatGetSize, get_global_size, mat_p, output i32, res1, output i32, res2, #[doc = "Returns the number of global rows and columns of a matrix."];
+        MatGetLocalSize, get_local_size, mat_p, output PetscInt, res1, output PetscInt, res2, #[doc = "Returns the number of local rows and local columns of a matrix.\n\nThat is the local size of the left and right vectors as returned by `MatCreateVecs()`"];
+        MatGetSize, get_global_size, mat_p, output PetscInt, res1, output PetscInt, res2, #[doc = "Returns the number of global rows and columns of a matrix."];
     }
 
     // TODO: there is more to each of these allocations that i should add support for

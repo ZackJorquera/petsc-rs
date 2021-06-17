@@ -184,7 +184,7 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
     ///     let mut f_view = f.view_mut()?;
     ///     let g_view = g.view()?;
     ///
-    ///     let d = f64::powi(n as f64 - 1.0, 2);
+    ///     let d = PetscScalar::powi(n as PetscScalar - 1.0, 2);
     ///
     ///     // Nonlinear transformation
     ///     f_view[0] = x_view[0];
@@ -299,7 +299,7 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
     /// snes.set_jacobian_single_mat(J,|_snes, x: &Vector, ap_mat: &mut Mat| {
     ///     let x_view = x.view()?;
     ///
-    ///     let d = f64::powi(n as f64 - 1.0, 2);
+    ///     let d = PetscScalar::powi(n as PetscScalar - 1.0, 2);
     ///
     ///     ap_mat.assemble_with((0..n).map(|i| if i == 0 || i == n-1{ vec![(i,i,1.0)] }
     ///                                         else { vec![(i,i-1,d), (i,i,-2.0*d+2.0*x_view[i as usize]), (i,i+1,d)] })
@@ -398,7 +398,7 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
     /// snes.set_jacobian(J, P,|_snes, x: &Vector, a_mat: &mut Mat, p_mat: &mut Mat| {
     ///     let x_view = x.view()?;
     ///
-    ///     let d = f64::powi(n as f64 - 1.0, 2);
+    ///     let d = PetscScalar::powi(n as PetscScalar - 1.0, 2);
     ///
     ///     a_mat.assemble_with((0..n).map(|i| if i == 0 || i == n-1{ vec![(i,i,1.0)] }
     ///                                         else { vec![(i,i-1,d), (i,i,-2.0*d+2.0*x_view[i as usize]), (i,i+1,d)] })
@@ -483,8 +483,8 @@ impl<'a> SNES<'a, '_> {
     wrap_simple_petsc_member_funcs! {
         SNESSetFromOptions, set_from_options, snes_p, takes mut, #[doc = "Sets various SNES and KSP parameters from user options."];
         SNESSetUp, set_up, snes_p, takes mut, #[doc = "Sets up the internal data structures for the later use of a nonlinear solver. This will be automatically called with [`SNES::solve()`]."];
-        SNESGetIterationNumber, get_iteration_number, snes_p, output i32, snes_p, #[doc = "Gets the number of nonlinear iterations completed at this time. (<https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/SNES/SNESGetIterationNumber.html>)"];
-        SNESGetTolerances, get_tolerances, snes_p, output f64, atol, output f64, rtol, output f64, stol, output i32, maxit, output i32, maxf, #[doc = "Gets various parameters used in convergence tests."]; 
+        SNESGetIterationNumber, get_iteration_number, snes_p, output PetscInt, snes_p, #[doc = "Gets the number of nonlinear iterations completed at this time. (<https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/SNES/SNESGetIterationNumber.html>)"];
+        SNESGetTolerances, get_tolerances, snes_p, output PetscReal, atol, output PetscReal, rtol, output PetscReal, stol, output PetscInt, maxit, output PetscInt, maxf, #[doc = "Gets various parameters used in convergence tests."]; 
         SNESGetConvergedReason, get_converged_reason, snes_p, output SNESConvergedReason, conv_reas, #[doc = "Gets the reason the SNES iteration was stopped."];
     }
 }

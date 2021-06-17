@@ -1,0 +1,27 @@
+# this example tests that PETSc can be compiled and run using complex number for PetscScalar
+# the code is the exact same as for the ksp example
+
+[package]
+name = "complex-ksp"
+version = "0.1.0"
+authors = ["ZackJorquera <jorquerazack@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[bin]]
+name = "ex2"
+path = "src/ex2.rs"
+
+[dependencies]
+# adding libffi-sys is a work around, mpi requeres libffi which will fail to compile on WSL2 without 
+# the `system` feature so we require libffi to already be install everywhere. This seems to be an
+# issue with the "user-operations" feature for mpi (which is the default), but `default-features = false`
+# doesn't seem to work.
+libffi-sys = { version = "*", features = ["system"] }
+mpi = {git = "https://github.com/ZackJorquera/rsmpi.git", branch = "trait_object_safety", default-features = false }
+structopt = { version = "0.3", default-features = false }
+
+# We want to tell `petsc-sys` directly to not use the default features so that we can use other ones
+petsc-sys = { path = "../../petsc-sys/", default-features = false, features = ["petsc-real-f32", "petsc-int-i64", "petsc-use-complex"] }
+petsc-rs = { path = "../../", default-features = false }

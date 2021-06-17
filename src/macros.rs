@@ -93,7 +93,7 @@ macro_rules! wrap_prealloc_petsc_member_funcs {
     )*} => {
 $(
     #[$doc]
-    pub fn $new_func(&mut self, $arg1: i32, $arg2: ::std::option::Option<&[i32]>) -> crate::Result<()> {
+    pub fn $new_func(&mut self, $arg1: crate::PetscInt, $arg2: ::std::option::Option<&[crate::PetscInt]>) -> crate::Result<()> {
         let ierr = unsafe { crate::petsc_raw::$raw_func(self.$raw_ptr_var, $arg1, 
             $arg2.map(|o| o.as_ptr()).unwrap_or(::std::ptr::null())) };
         Petsc::check_error(self.world, ierr)
@@ -105,7 +105,7 @@ $(
     )*} => {
 $(
     #[$doc]
-    pub fn $new_func(&mut self, $arg1: i32, $arg2: ::std::option::Option<&[i32]>, $arg3: i32, $arg4: ::std::option::Option<&[i32]>) -> crate::Result<()> {
+    pub fn $new_func(&mut self, $arg1: crate::PetscInt, $arg2: ::std::option::Option<&[crate::PetscInt]>, $arg3: crate::PetscInt, $arg4: ::std::option::Option<&[crate::PetscInt]>) -> crate::Result<()> {
         let ierr = unsafe { crate::petsc_raw::$raw_func(self.$raw_ptr_var, $arg1, 
             $arg2.map(|o| o.as_ptr()).unwrap_or(::std::ptr::null()), $arg3,
             $arg4.map(|o| o.as_ptr()).unwrap_or(::std::ptr::null())) };
@@ -118,7 +118,7 @@ $(
     )*} => {
 $(
     #[$doc]
-    pub fn $new_func(&mut self, $arg1: i32, $arg2: i32, $arg3: ::std::option::Option<&[i32]>) -> crate::Result<()> {
+    pub fn $new_func(&mut self, $arg1: crate::PetscInt, $arg2: crate::PetscInt, $arg3: ::std::option::Option<&[crate::PetscInt]>) -> crate::Result<()> {
         let ierr = unsafe { crate::petsc_raw::$raw_func(self.$raw_ptr_var, $arg1, $arg2,
             $arg3.map(|o| o.as_ptr()).unwrap_or(::std::ptr::null())) };
         Petsc::check_error(self.world, ierr)
@@ -130,7 +130,7 @@ $(
     )*} => {
 $(
     #[$doc]
-    pub fn $new_func(&mut self, $arg1: i32, $arg2: i32, $arg3: ::std::option::Option<&[i32]>, $arg4: i32, $arg5: ::std::option::Option<&[i32]>) -> crate::Result<()> {
+    pub fn $new_func(&mut self, $arg1: crate::PetscInt, $arg2: crate::PetscInt, $arg3: ::std::option::Option<&[crate::PetscInt]>, $arg4: crate::PetscInt, $arg5: ::std::option::Option<&[crate::PetscInt]>) -> crate::Result<()> {
         let ierr = unsafe { crate::petsc_raw::$raw_func(self.$raw_ptr_var, $arg1, $arg2,
             $arg3.map(|o| o.as_ptr()).unwrap_or(::std::ptr::null()), $arg4,
             $arg5.map(|o| o.as_ptr()).unwrap_or(::std::ptr::null())) };
