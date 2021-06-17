@@ -4,11 +4,9 @@
 // This include file allows you to use ANY public PETSc function
 #include <petsc.h>
 
-// The PETSC_ERR variants are defined with `#define` so they don't show up with bindgen
-// At least not yet, see: https://github.com/rust-lang/rust-bindgen/issues/316
-// So some stuff from `petscerror.h` here as an enum
-// Also we renamed the variants to PETSC_ERROR_*
 
+// TODO: move this enum to the rust side, the rhs value are visable in rust
+// TODO: do we even want this to be an enum
 /// PETSc Error Codes
 typedef enum {
     /// should always be one less then the smallest value 

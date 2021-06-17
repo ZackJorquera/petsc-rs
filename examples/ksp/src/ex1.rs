@@ -143,7 +143,7 @@ fn main() -> petsc_rs::Result<()> {
         View solver info; we could instead use the option -ksp_view to
         print this info to the screen at the conclusion of KSPSolve().
     */
-    let viewer = Viewer::ascii_get_stdout(petsc.world())?;
+    let viewer = Viewer::create_ascii_stdout(petsc.world())?;
     ksp.view_with(&viewer)?;
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -

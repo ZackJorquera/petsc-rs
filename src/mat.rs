@@ -18,7 +18,6 @@ pub struct Mat<'a> {
 
 impl<'a> Drop for Mat<'a> {
     fn drop(&mut self) {
-        // TODO: if the mat has more that one reference, than the object isn't really destroyed
         unsafe {
             let ierr = petsc_raw::MatDestroy(&mut self.mat_p as *mut *mut petsc_raw::_p_Mat);
             let _ = Petsc::check_error(self.world, ierr); // TODO: should i unwrap or what idk?
@@ -31,8 +30,6 @@ pub use petsc_raw::MatOption;
 pub use petsc_raw::MatDuplicateOption;
 
 impl<'a> Mat<'a> {
-    // TODO: maybe add simple builder type
-
     /// Same at [`Petsc::mat_create()`].
     pub fn create(world: &'a dyn Communicator,) -> Result<Self> {
         let mut mat_p = MaybeUninit::uninit();
@@ -59,10 +56,10 @@ impl<'a> Mat<'a> {
     /// If None is not used for the local sizes, then the user must ensure that they are chosen to be compatible with the vectors.
     pub fn set_sizes(&mut self, local_rows: Option<i32>, local_cols: Option<i32>, global_rows: Option<i32>, global_cols: Option<i32>) -> Result<()> {
         let ierr = unsafe { petsc_raw::MatSetSizes(
-            self.mat_p, local_rows.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
-            local_cols.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
-            global_rows.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
-            global_cols.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER)) };
+            self.mat_p, local_rows.unwrap_or(petsc_raw::PETSC_DECIDE), 
+            local_cols.unwrap_or(petsc_raw::PETSC_DECIDE), 
+            global_rows.unwrap_or(petsc_raw::PETSC_DECIDE), 
+            global_cols.unwrap_or(petsc_raw::PETSC_DECIDE)) };
         Petsc::check_error(self.world, ierr)
     }
 
@@ -123,7 +120,7 @@ impl<'a> Mat<'a> {
     /// mat.assembly_begin(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
     /// mat.assembly_end(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
     /// # // for debugging
-    /// # let viewer = Viewer::ascii_get_stdout(petsc.world())?;
+    /// # let viewer = Viewer::create_ascii_stdout(petsc.world())?;
     /// # mat.view_with(&viewer)?;
     ///
     /// for i in 0..n {
@@ -187,19 +184,6 @@ impl<'a> Mat<'a> {
         Ok(array_iter.zip(slice_iter_p1).map(|(s,e)| *s..*e).collect())
     }
 
-    /// Returns the number of local rows and local columns of a matrix, 
-    /// that is the local size of the left and right vectors as returned by `MatCreateVecs()`
-    pub fn get_local_size(&self) -> Result<(i32, i32)>
-    {
-        // Could this be a macro?
-        let mut res1 = MaybeUninit::<i32>::uninit();
-        let mut res2 = MaybeUninit::<i32>::uninit();
-        let ierr = unsafe { petsc_raw::MatGetLocalSize(self.mat_p, res1.as_mut_ptr(), res2.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
-
-        Ok(unsafe { (res1.assume_init(), res2.assume_init()) })
-    }
-
     /// Sets a parameter option for a matrix. Some options may be specific to certain storage formats. 
     /// Some options determine how values will be inserted (or added). Sorted, row-oriented input will
     /// generally assemble the fastest. The default is row-oriented.
@@ -248,7 +232,7 @@ impl<'a> Mat<'a> {
     ///         .filter(|(_,_,v)| *v != 0.0 ), 
     ///     InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY);
     /// # // for debugging
-    /// # let viewer = Viewer::ascii_get_stdout(petsc.world())?;
+    /// # let viewer = Viewer::create_ascii_stdout(petsc.world())?;
     /// # mat.view_with(&viewer)?;
     /// 
     /// assert_eq!(&mat.get_values(0..n, 0..n).unwrap()[..], &[ 2.0, -1.0,  0.0,  0.0,  0.0,
@@ -266,7 +250,6 @@ impl<'a> Mat<'a> {
         // We don't actually care about the num_inserts value, we just need something that
         // implements `Sum` so we can use the sum method and `()` does not.
         let _num_inserts = iter_builder.into_iter().map(|(idxm, idxn, v)| {
-            // TODO: check the arrays are valid
             self.set_values(std::slice::from_ref(&idxm), std::slice::from_ref(&idxn),
                 std::slice::from_ref(&v), addv).map(|_| 1)
         }).sum::<Result<i32>>()?;
@@ -305,7 +288,7 @@ impl<'a> Mat<'a> {
     ///         .map(|(v, (i,j))| (i,j,v as f64)),
     ///     InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY);
     /// # // for debugging
-    /// # let viewer = Viewer::ascii_get_stdout(petsc.world())?;
+    /// # let viewer = Viewer::create_ascii_stdout(petsc.world())?;
     /// # mat.view_with(&viewer)?;
     /// 
     /// assert_eq!(&mat.get_values(0..n, 0..n).unwrap()[..], &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
@@ -322,16 +305,6 @@ impl<'a> Mat<'a> {
         T2: IntoIterator<Item = i32>,
         <T2 as IntoIterator>::IntoIter: ExactSizeIterator,
     {
-        // TODO: idxm/idxn can't be a &[i32; N] because it impl IntoIterator with Item=&i32 (same with &Vec<i32>)
-        // This might not be an issue because [i32; N] implements copy.
-
-        // TODO: make this return a slice (like how libceed has the VectorView type)
-        // For now im going to return a vector because this is a temporary testing function
-        // Really we need to use `MatView` which can get data from the whole matrix
-
-        // TODO: is this good, it feels like it would be better to just accept &[i32] and then we dont 
-        // need to do the collect. Although, it is nice to accept ranges or iters as input.
-
         let idxm_iter = idxm.into_iter();
         let mi = idxm_iter.len();
         let idxm_array = idxm_iter.collect::<Vec<_>>();
@@ -357,6 +330,8 @@ impl<'a> Mat<'a> {
         MatSetUp, set_up, mat_p, takes mut, #[doc = "Sets up the internal matrix data structures for later use"];
         MatAssemblyBegin, assembly_begin, mat_p, input MatAssemblyType, assembly_type, takes mut, #[doc = "Begins assembling the matrix. This routine should be called after completing all calls to MatSetValues()."];
         MatAssemblyEnd, assembly_end, mat_p, input MatAssemblyType, assembly_type, takes mut, #[doc = "Completes assembling the matrix. This routine should be called after MatAssemblyBegin()."];
+        MatGetLocalSize, get_local_size, mat_p, output i32, res1, output i32, res2, #[doc = "Returns the number of local rows and local columns of a matrix.\n\nThat is the local size of the left and right vectors as returned by `MatCreateVecs()`"];
+        MatGetSize, get_global_size, mat_p, output i32, res1, output i32, res2, #[doc = "Returns the number of global rows and columns of a matrix."];
     }
 
     // TODO: there is more to each of these allocations that i should add support for

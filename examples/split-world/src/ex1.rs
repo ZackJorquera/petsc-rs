@@ -210,7 +210,7 @@ fn do_ksp_ex2(petsc: &Petsc, m: i32, n: i32, view_exact_sol: bool) -> petsc_rs::
     // View the exact solution vector if desired
     if view_exact_sol
     {
-        let viewer = Viewer::ascii_get_stdout(petsc.world())?;
+        let viewer = Viewer::create_ascii_stdout(petsc.world())?;
         u.view_with(&viewer)?;
     }
 
@@ -376,7 +376,7 @@ fn do_ksp_ex23(petsc: &Petsc, n: i32, view_ksp: bool) -> petsc_rs::Result<()> {
         print this info to the screen at the conclusion of KSPSolve().
     */
     if view_ksp {
-        let viewer = Viewer::ascii_get_stdout(petsc.world())?;
+        let viewer = Viewer::create_ascii_stdout(petsc.world())?;
         ksp.view_with(&viewer)?;
     }
 

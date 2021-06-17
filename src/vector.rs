@@ -6,7 +6,6 @@ use std::ops::{Deref, DerefMut};
 
 use crate::prelude::*;
 
-// TODO: should we add a builder type so that you have to call set_type or set_from_options in order to use the vector
 /// Abstract PETSc vector object
 pub struct Vector<'a> {
     pub(crate) world: &'a dyn Communicator,
@@ -83,8 +82,8 @@ impl<'a> Vector<'a> {
     /// `global_size` of `None` then all processors must, otherwise the program will hang.
     pub fn set_sizes(&mut self, local_size: Option<i32>, global_size: Option<i32>) -> Result<()> {
         let ierr = unsafe { petsc_raw::VecSetSizes(
-            self.vec_p, local_size.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
-            global_size.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER)) };
+            self.vec_p, local_size.unwrap_or(petsc_raw::PETSC_DECIDE), 
+            global_size.unwrap_or(petsc_raw::PETSC_DECIDE)) };
         Petsc::check_error(self.world, ierr)
     }
 
@@ -203,7 +202,6 @@ impl<'a> Vector<'a> {
         // We don't actually care about the num_inserts value, we just need something that
         // implements `Sum` so we can use the sum method and `()` does not.
         let _num_inserts = iter_builder.into_iter().map(|(ix, v)| {
-            // TODO: check the arrays are valid
             self.set_values(std::slice::from_ref(&ix),
                 std::slice::from_ref(&v), iora).map(|_| 1)
         }).sum::<Result<i32>>()?;
@@ -247,16 +245,6 @@ impl<'a> Vector<'a> {
         T: IntoIterator<Item = i32>,
         <T as IntoIterator>::IntoIter: ExactSizeIterator
     {
-        // TODO: ix can't be a &[i32; N] because it impl IntoIterator with Item=&i32 (same with &Vec<i32>)
-        // This might not be an issue because [i32; N] implements copy.
-
-        // TODO: make this return a slice (like how libceed has the VectorView type)
-        // For now im going to return a vector because this is a temporary testing function
-        // Really we need to use `VecView` which can get data from the whole vector
-
-        // TODO: is this good, it feels like it would be better to just accept &[i32] and then we dont 
-        // need to do the collect. Although, it is nice to accept ranges or iters as input.
-
         // TODO: i added Vector::view which returns a slice, do we still need this method?
 
         let ix_iter = ix.into_iter();
@@ -275,6 +263,38 @@ impl<'a> Vector<'a> {
     /// This method assumes that the vectors are laid
     /// out with the first n1 elements on the first processor, next n2 elements on the second, etc.
     /// For certain parallel layouts this range may not be well defined.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use petsc_rs::prelude::*;
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// # let petsc = Petsc::init_no_args()?;
+    /// // note, cargo wont run tests with mpi so this will always be run with
+    /// // a single processor, but this example will also work in a multiprocessor
+    /// // comm world.
+    /// let values = [0.0,1.0,2.0,3.0,4.0,5.0,6.0];
+    /// let mut v = petsc.vec_create()?;
+    /// v.set_sizes(None, Some(values.len() as i32))?;
+    /// v.set_from_options()?;
+    ///
+    /// let vec_ownership_range = v.get_ownership_range()?;
+    /// let vec_ownership_range_usize = (vec_ownership_range.start as usize)..(vec_ownership_range.end as usize);
+    ///
+    /// v.assemble_with(vec_ownership_range.clone().zip(
+    ///         values[vec_ownership_range_usize.clone()].iter().cloned()),
+    ///     InsertMode::INSERT_VALUES)?;
+    ///
+    /// // or we could do:
+    /// let v2 = Vector::from_slice(petsc.world(), &values[vec_ownership_range_usize.clone()])?;
+    ///
+    /// let v_view = v.view()?;
+    /// let v2_view = v2.view()?;
+    /// assert_eq!(&v_view[..], &values[vec_ownership_range_usize.clone()]);
+    /// assert_eq!(&v_view[..], &v2_view[..]);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn get_ownership_range(&self) -> Result<std::ops::Range<i32>> {
         let mut low = MaybeUninit::<i32>::uninit();
         let mut high = MaybeUninit::<i32>::uninit();
@@ -303,7 +323,7 @@ impl<'a> Vector<'a> {
         Ok(array_iter.zip(slice_iter_p1).map(|(s,e)| *s..*e).collect())
     }
 
-    /// Create an immutable view of the vector.
+    /// Create an immutable view of the this processor's portion of the vector.
     ///
     /// # Implementation Note
     ///
@@ -318,6 +338,11 @@ impl<'a> Vector<'a> {
     /// # use petsc_rs::prelude::*;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
+    /// if petsc.world().size() != 1 {
+    ///     // note, cargo wont run tests with mpi so this will never be reached,
+    ///     // but this example will only work in a uniprocessor comm world
+    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!").unwrap();
+    /// }
     /// let mut v = petsc.vec_create()?;
     /// v.set_sizes(None, Some(10))?; // create vector of size 10
     /// v.set_from_options()?;
@@ -346,7 +371,7 @@ impl<'a> Vector<'a> {
         VectorView::new(self)
     }
 
-    /// Create an mutable view of the vector.
+    /// Create an mutable view of the this processor's portion of the vector.
     ///
     /// # Implementation Note
     ///
@@ -362,6 +387,11 @@ impl<'a> Vector<'a> {
     /// # use petsc_rs::prelude::*;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
+    /// if petsc.world().size() != 1 {
+    ///     // note, cargo wont run tests with mpi so this will never be reached,
+    ///     // but this example will only work in a uniprocessor comm world
+    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!").unwrap();
+    /// }
     /// let mut v = petsc.vec_create()?;
     /// v.set_sizes(None, Some(10))?; // create vector of size 10
     /// v.set_from_options()?;
@@ -383,7 +413,48 @@ impl<'a> Vector<'a> {
         VectorViewMut::new(self)
     }
 
-    // TODO: add `from_array`/`from_slice` and maybe also `set_slice`
+    /// Create a default Vector from a slice
+    ///
+    /// Note, [`set_from_options()`](Vector::set_from_options()) will be used while constructing the vector.
+    ///
+    /// # Parameters
+    ///
+    /// * `world` - the comm world for the vector
+    /// * `slice` - values to initialize this processor's portion of the vector data with
+    ///
+    /// The resulting vector will have the local size be set to `slice.len()`
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use petsc_rs::prelude::*;
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// # let petsc = Petsc::init_no_args()?;
+    /// // note, cargo wont run tests with mpi so this will always be run with
+    /// // a single processor, but this example will also work in a multiprocessor
+    /// // comm world.
+    /// let values = [0.0,1.0,2.0,3.0,4.0,5.0,6.0];
+    /// // Will set each processor's portion of the vector to `values`
+    /// let mut v = Vector::from_slice(petsc.world(), &values)?;
+    ///
+    /// let v_view = v.view()?;
+    /// assert_eq!(v.get_local_size()?, values.len() as i32);
+    /// assert_eq!(&v_view[..], &values);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn from_slice(world: &'a dyn Communicator, slice: &[f64]) -> Result<Self> {
+        let mut v = Vector::create(world)?;
+        v.set_sizes(Some(slice.len() as i32), None)?; // create vector of size 10
+        v.set_from_options()?;
+        let ix = v.get_ownership_range()?.collect::<Vec<_>>();
+        v.set_values(&ix, slice, InsertMode::INSERT_VALUES)?;
+        
+        v.assembly_begin()?;
+        v.assembly_end()?;
+
+        Ok(v)
+    }
 }
 
 impl Drop for VectorViewMut<'_, '_> {
@@ -429,20 +500,20 @@ impl<'a, 'b> VectorView<'a, 'b> {
 impl Deref for VectorViewMut<'_, '_> {
     type Target = [f64];
     fn deref(&self) -> &[f64] {
-        unsafe { std::slice::from_raw_parts(self.array, self.vec.get_global_size().unwrap() as usize) }
+        unsafe { std::slice::from_raw_parts(self.array, self.vec.get_local_size().unwrap() as usize) }
     }
 }
 
 impl DerefMut for VectorViewMut<'_, '_> {
     fn deref_mut(&mut self) -> &mut [f64] {
-        unsafe { std::slice::from_raw_parts_mut(self.array, self.vec.get_global_size().unwrap() as usize) }
+        unsafe { std::slice::from_raw_parts_mut(self.array, self.vec.get_local_size().unwrap() as usize) }
     }
 }
 
 impl Deref for VectorView<'_, '_> {
     type Target = [f64];
     fn deref(&self) -> &[f64] {
-        unsafe { std::slice::from_raw_parts(self.array, self.vec.get_global_size().unwrap() as usize) }
+        unsafe { std::slice::from_raw_parts(self.array, self.vec.get_local_size().unwrap() as usize) }
     }
 }
 

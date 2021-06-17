@@ -48,10 +48,7 @@ use prelude::*;
 
 // https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Sys/index.html
 
-// TODO: Would it make sense to only have PetscInitializeNoArguments and have rust deal with all the 
-// options database.
-
-// TODO: should all Petsc types be reference counted, are should we force functions that create refrences 
+// TODO: should all Petsc types be reference counted, or should we force functions that create refrences 
 // (i.e. call `PetscObjectReference`) to take `Rc`s (or `Arc`s, idk if it needs to be thread safe (i would 
 // guess not)). Or should it all be handled under the hood. It seems like this is not really a public
 // facing function. And it is unclear how to remove a reference count, like it seems that calling destroy
@@ -61,6 +58,8 @@ use prelude::*;
 // We need to add support for PetscScalar being complex, or being a different size float.
 // It seems like this is a compile time thing so it isn't as important to add right now.
 // https://petsc.org/release/docs/manualpages/Sys/PetscScalar.html#PetscScalar
+
+// TODO: add wrappers for PetscOptionsGet* functions or work on a better way to get params.
 
 /// Prints to standard out, only from the first processor in the communicator.
 /// Calls from other processes are ignored.
@@ -186,14 +185,28 @@ impl PetscBuilder
         let help_cstring = self.help_msg.map(|ref h| CString::new(h.to_string()).ok()).flatten();
         let help_c_str = help_cstring.as_ref().map_or_else(|| std::ptr::null(), |v| v.as_ptr());
 
-        let ierr = unsafe { petsc_raw::PetscInitialize(c_argc_p, c_args_p, file_c_str, help_c_str) };
+        let ierr;
         // We pass in the args data so that we can reconstruct the vec to free all the memory.
         let petsc = Petsc { world: match self.world { 
             Some(world) => {
+                // Note, in this case MPI has already initialized
+
+                // SAFETY: Nothing should use the global variable `PETSC_COMM_WORLD` directly
+                // everything should access it through the `Petsc.world()` method which is only
+                // accessible after this (at least on the rust side of things). 
+                // Additional info on using this variable can be found here:
+                // https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Sys/PETSC_COMM_WORLD.html
                 unsafe { petsc_raw::PETSC_COMM_WORLD = world.as_raw(); }
+
+                ierr = unsafe { petsc_raw::PetscInitialize(c_argc_p, c_args_p, file_c_str, help_c_str) };
+
                 world
             }, 
-            _ => Box::new(mpi::topology::SystemCommunicator::world()) 
+            _ => {
+                // Note, in this case MPI has not been initialized, it is initialized with PETSc
+                ierr = unsafe { petsc_raw::PetscInitialize(c_argc_p, c_args_p, file_c_str, help_c_str) };
+                Box::new(mpi::topology::SystemCommunicator::world())
+            }
         }, raw_args_vec_data: self.args.map(|_| (c_args, argc as usize, vec_cap)) };
         Petsc::check_error(petsc.world(), ierr)?;
 
@@ -317,7 +330,7 @@ impl Petsc {
         self.world.as_ref()
     }
 
-    // TODO: move out of `Petsc` maybe
+    // TODO: should we move this out of `Petsc`, it is a static function
     /// Internal error checker
     /// replacement for the CHKERRQ macro in the C api
     #[doc(hidden)]
@@ -349,7 +362,7 @@ impl Petsc {
         return Err(error);
     }
 
-    // TODO: move out of `Petsc` maybe
+    // TODO: should we move this out of `Petsc`, it is a static function
     /// Function to call when an error has been detected.
     /// replacement for the SETERRQ macro in the C api.
     /// Will always return an `Err`.
@@ -383,7 +396,7 @@ impl Petsc {
         return Err(error);
     }
 
-    // TODO: move out of `Petsc` maybe
+    // TODO: should we move this out of `Petsc`, it is a static function
     /// replacement for the `PetscPrintf` function in the C api. You can also use the [`petsc_println`] macro
     /// to have string formatting.
     /// Prints to standard out, only from the first processor in the communicator. Calls from other processes are ignored.
@@ -475,5 +488,12 @@ impl Petsc {
     /// ```
     pub fn snes_create(&self) -> Result<crate::SNES> {
         crate::SNES::create(self.world())
+    }
+
+    /// Creates a viewer context the prints to stdout
+    ///
+    /// A replacement the the C API's `PETSC_VIEWER_STDOUT_WORLD`.
+    pub fn viewer_create_ascii_stdout(&self) -> Result<crate::Viewer> {
+        Viewer::create_ascii_stdout(self.world())
     }
 }
