@@ -8,8 +8,6 @@
 //! $ mpiexec -n 1 target/debug/ex2
 //! Norm of error 1.49751e-10, Iters 3
 //! ```
-//!
-//! Note, this example does not support complex numbers
 
 static HELP_MSG: &str = "Newton method to solve u'' + u^{2} = f, sequentially.\n\
 This example employs a user-defined monitoring routine.\n\n";
@@ -36,7 +34,12 @@ fn main() -> petsc_rs::Result<()> {
         Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
     }
 
-    let h = 1.0/(n as PetscScalar - 1.0);
+    // Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
+    // float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
+    // call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
+    // but if `PetscScalar` is complex it will construct a complex value which the imaginary part being
+    // set to `0`.
+    let h = 1.0/(PetscScalar::from(n as PetscReal) - 1.0);
 
     /*
         Note that we form 1 vector from scratch and then duplicate as needed.
@@ -56,12 +59,12 @@ fn main() -> petsc_rs::Result<()> {
         Store right-hand-side of PDE and exact solution
     - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
     u.assemble_with((0..n).map(|i| {
-        let xp = i as PetscScalar * h;
-        (i, PetscScalar::powi(xp, 3))
+        let xp = PetscScalar::from(i as PetscReal) * h;
+        (i, xp.powi(3))
     }), InsertMode::INSERT_VALUES)?;
     g.assemble_with((0..n).map(|i| {
-        let xp = i as PetscScalar * h;
-        (i, 6.0*xp + PetscScalar::powi(xp+1.0e-12, 6)) // +1.e-12 is to prevent 0^6
+        let xp = PetscScalar::from(i as PetscReal) * h;
+        (i, 6.0*xp + (xp+1.0e-12).powi(6)) // +1.e-12 is to prevent 0^6
     }), InsertMode::INSERT_VALUES)?;
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -73,7 +76,7 @@ fn main() -> petsc_rs::Result<()> {
         to employ an initial guess of zero, the user should explicitly set
         this vector to zero by calling VecSet().
     */
-    x.set_all(0.5)?;
+    x.set_all(PetscScalar::from(0.5))?;
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
      Create nonlinear solver context
@@ -99,7 +102,7 @@ fn main() -> petsc_rs::Result<()> {
         let mut f_view = f.view_mut()?;
         let g_view = g.view()?;
 
-        let d = PetscScalar::powi(n as PetscScalar - 1.0, 2);
+        let d = PetscScalar::from(n as PetscReal - 1.0).powi(2);
 
         f_view[0] = x_view[0];
         for i in 1..(n as usize - 1) {
@@ -143,9 +146,9 @@ fn main() -> petsc_rs::Result<()> {
 
         let x_view = x.view()?;
 
-        let d = PetscScalar::powi(n as PetscScalar - 1.0, 2);
+        let d = (PetscScalar::from(n as PetscReal) - 1.0).powi(2);
 
-        ap_mat.assemble_with((0..n).map(|i| if i == 0 || i == n-1{ vec![(i,i,1.0)] }
+        ap_mat.assemble_with((0..n).map(|i| if i == 0 || i == n-1{ vec![(i,i,PetscScalar::from(1.0))] }
                                             else { vec![(i,i-1,d), (i,i,-2.0*d+2.0*x_view[i as usize]), (i,i+1,d)] })
                 .flatten(), 
             InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
@@ -177,7 +180,7 @@ fn main() -> petsc_rs::Result<()> {
     /*
         Check the error
     */
-    x.axpy(-1.0, &u)?;
+    x.axpy(PetscScalar::from(-1.0), &u)?;
     let x_norm = x.norm(NormType::NORM_2)?;
     let iters = snes.get_iteration_number()?;
     petsc_println!(petsc.world(), "Norm of error {:.5e}, Iters {}", x_norm, iters);

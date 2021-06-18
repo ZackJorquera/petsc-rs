@@ -113,7 +113,8 @@ impl<'a> Mat<'a> {
     /// //  3  4  5
     /// //  6  7  8
     /// for i in 0..n {
-    ///     let v = [i as PetscScalar * 3.0, i as PetscScalar * 3.0+1.0, i as PetscScalar * 3.0+2.0];
+    ///     let v = [PetscScalar::from(i as PetscReal) * 3.0, PetscScalar::from(i as PetscReal) * 3.0+1.0,
+    ///         PetscScalar::from(i as PetscReal) * 3.0+2.0];
     ///     mat.set_values(&[i], &[0,1,2], &v, InsertMode::INSERT_VALUES)?;
     /// }
     /// // You MUST assemble before you can use 
@@ -124,7 +125,8 @@ impl<'a> Mat<'a> {
     /// # mat.view_with(&viewer)?;
     ///
     /// for i in 0..n {
-    ///     let v = [i as PetscScalar, i as PetscScalar + 3.0, i as PetscScalar + 6.0];
+    ///     let v = [PetscScalar::from(i as PetscReal), PetscScalar::from(i as PetscReal) + 3.0,
+    ///         PetscScalar::from(i as PetscReal) + 6.0];
     ///     mat2.set_values(&[0,1,2], &[i], &v, InsertMode::INSERT_VALUES)?;
     /// }
     /// // You MUST assemble before you can use 
@@ -133,10 +135,12 @@ impl<'a> Mat<'a> {
     /// # // for debugging
     /// # mat2.view_with(&viewer)?;
     /// 
-    /// assert_eq!(&mat.get_values(0..n, 0..n).unwrap()[..], &mat2.get_values(0..n, 0..n).unwrap()[..]);
-    /// assert_eq!(&mat.get_values(0..n, 0..n).unwrap()[..], &[ 0.0,  1.0,  2.0,
-    ///                                                         3.0,  4.0,  5.0,
-    ///                                                         6.0,  7.0,  8.0,]);
+    /// // We do that map in the case that `PetscScalar` is complex.
+    /// assert_eq!(mat.get_values(0..n, 0..n).unwrap(), mat2.get_values(0..n, 0..n).unwrap());
+    /// assert_eq!(mat.get_values(0..n, 0..n).unwrap(), [ 0.0,  1.0,  2.0,
+    ///                                                   3.0,  4.0,  5.0,
+    ///                                                   6.0,  7.0,  8.0,]
+    ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
     /// # Ok(())
     /// # }
     /// ```
@@ -145,7 +149,7 @@ impl<'a> Mat<'a> {
         let n = idxn.len();
         assert_eq!(v.len(), m*n);
         let ierr = unsafe { petsc_raw::MatSetValues(self.mat_p, m as PetscInt, idxm.as_ptr(), n as PetscInt,
-            idxn.as_ptr(), v.as_ptr(), addv) };
+            idxn.as_ptr(), v.as_ptr() as *mut _, addv) };
         Petsc::check_error(self.world, ierr)
     }
 
@@ -226,20 +230,22 @@ impl<'a> Mat<'a> {
     /// //  0  0 -1  2 -1
     /// //  0  0  0 -1  2
     /// mat.assemble_with((0..n).map(|i| (0..n).map(move |j| (i,j))).flatten()
-    ///         .map(|(i,j)| if i == j { (i,j,2.0) } 
-    ///                      else if (i - j).abs() == 1 {(i,j,-1.0)}
-    ///                      else {(i,j,0.0)})
-    ///         .filter(|(_,_,v)| *v != 0.0 ), 
+    ///         .map(|(i,j)| if i == j { (i,j,PetscScalar::from(2.0)) } 
+    ///                      else if (i - j).abs() == 1 {(i,j,PetscScalar::from(-1.0))}
+    ///                      else {(i,j,PetscScalar::from(0.0))})
+    ///         .filter(|(_,_,v)| *v != PetscScalar::from(0.0) ), 
     ///     InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY);
     /// # // for debugging
     /// # let viewer = Viewer::create_ascii_stdout(petsc.world())?;
     /// # mat.view_with(&viewer)?;
     /// 
-    /// assert_eq!(&mat.get_values(0..n, 0..n).unwrap()[..], &[ 2.0, -1.0,  0.0,  0.0,  0.0,
-    ///                                                        -1.0,  2.0, -1.0,  0.0,  0.0,
-    ///                                                         0.0, -1.0,  2.0, -1.0,  0.0,
-    ///                                                         0.0,  0.0, -1.0,  2.0, -1.0,
-    ///                                                         0.0,  0.0,  0.0, -1.0,  2.0]);
+    /// // We do that map in the case that `PetscScalar` is complex.
+    /// assert_eq!(mat.get_values(0..n, 0..n).unwrap(), [ 2.0, -1.0,  0.0,  0.0,  0.0,
+    ///                                                  -1.0,  2.0, -1.0,  0.0,  0.0,
+    ///                                                   0.0, -1.0,  2.0, -1.0,  0.0,
+    ///                                                   0.0,  0.0, -1.0,  2.0, -1.0,
+    ///                                                   0.0,  0.0,  0.0, -1.0,  2.0]
+    ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
     /// # Ok(())
     /// # }
     /// ```
@@ -291,32 +297,35 @@ impl<'a> Mat<'a> {
     /// # let viewer = Viewer::create_ascii_stdout(petsc.world())?;
     /// # mat.view_with(&viewer)?;
     /// 
-    /// assert_eq!(&mat.get_values(0..n, 0..n).unwrap()[..], &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
-    /// assert_eq!(&mat.get_values(0..n, [0]).unwrap()[..], &[0.0, 3.0, 6.0]);
-    /// assert_eq!(&mat.get_values([1], 0..2).unwrap()[..], &[3.0, 4.0]);
-    /// assert_eq!(&mat.get_values([1,2], [0,2]).unwrap()[..], &[3.0, 5.0, 6.0, 8.0]);
+    /// // We do that map in the case that `PetscScalar` is complex.
+    /// assert_eq!(mat.get_values(0..n, 0..n).unwrap(),
+    ///            [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
+    /// assert_eq!(mat.get_values(0..n, [0]).unwrap(),
+    ///            [0.0, 3.0, 6.0].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
+    /// assert_eq!(mat.get_values([1], 0..2).unwrap(),
+    ///            [3.0, 4.0].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
+    /// assert_eq!(mat.get_values([1,2], [0,2]).unwrap(),
+    ///            [3.0, 5.0, 6.0, 8.0].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
     /// # Ok(())
     /// # }
     /// ```
     pub fn get_values<T1, T2>(&self, idxm: T1, idxn: T2) -> Result<Vec<PetscScalar>>
     where
         T1: IntoIterator<Item = PetscInt>,
-        <T1 as IntoIterator>::IntoIter: ExactSizeIterator,
         T2: IntoIterator<Item = PetscInt>,
-        <T2 as IntoIterator>::IntoIter: ExactSizeIterator,
     {
         let idxm_iter = idxm.into_iter();
-        let mi = idxm_iter.len();
         let idxm_array = idxm_iter.collect::<Vec<_>>();
+        let mi = idxm_array.len();
 
         let idxn_iter = idxn.into_iter();
-        let ni = idxn_iter.len();
         let idxn_array = idxn_iter.collect::<Vec<_>>();
+        let ni = idxn_array.len();
         
         let mut out_vec = vec![PetscScalar::default(); mi * ni];
 
         let ierr = unsafe { petsc_raw::MatGetValues(self.mat_p, mi as PetscInt, idxm_array.as_ptr(),
-            ni as PetscInt, idxn_array.as_ptr(), out_vec[..].as_mut_ptr()) };
+            ni as PetscInt, idxn_array.as_ptr(), out_vec[..].as_mut_ptr() as *mut _) };
         Petsc::check_error(self.world, ierr)?;
 
         Ok(out_vec)

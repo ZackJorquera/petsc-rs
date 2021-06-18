@@ -90,7 +90,7 @@ impl<'a> Vector<'a> {
     /// Computes self += alpha * other
     pub fn axpy(&mut self, alpha: PetscScalar, other: &Vector) -> Result<()>
     {
-        let ierr = unsafe { petsc_raw::VecAXPY(self.vec_p, alpha, other.vec_p) };
+        let ierr = unsafe { petsc_raw::VecAXPY(self.vec_p, alpha.into(), other.vec_p) };
         Petsc::check_error(self.world, ierr)
     }
 
@@ -139,18 +139,25 @@ impl<'a> Vector<'a> {
     /// v.set_sizes(None, Some(10)).unwrap(); // create vector of size 10
     /// v.set_from_options().unwrap();
     ///
-    /// v.set_values(&[0, 3, 7, 9], &[1.1, 2.2, 3.3, 4.4], InsertMode::INSERT_VALUES).unwrap();
+    /// v.set_values(&[0, 3, 7, 9], &[PetscScalar::from(1.1), PetscScalar::from(2.2),
+    ///                               PetscScalar::from(3.3), PetscScalar::from(4.4)],
+    ///     InsertMode::INSERT_VALUES).unwrap();
     /// // You MUST assemble before you can use 
     /// v.assembly_begin().unwrap();
     /// v.assembly_end().unwrap();
     ///
-    /// assert_eq!(&v.get_values(0..10).unwrap()[..], &[1.1,0.0,0.0,2.2,0.0,0.0,0.0,3.3,0.0,4.4]);
+    /// // We do the map in the case that `PetscScalar` is complex.
+    /// assert_eq!(v.get_values(0..10).unwrap(), [1.1,0.0,0.0,2.2,0.0,0.0,0.0,3.3,0.0,4.4]
+    ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
     ///
-    /// v.set_values(&vec![0, 2, 8, 9], &vec![1.0, 2.0, 3.0, 4.0], InsertMode::ADD_VALUES).unwrap();
+    /// v.set_values(&vec![0, 2, 8, 9], &vec![PetscScalar::from(1.0), PetscScalar::from(2.0),
+    ///                                       PetscScalar::from(3.0), PetscScalar::from(4.0)],
+    ///     InsertMode::ADD_VALUES).unwrap();
     /// // You MUST assemble before you can use 
     /// v.assembly_begin().unwrap();
     /// v.assembly_end().unwrap();
-    /// assert_eq!(&v.get_values(0..10).unwrap()[..], &[2.1,0.0,2.0,2.2,0.0,0.0,0.0,3.3,3.0,8.4]);
+    /// assert_eq!(v.get_values(0..10).unwrap(), [2.1,0.0,2.0,2.2,0.0,0.0,0.0,3.3,3.0,8.4]
+    ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
     /// ```
     pub fn set_values(&mut self, ix: &[PetscInt], v: &[PetscScalar], iora: InsertMode) -> Result<()>
     {
@@ -159,7 +166,7 @@ impl<'a> Vector<'a> {
         assert_eq!(ix.len(), v.len());
 
         let ni = ix.len() as PetscInt;
-        let ierr = unsafe { petsc_raw::VecSetValues(self.vec_p, ni, ix.as_ptr(), v.as_ptr(), iora) };
+        let ierr = unsafe { petsc_raw::VecSetValues(self.vec_p, ni, ix.as_ptr(), v.as_ptr() as *mut _, iora) };
         Petsc::check_error(self.world, ierr)
     }
 
@@ -187,11 +194,18 @@ impl<'a> Vector<'a> {
     /// v.set_from_options()?;
     ///
     /// v.assemble_with([0, 3, 7, 9].iter().cloned()
-    ///         .zip([1.1, 2.2, 3.3, 4.4]), InsertMode::INSERT_VALUES)?;
-    /// assert_eq!(&v.get_values(0..10)?[..], &[1.1,0.0,0.0,2.2,0.0,0.0,0.0,3.3,0.0,4.4]);
+    ///         .zip([PetscScalar::from(1.1), PetscScalar::from(2.2),
+    ///               PetscScalar::from(3.3), PetscScalar::from(4.4)]),
+    ///     InsertMode::INSERT_VALUES)?;
+    /// // We do the map in the case that `PetscScalar` is complex.
+    /// assert_eq!(v.get_values(0..10)?, [1.1,0.0,0.0,2.2,0.0,0.0,0.0,3.3,0.0,4.4]
+    ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
     ///
-    /// v.assemble_with([(0, 1.0), (2, 2.0), (8, 3.0), (9, 4.0)], InsertMode::ADD_VALUES)?;
-    /// assert_eq!(&v.get_values(0..10)?[..], &[2.1,0.0,2.0,2.2,0.0,0.0,0.0,3.3,3.0,8.4]);
+    /// v.assemble_with([(0, PetscScalar::from(1.0)), (2, PetscScalar::from(2.0)),
+    ///                  (8, PetscScalar::from(3.0)), (9, PetscScalar::from(4.0))],
+    ///     InsertMode::ADD_VALUES)?;
+    /// assert_eq!(v.get_values(0..10)?, [2.1,0.0,2.0,2.2,0.0,0.0,0.0,3.3,3.0,8.4]
+    ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
     /// # Ok(())
     /// # }
     /// ```
@@ -233,26 +247,32 @@ impl<'a> Vector<'a> {
     /// v.set_from_options().unwrap();
     ///
     /// let ix = [0, 2, 7, 9];
-    /// v.set_values(&ix, &[1.1, 2.2, 3.3, 4.4], InsertMode::INSERT_VALUES).unwrap();
+    /// v.set_values(&ix, &[PetscScalar::from(1.1), PetscScalar::from(2.2),
+    ///                     PetscScalar::from(3.3), PetscScalar::from(4.4)],
+    ///     InsertMode::INSERT_VALUES).unwrap();
     ///
-    /// assert_eq!(&v.get_values(ix).unwrap()[..], &[1.1, 2.2, 3.3, 4.4]);
-    /// assert_eq!(&v.get_values(vec![2, 0, 9, 7]).unwrap()[..], &[2.2, 1.1, 4.4, 3.3]);
-    /// assert_eq!(&v.get_values(0..10).unwrap()[..], &[1.1,0.0,2.2,0.0,0.0,0.0,0.0,3.3,0.0,4.4]);
-    /// assert_eq!(&v.get_values((0..5).map(|v| v*2)).unwrap()[..], &[1.1,2.2,0.0,0.0,0.0]);
+    /// // We do the map in the case that `PetscScalar` is complex.
+    /// assert_eq!(v.get_values(ix).unwrap(),
+    ///     [1.1, 2.2, 3.3, 4.4].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
+    /// assert_eq!(v.get_values(vec![2, 0, 9, 7]).unwrap(),
+    ///     [2.2, 1.1, 4.4, 3.3].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
+    /// assert_eq!(v.get_values(0..10).unwrap(),
+    ///     [1.1,0.0,2.2,0.0,0.0,0.0,0.0,3.3,0.0,4.4].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
+    /// assert_eq!(v.get_values((0..5).map(|v| v*2)).unwrap(),
+    ///     [1.1,2.2,0.0,0.0,0.0].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
     /// ```
     pub fn get_values<T>(&self, ix: T) -> Result<Vec<PetscScalar>>
     where
         T: IntoIterator<Item = PetscInt>,
-        <T as IntoIterator>::IntoIter: ExactSizeIterator
     {
         // TODO: i added Vector::view which returns a slice, do we still need this method?
 
         let ix_iter = ix.into_iter();
-        let ni = ix_iter.len();
         let ix_array = ix_iter.collect::<Vec<_>>();
+        let ni = ix_array.len();
         let mut out_vec = vec![PetscScalar::default();ni];
 
-        let ierr = unsafe { petsc_raw::VecGetValues(self.vec_p, ni as PetscInt, ix_array.as_ptr(), out_vec[..].as_mut_ptr()) };
+        let ierr = unsafe { petsc_raw::VecGetValues(self.vec_p, ni as PetscInt, ix_array.as_ptr(), out_vec[..].as_mut_ptr() as *mut _) };
         Petsc::check_error(self.world, ierr)?;
 
         Ok(out_vec)
@@ -273,7 +293,10 @@ impl<'a> Vector<'a> {
     /// // note, cargo wont run tests with mpi so this will always be run with
     /// // a single processor, but this example will also work in a multiprocessor
     /// // comm world.
-    /// let values = [0.0,1.0,2.0,3.0,4.0,5.0,6.0];
+    ///
+    /// // We do the map in the case that `PetscScalar` is complex.
+    /// let values = [0.0,1.0,2.0,3.0,4.0,5.0,6.0]
+    ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>();
     /// let mut v = petsc.vec_create()?;
     /// v.set_sizes(None, Some(values.len() as PetscInt))?;
     /// v.set_from_options()?;
@@ -348,21 +371,29 @@ impl<'a> Vector<'a> {
     /// v.set_from_options()?;
     /// 
     /// v.assemble_with([0, 3, 7, 9].iter().cloned()
-    ///         .zip([1.1, 2.2, 3.3, 4.4]), InsertMode::INSERT_VALUES)?;
-    /// assert_eq!(&v.get_values(0..10)?[..], &[1.1,0.0,0.0,2.2,0.0,0.0,0.0,3.3,0.0,4.4]);
+    ///         .zip([PetscScalar::from(1.1), PetscScalar::from(2.2),
+    ///               PetscScalar::from(3.3), PetscScalar::from(4.4)]),
+    ///     InsertMode::INSERT_VALUES)?;
+    /// // We do the map in the case that `PetscScalar` is complex.
+    /// assert_eq!(v.get_values(0..10)?, [1.1,0.0,0.0,2.2,0.0,0.0,0.0,3.3,0.0,4.4]
+    ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
     ///
     /// {
     ///     let mut v_view = v.view()?;
-    ///     assert_eq!(&v_view[..], &[1.1,0.0,0.0,2.2,0.0,0.0,0.0,3.3,0.0,4.4]);
+    ///     assert_eq!(&v_view[..], &[1.1,0.0,0.0,2.2,0.0,0.0,0.0,3.3,0.0,4.4]
+    ///         .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
     /// }
     ///
-    /// v.assemble_with([(0, 1.0), (2, 2.0), (8, 3.0), (9, 4.0)], InsertMode::ADD_VALUES)?;
+    /// v.assemble_with([(0, PetscScalar::from(1.0)), (2, PetscScalar::from(2.0)),
+    ///                  (8, PetscScalar::from(3.0)), (9, PetscScalar::from(4.0))],
+    ///     InsertMode::ADD_VALUES)?;
     ///
     /// // It is valid to have multiple immutable views
     /// let v_view = v.view()?;
     /// let v_view2 = v.view()?;
     /// assert_eq!(&v_view[..], &v_view2[..]);
-    /// assert_eq!(&v_view2[..], &[2.1,0.0,2.0,2.2,0.0,0.0,0.0,3.3,3.0,8.4]);
+    /// assert_eq!(&v_view2[..], &[2.1,0.0,2.0,2.2,0.0,0.0,0.0,3.3,3.0,8.4]
+    ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>()[..]);
     /// # Ok(())
     /// # }
     /// ```
@@ -395,16 +426,18 @@ impl<'a> Vector<'a> {
     /// let mut v = petsc.vec_create()?;
     /// v.set_sizes(None, Some(10))?; // create vector of size 10
     /// v.set_from_options()?;
-    /// v.set_all(1.5)?;
+    /// v.set_all(PetscScalar::from(1.5))?;
     ///
     /// {
     ///     let mut v_view = v.view_mut()?;
-    ///     assert_eq!(&v_view[..], &[1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5]);
-    ///     v_view[2] = 9.0;
+    ///     assert_eq!(&v_view[..], &[PetscScalar::from(1.5); 10]);
+    ///     v_view[2] = PetscScalar::from(9.0);
     /// }
     ///
     /// let v_view = v.view()?;
-    /// assert_eq!(&v_view[..], &[1.5, 1.5, 9.0, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5]);
+    /// // We do the map in the case that `PetscScalar` is complex.
+    /// assert_eq!(&v_view[..], &[1.5, 1.5, 9.0, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5]
+    ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>()[..]);
     /// # Ok(())
     /// # }
     /// ```
@@ -433,7 +466,10 @@ impl<'a> Vector<'a> {
     /// // note, cargo wont run tests with mpi so this will always be run with
     /// // a single processor, but this example will also work in a multiprocessor
     /// // comm world.
-    /// let values = [0.0,1.0,2.0,3.0,4.0,5.0,6.0];
+    ///
+    /// // We do the map in the case that `PetscScalar` is complex.
+    /// let values = [0.0,1.0,2.0,3.0,4.0,5.0,6.0]
+    ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>();
     /// // Will set each processor's portion of the vector to `values`
     /// let mut v = Vector::from_slice(petsc.world(), &values)?;
     ///
@@ -460,7 +496,7 @@ impl<'a> Vector<'a> {
 impl Drop for VectorViewMut<'_, '_> {
     fn drop(&mut self) {
         unsafe {
-            let ierr = petsc_raw::VecRestoreArray(self.vec.vec_p, &mut self.array as *mut _);
+            let ierr = petsc_raw::VecRestoreArray(self.vec.vec_p, &mut self.array as *mut *mut _ as *mut *mut _);
             let _ = Petsc::check_error(self.vec.world, ierr); // TODO should i unwrap or what idk?
         }
     }
@@ -469,7 +505,7 @@ impl Drop for VectorViewMut<'_, '_> {
 impl Drop for VectorView<'_, '_> {
     fn drop(&mut self) {
         unsafe {
-            let ierr = petsc_raw::VecRestoreArrayRead(self.vec.vec_p, &mut self.array as *mut _);
+            let ierr = petsc_raw::VecRestoreArrayRead(self.vec.vec_p, &mut self.array as *mut *const _ as *mut *const _);
             let _ = Petsc::check_error(self.vec.world, ierr); // TODO should i unwrap or what idk?
         }
     }
@@ -479,7 +515,7 @@ impl<'a, 'b> VectorViewMut<'a, 'b> {
     /// Constructs a VectorViewMut from a Vector reference
     fn new(vec: &'b mut Vector<'a>) -> Result<Self> {
         let mut array = MaybeUninit::<*mut PetscScalar>::uninit();
-        let ierr = unsafe { petsc_raw::VecGetArray(vec.vec_p, array.as_mut_ptr()) };
+        let ierr = unsafe { petsc_raw::VecGetArray(vec.vec_p, array.as_mut_ptr() as *mut *mut _) };
         Petsc::check_error(vec.world, ierr)?;
 
         Ok(Self { vec, array: unsafe { array.assume_init() } })
@@ -490,7 +526,7 @@ impl<'a, 'b> VectorView<'a, 'b> {
     /// Constructs a VectorViewMut from a Vector reference
     fn new(vec: &'b Vector<'a>) -> Result<Self> {
         let mut array = MaybeUninit::<*const PetscScalar>::uninit();
-        let ierr = unsafe { petsc_raw::VecGetArrayRead(vec.vec_p, array.as_mut_ptr()) };
+        let ierr = unsafe { petsc_raw::VecGetArrayRead(vec.vec_p, array.as_mut_ptr() as *mut *const _) };
         Petsc::check_error(vec.world, ierr)?;
 
         Ok(Self { vec, array: unsafe { array.assume_init() } })

@@ -83,6 +83,8 @@ pub static PCTYPE_TABLE: &'static [&str] = &[
     "hara"
 ];
 
+/// Preconditioner type.
+///
 /// This enum is from: <https://petsc.org/release/docs/manualpages/PC/PCType.html#PCType>
 pub enum PCTypeEnum {
     PCNONE = 0,
@@ -136,24 +138,19 @@ pub enum PCTypeEnum {
     PCHARA,
 }
 
-
-// ----------------------------------------------------
-// This is a test, I want to find the best way to do it
-// ----------------------------------------------------
-// TODO: i think this would make more sense being on the petsc-rs side
-
 // TODO: num_complex::Complex docs say:
 // "Note that Complex<F> where F is a floating point type is only memory layout compatible with C’s
 // complex types, not necessarily calling convention compatible. This means that for FFI you can
 // only pass Complex<F> behind a pointer, not as a value."
 // What does this mean for use? If every function is listed as `extern "C"` are we ok?
-// Petsc function dont take pointers as inputs.
+// Petsc function dont take pointers as inputs all the time.
 
 // TODO: i don't really like doing it this way but it seems that that this is how bindgen wants
 // us to do it https://github.com/rust-lang/rust-bindgen/issues/72#issuecomment-258677264
 #[cfg(feature = "petsc-use-complex")]
 impl Into<Complex<PetscReal>> for __BindgenComplex<PetscReal> {
     fn into(self) -> Complex<PetscReal> {
+        // TODO: is this safe?
         unsafe { std::mem::transmute(self) }
     }
 }
@@ -161,20 +158,60 @@ impl Into<Complex<PetscReal>> for __BindgenComplex<PetscReal> {
 #[cfg(feature = "petsc-use-complex")]
 impl From<Complex<PetscReal>> for __BindgenComplex<PetscReal> {
     fn from(ct: Complex<PetscReal>) -> __BindgenComplex<PetscReal> {
+        // Is this safe?
         unsafe { std::mem::transmute(ct) }
     }
 }
 
-impl <T: Default> From<T> for __BindgenComplex<T> {
-    fn from(t: T) -> Self {
-        __BindgenComplex {re: t, im: T::default() }
-    }
-}
-
-// We want to expose the complex type using the num-complex type
+// We want to expose the complex type using the num-complex Complex type
+// which has the same memory layout as the one bindgen creates, `__BindgenComplex`.
+// TODO: is this the best way to do this. If we are just going to transmute to convert 
+// why dont we ignore these types from bindgen a manually define them our selves like
+// we did for MPI_Comm.
 #[cfg(feature = "petsc-use-complex")]
 pub type PetscComplex2 = Complex<PetscReal>;
-#[cfg(feature = "petsc-use-complex")]
-pub type PetscScalar2 = Complex<PetscReal>;
+#[cfg(not(feature = "petsc-use-complex"))]
+pub type PetscComplex2 = PetscComplex;
+
+// TODO: I dont like how i have to do the doc string twice
+/// PETSc scalar type.
+///
+/// Can represent either a real or complex number in varying levels of precision. The specific 
+/// representation can be set by features for [`petsc-sys`](crate).
+///
+/// Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
+/// float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
+/// call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
+/// but if `PetscScalar` is complex it will construct a complex value which the imaginary part being
+/// set to `0`.
+///
+/// # Example
+///
+/// ```
+/// # use petsc_rs::prelude::*;
+/// // This will always work
+/// let a = PetscScalar::from(1.5);
+/// ```
 #[cfg(not(feature = "petsc-use-complex"))]
 pub type PetscScalar2 = PetscReal;
+
+/// PETSc scalar type.
+///
+/// Can represent either a real or complex number in varying levels of precision. The specific 
+/// representation can be set by features for [`petsc-sys`](crate).
+///
+/// Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
+/// float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
+/// call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
+/// but if `PetscScalar` is complex it will construct a complex value which the imaginary part being 
+/// set to `0`.
+///
+/// # Example
+///
+/// ```
+/// # use petsc_rs::prelude::*;
+/// // This will always work
+/// let a = PetscScalar::from(1.5);
+/// ```
+#[cfg(feature = "petsc-use-complex")]
+pub type PetscScalar2 = PetscComplex2;

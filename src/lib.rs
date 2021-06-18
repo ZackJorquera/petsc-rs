@@ -12,6 +12,8 @@ pub(crate) mod petsc_raw {
     pub use petsc_sys::*;
 }
 
+pub use petsc_raw::{PetscInt, PetscReal, PetscComplex2 as PetscComplex, PetscScalar2 as PetscScalar};
+
 pub(crate) mod macros;
 
 pub mod vector;
@@ -57,11 +59,6 @@ use prelude::*;
 // guess not)). Or should it all be handled under the hood. It seems like this is not really a public
 // facing function. And it is unclear how to remove a reference count, like it seems that calling destroy
 // or PetscObjectDereference will decrement the count.
-
-// TODO: we should accept PetscScalar, but we will just assume that it is always a f64 for now.
-// We need to add support for PetscScalar being complex, or being a different size float.
-// It seems like this is a compile time thing so it isn't as important to add right now.
-// https://petsc.org/release/docs/manualpages/Sys/PetscScalar.html#PetscScalar
 
 // TODO: add wrappers for PetscOptionsGet* functions or work on a better way to get params.
 
@@ -501,33 +498,3 @@ impl Petsc {
         Viewer::create_ascii_stdout(self.world())
     }
 }
-
-// ----------------------------------------------------
-// This is a test, I want to find the best way to do it
-// ----------------------------------------------------
-//pub use petsc_raw::{PetscInt, PetscScalar2 as PetscScalar, PetscReal, PetscComplex2 as PetscComplex};
-
-// TODO: when PetscScalar is complex it uses the __BindgenComplex type which doesn't really have
-// anything implemented for it. It would be way better to use the num_complex::Complex type as it
-// has the same layout, but has the num trait implemented for it and everything we would want.
-
-/// PETSc scalar type.
-///
-/// Can represent either a real or complex number in varying levels of precision. The specific 
-/// representation can be set by features for [`petsc-sys`](#).
-///
-/// Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
-/// float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
-/// call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
-/// but if `PetscScalar` is complex it will construct a complex value which the imaginary part being
-/// the default value (i.e. the underling type must implement `Default`).
-///
-/// # Example
-///
-/// ```
-/// # use petsc_rs::prelude::*;
-/// // This will always work
-/// let a = PetscScalar::from(1.5);
-/// ```
-pub type PetscScalar = petsc_raw::PetscScalar;
-pub use petsc_raw::{PetscInt, PetscReal, PetscComplex};

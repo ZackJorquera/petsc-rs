@@ -24,6 +24,7 @@ fn main() {
 
     println!("cargo:rerun-if-env-changed=PETSC_DIR");
     println!("cargo:rerun-if-env-changed=PETSC_ARCH");
+    println!("cargo:rerun-if-env-changed=PETSC_ARCH_RELEASE");
     println!("cargo:rerun-if-env-changed=PKG_CONFIG_PATH");
 
     let real_features = features.iter().filter(|a| a.contains("PETSC_REAL_"))
@@ -32,14 +33,29 @@ fn main() {
     let int_features = features.iter().filter(|a| a.contains("PETSC_INT_"))
         .copied().collect::<Vec<_>>();
     
-    assert!(real_features.len() == 1, "There must be exactly one \"petsc-real-*\" feature enabled");
-    assert!(int_features.len() == 1, "There must be exactly one \"petsc-int-*\" feature enabled");
+    assert_eq!(real_features.len(),  1, 
+        "There must be exactly one \"petsc-real-*\" feature enabled. There are {} enabled.",
+            real_features.len());
+    assert_eq!(int_features.len(), 1, 
+        "There must be exactly one \"petsc-int-*\" feature enabled. There are {} enabled.",
+            int_features.len());
 
-    // We do our best to find the PETSC install
+    let profile = env::var("PROFILE").expect("No profile set.");
+
+    // We do our best to find the PETSC install directory
     let petsc_dir = env::var("PETSC_DIR").map(|x| Path::new(&x).to_path_buf());
-    let petsc_full_dir = petsc_dir.map(|petsc_dir| match env::var("PETSC_ARCH") {
-        Ok(arch) => petsc_dir.join(arch),
-        Err(_) => petsc_dir,
+    let petsc_full_dir = petsc_dir.map(|petsc_dir| match profile.as_str() {
+        "release" => match env::var("PETSC_ARCH_RELEASE") {
+            Ok(arch) => petsc_dir.join(arch),
+            Err(_) => match env::var("PETSC_ARCH") {
+                Ok(arch) => petsc_dir.join(arch),
+                Err(_) => petsc_dir,
+            },
+        }
+        _ => match env::var("PETSC_ARCH") {
+            Ok(arch) => petsc_dir.join(arch),
+            Err(_) => petsc_dir,
+        }
     });
 
     // In order for pkg_config to find the lib data for us we need the directory containing `PETSc.pc` 
@@ -56,26 +72,42 @@ fn main() {
         }
     }
 
+    let atleast_version = "3.15";
     let lib = match pkg_config::Config::new()
-        .atleast_version("3.15")
-        .probe("PETSc") { // case sensitive, but it shouldn't have to be maybe TODO: allow for lower case
+        .atleast_version(atleast_version)
+        .probe("PETSc") { // note, this is case sensitive
             Ok(lib) => lib,
-            Err(err) => panic!("Could not find library \'PETSc\', Error: {:?}", err)
+            Err(err) => { 
+                eprintln!("Could not find library \'PETSc\', will try again. Error: {:?} ", err);
+                match pkg_config::Config::new()
+                    .atleast_version(atleast_version)
+                    .probe("petsc") {
+                        Ok(lib) => lib,
+                        Err(err) => panic!("Could not find library \'petsc\', Error: {:?}", err)
+                    }
+            },
         };
+
+    eprintln!("lib found: {:?}", lib);
+    
+    let mut bindings = bindgen::Builder::default();
 
     for dir in &lib.link_paths {
         println!("cargo:rustc-link-search={}", dir.display());
         // the binary will look for the petsc lib in the directory pointed at by LD_LIBRARY_PATH
         println!("cargo:rustc-env=LD_LIBRARY_PATH={}", dir.display());
+
+        bindings = bindings.clang_arg(format!("-L{}", dir.to_string_lossy()));
     }
     for lib in &lib.libs {
         println!("cargo:rustc-link-lib={}", lib);
+
+        // TODO: what does this do? it requires the crate libloading
+        // bindings = bindings.dynamic_library_name(lib);
     }
     
     // Tell cargo to invalidate the built crate whenever the wrapper changes
     println!("cargo:rerun-if-changed=src/petsc_wrapper.h");
-
-    let mut bindings = bindgen::Builder::default();
 
     for dir in &lib.include_paths {
         //println!("cargo:rerun-if-changed={}", dir.to_string_lossy());
@@ -84,6 +116,7 @@ fn main() {
 
     // TODO: make better, show i do parsing. There must be a library that can do this
     // This gets the includes from mpicc
+    // We could probably use the build-probe-mpi crate to get this info.
     if let Ok(output) = Command::new("mpicc").args(&["--show"]).output() {
         let gcc_command = String::from_utf8_lossy(&output.stdout).into_owned();
         let include_paths = gcc_command.split(' ').filter(|&s| &s[..2] == "-I");
@@ -155,32 +188,26 @@ fn main() {
     match real_features[0]
     {
         "CARGO_FEATURE_PETSC_REAL_F64" => assert!(petsc_use_idents.contains(&"PETSC_USE_REAL_DOUBLE".into()),
-                                                         "PETSc is not compiled to use `f64` for real"),
+            "PETSc is not compiled to use `f64` for real, but the feature \"petsc-real-f64\" is set."),
         "CARGO_FEATURE_PETSC_REAL_F32" => assert!(petsc_use_idents.contains(&"PETSC_USE_REAL_SINGLE".into()),
-                                                         "PETSc is not compiled to use `f32` for real"),
+            "PETSc is not compiled to use `f32` for real, but the feature \"petsc-real-f32\" is set."),
         _ => panic!("Invalid feature type for petsc real")
     }
 
     if use_complex_feature {
         assert!(petsc_use_idents.contains(&"PETSC_USE_COMPLEX".into()),
-                "PETSc is not compiled to use complex for scalar");
+                "PETSc is not compiled to use complex for scalar, but the feature \"petsc-use-complex\" is set.");
     } else {
         assert!(!petsc_use_idents.contains(&"PETSC_USE_COMPLEX".into()),
-                "PETSc is not compiled to use real for scalar");
+                "PETSc is compiled to use complex for scalar, but the feature \"petsc-use-complex\" is no set.");
     }
     
     match int_features[0]
     {
         "CARGO_FEATURE_PETSC_INT_I64" => assert!(petsc_use_idents.contains(&"PETSC_USE_64BIT_INDICES".into()),
-                                                 "PETSc is not compiled to use `i64` for ints"),
+            "PETSc is not compiled to use `i64` for ints, but the feature \"petsc-int-i64\" is set."),
         "CARGO_FEATURE_PETSC_INT_I32" => assert!(!petsc_use_idents.contains(&"PETSC_USE_64BIT_INDICES".into()),
-                                                 "PETSc is not compiled to use `i32` for ints"),
+            "PETSc is not compiled to use `i32` for ints, but the feature \"petsc-int-i32\" is set."),
         _ => panic!("Invalid feature type for petsc int")
     }
-
-    // TODO: allow different scalar and int types
-    // assert_eq!(real_features[0], "CARGO_FEATURE_PETSC_REAL_F64", "petsc-sys currently only supports using `f64` for reals. Please use the `petsc-real-f64` feature.");
-    // assert!(!use_complex_feature, "petsc-sys currently does not supports using complex for scalar. Please turn of the `petsc-use-complex` feature.");
-    // assert_eq!(int_features[0], "CARGO_FEATURE_PETSC_INT_I32", "petsc-sys currently only supports using `i32` as `PetscInt`. Please use the `petsc-int-i32` feature.");
-    // panic!();
 }

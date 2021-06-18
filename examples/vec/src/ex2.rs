@@ -30,20 +30,16 @@ fn main() -> petsc_rs::Result<()> {
     // or init with no options
     // let petsc = Petsc::init_no_args()?;
 
-    let rank = petsc.world().rank();
+    let rank = petsc.world().rank() as PetscInt;
 
     let mut x = petsc.vec_create()?;
     x.set_sizes(Some(rank+1), None)?;
     x.set_from_options()?;
     let size = x.get_global_size()?;
-    x.set_all(1.0)?;
+    x.set_all(PetscScalar::from(1.0))?;
+    // x.set_all(PetscScalar {re: 1.0, im: 1.0})?;
 
-    for i in 0..size-rank {
-        x.set_values(&[i], &[1.0], InsertMode::ADD_VALUES)?;
-    }
-    x.set_values(&(0..size-rank).collect::<Vec<_>>(), &(0..size-rank).map(|_| 1.0).collect::<Vec<_>>(), InsertMode::ADD_VALUES)?;
-
-    x.assemble()?;
+    x.assemble_with((0..size-rank).map(|i| (i, PetscScalar::from(1.0))), InsertMode::ADD_VALUES)?;
 
     let viewer = Viewer::create_ascii_stdout(petsc.world())?;
     x.view_with(&viewer)?;

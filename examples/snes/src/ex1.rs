@@ -6,8 +6,6 @@
 //! $ cargo build --bin ex1
 //! $ mpiexec -n 1 target/debug/ex1
 //! ```
-//!
-//! Note, this example does not support complex numbers
 
 static HELP_MSG: &str = "Newton's method for a two-variable system, sequential.\n\n";
 
@@ -121,12 +119,17 @@ fn main() -> petsc_rs::Result<()> {
         to employ an initial guess of zero, the user should explicitly set
         this vector to zero by calling VecSet().
     */
+    // Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
+    // float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
+    // call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
+    // but if `PetscScalar` is complex it will construct a complex value which the imaginary part being
+    // set to `0`.
     if !hard_flg {
-        x.set_all(0.5)?;
+        x.set_all(PetscScalar::from(0.5))?;
     } else {
         let mut x_view = x.view_mut()?;
-        x_view[0] = 2.0;
-        x_view[1] = 3.0;
+        x_view[0] = PetscScalar::from(2.0);
+        x_view[1] = PetscScalar::from(3.0);
     }
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -158,7 +161,7 @@ fn from_function2(_snes: &SNES, x: &Vector, f: &mut Vector) -> petsc_rs::Result<
 fn from_jacobian2(_snes: &SNES, x: &Vector, jac: &mut Mat) -> petsc_rs::Result<()> {
     let x_view = x.view()?;
 
-    jac.assemble_with([(0,0,3.0*PetscScalar::cos(3.0*x_view[0])+1.0), (1,1,1.0)],
+    jac.assemble_with([(0,0,3.0*PetscScalar::cos(3.0*x_view[0])+1.0), (1,1,PetscScalar::from(1.0))],
         InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
 
     Ok(())

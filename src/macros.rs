@@ -72,7 +72,7 @@ $(
         $(
             let mut $tmp_ident = ::std::mem::MaybeUninit::<$ret_type>::uninit();
         )*
-        let ierr = unsafe { crate::petsc_raw::$raw_func(self.$raw_ptr_var, $( $param_name, )* $( $tmp_ident.as_mut_ptr() ),* )};
+        let ierr = unsafe { crate::petsc_raw::$raw_func(self.$raw_ptr_var, $( $param_name.into(), )* $( $tmp_ident.as_mut_ptr() as *mut _ ),* )};
         Petsc::check_error(self.world, ierr)?;
 
         #[allow(unused_unsafe)]

@@ -111,7 +111,7 @@ fn main() -> petsc_rs::Result<()> {
     // float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
     // call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
     // but if `PetscScalar` is complex it will construct a complex value which the imaginary part being
-    // the default value (i.e. the underling type must implement `Default`).
+    // set to `0`.
     A.assemble_with(mat_ownership_range.map(|ii| {
             let mut data_vec = vec![];
             let i = ii/n;

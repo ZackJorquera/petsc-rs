@@ -184,7 +184,7 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
     ///     let mut f_view = f.view_mut()?;
     ///     let g_view = g.view()?;
     ///
-    ///     let d = PetscScalar::powi(n as PetscScalar - 1.0, 2);
+    ///     let d = (PetscScalar::from(n as PetscReal) - 1.0).powi(2);
     ///
     ///     // Nonlinear transformation
     ///     f_view[0] = x_view[0];
@@ -299,9 +299,9 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
     /// snes.set_jacobian_single_mat(J,|_snes, x: &Vector, ap_mat: &mut Mat| {
     ///     let x_view = x.view()?;
     ///
-    ///     let d = PetscScalar::powi(n as PetscScalar - 1.0, 2);
+    ///     let d = (PetscScalar::from(n as PetscReal) - 1.0).powi(2);
     ///
-    ///     ap_mat.assemble_with((0..n).map(|i| if i == 0 || i == n-1{ vec![(i,i,1.0)] }
+    ///     ap_mat.assemble_with((0..n).map(|i| if i == 0 || i == n-1{ vec![(i,i,PetscScalar::from(1.0))] }
     ///                                         else { vec![(i,i-1,d), (i,i,-2.0*d+2.0*x_view[i as usize]), (i,i+1,d)] })
     ///             .flatten(), 
     ///         InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
@@ -391,22 +391,25 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
     /// J.set_from_options()?;
     /// J.seq_aij_set_preallocation(3, None)?;
     /// # #[allow(non_snake_case)]
-    /// let mut P = J.duplicate(MatDuplicateOption::MAT_SHARE_NONZERO_PATTERN)?;
+    /// let mut P = petsc.mat_create()?;
+    /// P.set_sizes(None, None, Some(n), Some(n))?;
+    /// P.set_from_options()?;
+    /// P.seq_aij_set_preallocation(3, None)?;
     ///
     /// let mut snes = petsc.snes_create()?;
     ///
     /// snes.set_jacobian(J, P,|_snes, x: &Vector, a_mat: &mut Mat, p_mat: &mut Mat| {
     ///     let x_view = x.view()?;
     ///
-    ///     let d = PetscScalar::powi(n as PetscScalar - 1.0, 2);
+    ///     let d = (PetscScalar::from(n as PetscReal) - 1.0).powi(2);
     ///
-    ///     a_mat.assemble_with((0..n).map(|i| if i == 0 || i == n-1{ vec![(i,i,1.0)] }
+    ///     a_mat.assemble_with((0..n).map(|i| if i == 0 || i == n-1{ vec![(i,i,PetscScalar::from(1.0))] }
     ///                                         else { vec![(i,i-1,d), (i,i,-2.0*d+2.0*x_view[i as usize]), (i,i+1,d)] })
     ///             .flatten(), 
     ///         InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
     ///
     ///     // Just set them to be the same matrix for the sake of this example
-    ///     p_mat.assemble_with((0..n).map(|i| if i == 0 || i == n-1{ vec![(i,i,1.0)] }
+    ///     p_mat.assemble_with((0..n).map(|i| if i == 0 || i == n-1{ vec![(i,i,PetscScalar::from(1.0))] }
     ///                                         else { vec![(i,i-1,d), (i,i,-2.0*d+2.0*x_view[i as usize]), (i,i+1,d)] })
     ///             .flatten(), 
     ///         InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
