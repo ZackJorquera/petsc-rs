@@ -22,6 +22,5 @@ libffi-sys = { version = "*", features = ["system"] }
 mpi = {git = "https://github.com/ZackJorquera/rsmpi.git", branch = "trait_object_safety", default-features = false }
 structopt = { version = "0.3", default-features = false }
 
-# We want to tell `petsc-sys` directly to not use the default features so that we can use other ones
-petsc-sys = { path = "../../petsc-sys/", default-features = false, features = ["petsc-real-f32", "petsc-int-i64", "petsc-use-complex"] }
-petsc-rs = { path = "../../", default-features = false }
+# We have to disable the default features so that we don't have multiple contradicting features specifying the types
+petsc-rs = { path = "../../", default-features = false, features = ["petsc-real-f32", "petsc-int-i64", "petsc-use-complex"] }

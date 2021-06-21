@@ -82,8 +82,8 @@ impl<'a> Vector<'a> {
     /// `global_size` of `None` then all processors must, otherwise the program will hang.
     pub fn set_sizes(&mut self, local_size: Option<PetscInt>, global_size: Option<PetscInt>) -> Result<()> {
         let ierr = unsafe { petsc_raw::VecSetSizes(
-            self.vec_p, local_size.unwrap_or(petsc_raw::PETSC_DECIDE as PetscInt), 
-            global_size.unwrap_or(petsc_raw::PETSC_DECIDE as PetscInt)) };
+            self.vec_p, local_size.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
+            global_size.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER)) };
         Petsc::check_error(self.world, ierr)
     }
 

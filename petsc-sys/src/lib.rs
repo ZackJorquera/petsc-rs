@@ -26,6 +26,7 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 #[cfg(feature = "petsc-use-complex")]
 use num_complex::Complex;
 
+pub const PETSC_DECIDE_INTEGER: PetscInt = PETSC_DECIDE as PetscInt;
 pub const PETSC_DEFAULT_INTEGER: PetscInt = PETSC_DEFAULT as PetscInt;
 pub const PETSC_DEFAULT_REAL: PetscReal = PETSC_DEFAULT as PetscReal;
 
@@ -162,56 +163,3 @@ impl From<Complex<PetscReal>> for __BindgenComplex<PetscReal> {
         unsafe { std::mem::transmute(ct) }
     }
 }
-
-// We want to expose the complex type using the num-complex Complex type
-// which has the same memory layout as the one bindgen creates, `__BindgenComplex`.
-// TODO: is this the best way to do this. If we are just going to transmute to convert 
-// why dont we ignore these types from bindgen a manually define them our selves like
-// we did for MPI_Comm.
-#[cfg(feature = "petsc-use-complex")]
-pub type PetscComplex2 = Complex<PetscReal>;
-#[cfg(not(feature = "petsc-use-complex"))]
-pub type PetscComplex2 = PetscComplex;
-
-// TODO: I dont like how i have to do the doc string twice
-/// PETSc scalar type.
-///
-/// Can represent either a real or complex number in varying levels of precision. The specific 
-/// representation can be set by features for [`petsc-sys`](crate).
-///
-/// Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
-/// float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
-/// call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
-/// but if `PetscScalar` is complex it will construct a complex value which the imaginary part being
-/// set to `0`.
-///
-/// # Example
-///
-/// ```
-/// # use petsc_rs::prelude::*;
-/// // This will always work
-/// let a = PetscScalar::from(1.5);
-/// ```
-#[cfg(not(feature = "petsc-use-complex"))]
-pub type PetscScalar2 = PetscReal;
-
-/// PETSc scalar type.
-///
-/// Can represent either a real or complex number in varying levels of precision. The specific 
-/// representation can be set by features for [`petsc-sys`](crate).
-///
-/// Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
-/// float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
-/// call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
-/// but if `PetscScalar` is complex it will construct a complex value which the imaginary part being 
-/// set to `0`.
-///
-/// # Example
-///
-/// ```
-/// # use petsc_rs::prelude::*;
-/// // This will always work
-/// let a = PetscScalar::from(1.5);
-/// ```
-#[cfg(feature = "petsc-use-complex")]
-pub type PetscScalar2 = PetscComplex2;

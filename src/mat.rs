@@ -56,10 +56,10 @@ impl<'a> Mat<'a> {
     /// If None is not used for the local sizes, then the user must ensure that they are chosen to be compatible with the vectors.
     pub fn set_sizes(&mut self, local_rows: Option<PetscInt>, local_cols: Option<PetscInt>, global_rows: Option<PetscInt>, global_cols: Option<PetscInt>) -> Result<()> {
         let ierr = unsafe { petsc_raw::MatSetSizes(
-            self.mat_p, local_rows.unwrap_or(petsc_raw::PETSC_DECIDE as PetscInt), 
-            local_cols.unwrap_or(petsc_raw::PETSC_DECIDE as PetscInt), 
-            global_rows.unwrap_or(petsc_raw::PETSC_DECIDE as PetscInt), 
-            global_cols.unwrap_or(petsc_raw::PETSC_DECIDE as PetscInt)) };
+            self.mat_p, local_rows.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
+            local_cols.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
+            global_rows.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
+            global_cols.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER)) };
         Petsc::check_error(self.world, ierr)
     }
 
