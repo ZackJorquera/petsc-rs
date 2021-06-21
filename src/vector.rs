@@ -6,6 +6,8 @@ use std::ops::{Deref, DerefMut};
 
 use crate::prelude::*;
 
+use ndarray::{ArrayView, ArrayViewMut};
+
 /// Abstract PETSc vector object
 pub struct Vector<'a> {
     pub(crate) world: &'a dyn Communicator,
@@ -15,14 +17,16 @@ pub struct Vector<'a> {
 
 /// A immutable view of a Vector with Deref to slice.
 pub struct VectorView<'a, 'b> {
-    vec: &'b Vector<'a>,
-    array: *const f64,
+    pub(crate) vec: &'b Vector<'a>,
+    pub(crate) array: *const f64,
+    pub(crate) ndarray: ArrayView<'b, f64, ndarray::IxDyn>,
 }
 
 /// A mutable view of a Vector with Deref to slice.
 pub struct VectorViewMut<'a, 'b> {
-    vec: &'b mut Vector<'a>,
-    array: *mut f64,
+    pub(crate) vec: &'b mut Vector<'a>,
+    pub(crate) array: *mut f64,
+    pub(crate) ndarray: ArrayViewMut<'b, f64, ndarray::IxDyn>,
 }
 
 impl<'a> Drop for Vector<'a> {
@@ -290,8 +294,8 @@ impl<'a> Vector<'a> {
     ///
     /// let v_view = v.view()?;
     /// let v2_view = v2.view()?;
-    /// assert_eq!(&v_view[..], &values[vec_ownership_range_usize.clone()]);
-    /// assert_eq!(&v_view[..], &v2_view[..]);
+    /// assert_eq!(v_view.as_slice().unwrap(), &values[vec_ownership_range_usize.clone()]);
+    /// assert_eq!(v_view.as_slice().unwrap(), v2_view.as_slice().unwrap());
     /// # Ok(())
     /// # }
     /// ```
@@ -353,7 +357,7 @@ impl<'a> Vector<'a> {
     ///
     /// {
     ///     let mut v_view = v.view()?;
-    ///     assert_eq!(&v_view[..], &[1.1,0.0,0.0,2.2,0.0,0.0,0.0,3.3,0.0,4.4]);
+    ///     assert_eq!(v_view.as_slice().unwrap(), &[1.1,0.0,0.0,2.2,0.0,0.0,0.0,3.3,0.0,4.4]);
     /// }
     ///
     /// v.assemble_with([(0, 1.0), (2, 2.0), (8, 3.0), (9, 4.0)], InsertMode::ADD_VALUES)?;
@@ -361,8 +365,8 @@ impl<'a> Vector<'a> {
     /// // It is valid to have multiple immutable views
     /// let v_view = v.view()?;
     /// let v_view2 = v.view()?;
-    /// assert_eq!(&v_view[..], &v_view2[..]);
-    /// assert_eq!(&v_view2[..], &[2.1,0.0,2.0,2.2,0.0,0.0,0.0,3.3,3.0,8.4]);
+    /// assert_eq!(v_view.as_slice().unwrap(), v_view2.to_slice().unwrap());
+    /// assert_eq!(v_view2.as_slice().unwrap(), &[2.1,0.0,2.0,2.2,0.0,0.0,0.0,3.3,3.0,8.4]);
     /// # Ok(())
     /// # }
     /// ```
@@ -399,12 +403,12 @@ impl<'a> Vector<'a> {
     ///
     /// {
     ///     let mut v_view = v.view_mut()?;
-    ///     assert_eq!(&v_view[..], &[1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5]);
+    ///     assert_eq!(v_view.as_slice().unwrap(), &[1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5]);
     ///     v_view[2] = 9.0;
     /// }
     ///
     /// let v_view = v.view()?;
-    /// assert_eq!(&v_view[..], &[1.5, 1.5, 9.0, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5]);
+    /// assert_eq!(v_view.as_slice().unwrap(), &[1.5, 1.5, 9.0, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5]);
     /// # Ok(())
     /// # }
     /// ```
@@ -439,7 +443,7 @@ impl<'a> Vector<'a> {
     ///
     /// let v_view = v.view()?;
     /// assert_eq!(v.get_local_size()?, values.len() as i32);
-    /// assert_eq!(&v_view[..], &values);
+    /// assert_eq!(v_view.as_slice().unwrap(), &values);
     /// # Ok(())
     /// # }
     /// ```
@@ -482,7 +486,10 @@ impl<'a, 'b> VectorViewMut<'a, 'b> {
         let ierr = unsafe { petsc_raw::VecGetArray(vec.vec_p, array.as_mut_ptr()) };
         Petsc::check_error(vec.world, ierr)?;
 
-        Ok(Self { vec, array: unsafe { array.assume_init() } })
+        let ndarray = unsafe { 
+            ArrayViewMut::from_shape_ptr(ndarray::IxDyn(&[vec.get_local_size().unwrap() as usize]), array.assume_init()) };
+        
+        Ok(Self { vec, array: unsafe { array.assume_init() }, ndarray })
     }
 }
 
@@ -493,27 +500,44 @@ impl<'a, 'b> VectorView<'a, 'b> {
         let ierr = unsafe { petsc_raw::VecGetArrayRead(vec.vec_p, array.as_mut_ptr()) };
         Petsc::check_error(vec.world, ierr)?;
 
-        Ok(Self { vec, array: unsafe { array.assume_init() } })
+        let ndarray = unsafe { 
+            ArrayView::from_shape_ptr(ndarray::IxDyn(&[vec.get_local_size().unwrap() as usize]), array.assume_init()) };
+
+        Ok(Self { vec, array: unsafe { array.assume_init() }, ndarray })
     }
 }
 
-impl Deref for VectorViewMut<'_, '_> {
-    type Target = [f64];
-    fn deref(&self) -> &[f64] {
-        unsafe { std::slice::from_raw_parts(self.array, self.vec.get_local_size().unwrap() as usize) }
+// TODO: im not sure if i like this, it would make more sense for Vector::view to return an ArrayView
+// Be also we need to run out own custom drop.
+impl<'b> Deref for VectorViewMut<'_, 'b> {
+    type Target = ArrayViewMut<'b, f64, ndarray::IxDyn>;
+    fn deref(&self) -> &ArrayViewMut<'b, f64, ndarray::IxDyn> {
+        &self.ndarray
     }
 }
 
-impl DerefMut for VectorViewMut<'_, '_> {
-    fn deref_mut(&mut self) -> &mut [f64] {
-        unsafe { std::slice::from_raw_parts_mut(self.array, self.vec.get_local_size().unwrap() as usize) }
+impl<'b> DerefMut for VectorViewMut<'_, 'b> {
+    fn deref_mut(&mut self) -> &mut ArrayViewMut<'b, f64, ndarray::IxDyn> {
+        &mut self.ndarray
     }
 }
 
-impl Deref for VectorView<'_, '_> {
-    type Target = [f64];
-    fn deref(&self) -> &[f64] {
-        unsafe { std::slice::from_raw_parts(self.array, self.vec.get_local_size().unwrap() as usize) }
+impl std::fmt::Debug for VectorViewMut<'_, '_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.ndarray.fmt(f)
+    }
+}
+
+impl<'b> Deref for VectorView<'_, 'b> {
+    type Target = ArrayView<'b, f64, ndarray::IxDyn>;
+    fn deref(&self) -> &ArrayView<'b, f64, ndarray::IxDyn> {
+        &self.ndarray
+    }
+}
+
+impl std::fmt::Debug for VectorView<'_, '_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.ndarray.fmt(f)
     }
 }
 
@@ -528,6 +552,7 @@ impl<'a> Vector<'a> {
         VecGetLocalSize, get_local_size, vec_p, output i32, ls, #[doc = "Returns the number of elements of the vector stored in local memory."];
         VecGetSize, get_global_size, vec_p, output i32, gs, #[doc = "Returns the global number of elements of the vector."];
         VecNorm, norm, vec_p, input NormType, norm_type, output f64, tmp1, #[doc = "Computes the vector norm."];
+        VecScale, scale, vec_p, input f64, alpha, takes mut, #[doc = "Scales a vector (`x[i] *= alpha` for each `i`)."];
     }
 }
 

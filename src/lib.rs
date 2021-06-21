@@ -20,6 +20,7 @@ pub mod ksp;
 #[path = "preconditioner.rs"] pub mod pc; // TODO: or should i just rename the file
 pub mod viewer;
 pub mod snes;
+pub mod dm;
 
 pub mod prelude {
     //! Commonly used items.
@@ -33,6 +34,7 @@ pub mod prelude {
         ksp::{KSP, },
         snes::{SNES, },
         pc::{PC, PCType, },
+        dm::{DM, DMBoundaryType, DMDAStencilType, DMType, },
         viewer::{Viewer, PetscViewerFormat, },
     };
     pub use mpi::traits::*;

@@ -27,8 +27,6 @@ pub struct SNES<'a, 'tl> {
     jacobian_trampoline_data: Option<SNESJacobianTrampolineData<'a, 'tl>>,
 }
 
-//pub type SNESFunctionUserClosure = dyn FnMut(&SNES, &Vector, &mut Vector) -> Result<()>;
-
 struct SNESFunctionTrampolineData<'a, 'tl> {
     world: &'a dyn Communicator,
     // This field is only used for its ownership.
@@ -483,7 +481,7 @@ impl<'a> SNES<'a, '_> {
     wrap_simple_petsc_member_funcs! {
         SNESSetFromOptions, set_from_options, snes_p, takes mut, #[doc = "Sets various SNES and KSP parameters from user options."];
         SNESSetUp, set_up, snes_p, takes mut, #[doc = "Sets up the internal data structures for the later use of a nonlinear solver. This will be automatically called with [`SNES::solve()`]."];
-        SNESGetIterationNumber, get_iteration_number, snes_p, output i32, snes_p, #[doc = "Gets the number of nonlinear iterations completed at this time. (<https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/SNES/SNESGetIterationNumber.html>)"];
+        SNESGetIterationNumber, get_iteration_number, snes_p, output i32, it_num, #[doc = "Gets the number of nonlinear iterations completed at this time. (<https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/SNES/SNESGetIterationNumber.html>)"];
         SNESGetTolerances, get_tolerances, snes_p, output f64, atol, output f64, rtol, output f64, stol, output i32, maxit, output i32, maxf, #[doc = "Gets various parameters used in convergence tests."]; 
         SNESGetConvergedReason, get_converged_reason, snes_p, output SNESConvergedReason, conv_reas, #[doc = "Gets the reason the SNES iteration was stopped."];
     }

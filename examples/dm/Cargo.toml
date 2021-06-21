@@ -1,10 +1,14 @@
 [package]
-name = "petsc-rs"
+name = "ksp"
 version = "0.1.0"
 authors = ["Zack Jorquera <zackary.jorquera@colorado.edu>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[bin]]
+name = "ex1"
+path = "src/ex1.rs"
 
 [dependencies]
 # adding libffi-sys is a work around, mpi requeres libffi which will fail to compile on WSL2 without 
@@ -13,5 +17,6 @@ edition = "2018"
 # doesn't seem to work.
 libffi-sys = { version = "*", features = ["system"] }
 mpi = {git = "https://github.com/ZackJorquera/rsmpi.git", branch = "trait_object_safety", default-features = false }
-petsc-sys = { path = "./petsc-sys/" }
-ndarray = "0.15"
+petsc-rs = { path = "../../" }
+structopt = { version = "0.3", default-features = false }
+ndarray = "*"
