@@ -148,7 +148,7 @@ fn main() -> petsc_rs::Result<()> {
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
                         Solve the linear system
         - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
-    ksp.solve(&b, &mut x)?;
+    ksp.solve(Some(&b), &mut x)?;
 
     /*
         View solver info; we could instead use the option -ksp_view to

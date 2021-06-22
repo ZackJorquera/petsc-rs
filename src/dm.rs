@@ -221,6 +221,8 @@ impl<'a> DM<'a> {
     ///         .filter(|i| osr.contains(i))
     ///         .map(|i| (i, i as f64)),
     ///     InsertMode::INSERT_VALUES)?;
+    /// # let viewer = Viewer::create_ascii_stdout(petsc.world())?;
+    /// # global.view_with(&viewer)?;
     ///
     /// // creates immutable 2d view
     /// let g_view = dm.da_vec_view(&global)?;
@@ -402,6 +404,22 @@ impl<'a> DM<'a> {
 
         Ok(crate::vector::VectorViewMut { vec, array: unsafe { array.assume_init() }, ndarray })
     }
+
+    /// Sets the names of individual field components in multicomponent vectors associated with a DMDA.
+    ///
+    /// Note, you must call [`DM::set_up()`] before you call this.
+    ///
+    /// # Parameters
+    ///
+    /// * `nf` - field number for the DMDA (0, 1, ... dof-1), where dof indicates the number of
+    /// degrees of freedom per node within the DMDA.
+    /// * `name` - the name of the field (component)
+    pub fn da_set_feild_name<T: ToString>(&mut self, nf: i32, name: T) -> crate::Result<()> {
+        let name_cs = CString::new(name.to_string()).expect("`CString::new` failed");
+        
+        let ierr = unsafe { petsc_raw::DMDASetFieldName(self.dm_p, nf, name_cs.as_ptr()) };
+        Petsc::check_error(self.world, ierr)
+    }
 }
 
 // macro impls
@@ -432,6 +450,10 @@ impl<'a> DM<'a> {
             # Outputs (in order)\n\n\
             * `x,y,z` - the corner indices (where y and z are optional; these are used for 2D and 3D problems)\n\
             * `m,n,p` - widths in the corresponding directions (where n and p are optional; these are used for 2D and 3D problems)"];
+        // TODO: would it be nicer to have this take in a Range<f64>?
+        DMDASetUniformCoordinates, da_set_uniform_coordinates, dm_p, input f64, x_min, input f64, x_max, input f64, y_min,
+            input f64, y_max, input f64, z_min, input f64, z_max, #[doc = "Sets a DMDA coordinates to be a uniform grid.\n\n\
+            `y` and `z` value will be ignored for 1 and 2 dimensional problems."];
     }
 }
 

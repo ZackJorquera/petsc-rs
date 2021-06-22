@@ -198,7 +198,7 @@ fn main() -> petsc_rs::Result<()> {
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
                         Solve the linear system
         - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
-    ksp.solve(&b, &mut x)?;
+    ksp.solve(Some(&b), &mut x)?;
 
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -

@@ -29,8 +29,9 @@ pub mod prelude {
         PetscErrorKind,
         InsertMode,
         petsc_println,
+        petsc_println_all,
         vector::{Vector, NormType, VecOption, },
-        mat::{Mat, MatAssemblyType, MatOption, MatDuplicateOption, },
+        mat::{Mat, MatAssemblyType, MatOption, MatDuplicateOption, MatStencil, },
         ksp::{KSP, },
         snes::{SNES, },
         pc::{PC, PCType, },
@@ -88,6 +89,38 @@ macro_rules! petsc_println {
     ($world:expr, $($arg:tt)*) => ({
         Petsc::print($world, format_args!($($arg)*))?;
         Petsc::print($world, "\n")?;
+    })
+}
+
+/// Prints synchronized output from several processors. Output of the first processor is followed by
+/// that of the second, etc.
+///
+/// Will automatically call `PetscSynchronizedFlush` after.
+///
+/// Note, the macro internally uses the try operator, `?`, so it can only be used
+/// in functions that return a [`petsc_rs::Result`](Result).
+///
+/// # Example
+///
+/// ```
+/// # use petsc_rs::prelude::*;
+/// # fn main() -> petsc_rs::Result<()> {
+/// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
+///
+/// Petsc::print_all(petsc.world(), format!("Hello parallel world of {} processes from process {}!\n",
+///     petsc.world().size(), petsc.world().rank()))?;
+/// // or use:
+/// petsc_println_all!(petsc.world(), "Hello parallel world of {} processes from process {}!", 
+///     petsc.world().size(), petsc.world().rank());
+/// # Ok(())
+/// # }
+/// ```
+#[macro_export]
+macro_rules! petsc_println_all {
+    ($world:expr) => (Petsc::print_all($world, "\n")?);
+    ($world:expr, $($arg:tt)*) => ({
+        let s = format!("{}\n", format_args!($($arg)*));
+        Petsc::print_all($world, s)?;
     })
 }
 
@@ -401,6 +434,7 @@ impl Petsc {
     // TODO: should we move this out of `Petsc`, it is a static function
     /// replacement for the `PetscPrintf` function in the C api. You can also use the [`petsc_println`] macro
     /// to have string formatting.
+    ///
     /// Prints to standard out, only from the first processor in the communicator. Calls from other processes are ignored.
     ///
     /// # Example
@@ -418,7 +452,6 @@ impl Petsc {
     /// ```
     ///
     /// [`petsc_println`]: petsc_println
-    //#[doc(hidden)]
     pub fn print<T: ToString>(world: &dyn Communicator, msg: T) -> Result<()> {
         let msg_cs = ::std::ffi::CString::new(msg.to_string()).expect("`CString::new` failed");
 
@@ -426,6 +459,42 @@ impl Petsc {
         let ps = CString::new("%s").unwrap();
 
         let ierr = unsafe { petsc_raw::PetscPrintf(world.as_raw(), ps.as_ptr(), msg_cs.as_ptr()) };
+        Petsc::check_error(world, ierr)
+    }
+
+    /// Replacement for the `PetscSynchronizedPrintf` function in the C api. You can also use the [`petsc_println_all`]
+    /// macro to have rust string formatting.
+    ///
+    /// Prints synchronized output from several processors. Output of the first processor is followed by
+    /// that of the second, etc.
+    ///
+    /// Will automatically call `PetscSynchronizedFlush` after.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use petsc_rs::prelude::*;
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
+    ///
+    /// Petsc::print_all(petsc.world(), format!("Hello parallel world of {} processes from process {}!\n",
+    ///     petsc.world().size(), petsc.world().rank()))?;
+    /// // or use:
+    /// petsc_println_all!(petsc.world(), "Hello parallel world of {} processes from process {}!", 
+    ///     petsc.world().size(), petsc.world().rank());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn print_all<T: ToString>(world: &dyn Communicator, msg: T) -> Result<()> {
+        let msg_cs = ::std::ffi::CString::new(msg.to_string()).expect("`CString::new` failed");
+
+        // The first entry needs to be `%s` so that this function is not susceptible to printf injections.
+        let ps = CString::new("%s").unwrap();
+
+        let ierr = unsafe { petsc_raw::PetscSynchronizedPrintf(world.as_raw(), ps.as_ptr(), msg_cs.as_ptr()) };
+        Petsc::check_error(world, ierr)?;
+
+        let ierr = unsafe { petsc_raw::PetscSynchronizedFlush(world.as_raw(), petsc_raw::PETSC_STDOUT) };
         Petsc::check_error(world, ierr)
     }
 

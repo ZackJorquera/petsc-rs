@@ -28,6 +28,7 @@ impl<'a> Drop for Mat<'a> {
 pub use petsc_raw::MatAssemblyType;
 pub use petsc_raw::MatOption;
 pub use petsc_raw::MatDuplicateOption;
+pub use petsc_raw::MatStencil;
 
 impl<'a> Mat<'a> {
     /// Same at [`Petsc::mat_create()`].
@@ -149,6 +150,35 @@ impl<'a> Mat<'a> {
         Petsc::check_error(self.world, ierr)
     }
 
+    /// Inserts or adds a block of values into a matrix. Using structured grid indexing
+    ///
+    /// The grid coordinates are across the entire grid, not just the local portion.
+    ///
+    /// In order to use this routine, the matrix must have been created by a [DM](crate::dm).
+    ///
+    /// The columns and rows in the stencil passed in MUST be contained within the ghost region of
+    /// the given process as set with `DM::da_create_XXX()` or `MatSetStencil()`. For example, if you
+    /// create a [`DMDA`](crate::dm) with an overlap of one grid level and on a particular process its
+    /// first local nonghost x logical coordinate is 6 (so its first ghost x logical coordinate is 5)
+    /// the first i index you can use in your column and row indices in `MatSetStencil()` is 5.
+    ///
+    /// C API docs: <https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Mat/MatSetValuesStencil.html#MatSetValuesStencil>
+    ///
+    /// # Notes for [`MatStencil`] type
+    ///
+    /// The `i`,`j`, and `k` represent the logical coordinates over the entire grid (for 2 and
+    /// 1 dimensional problems the `k` and `j` entries are ignored). The `c` represents the the degrees
+    /// of freedom at each grid point (the dof argument to DMDASetDOF()). If dof is 1 then this entry
+    /// is ignored.
+    pub fn set_values_stencil(&mut self, idxm: &[MatStencil], idxn: &[MatStencil], v: &[f64], addv: InsertMode) -> Result<()> {
+        let m = idxm.len();
+        let n = idxn.len();
+        assert_eq!(v.len(), m*n);
+        let ierr = unsafe { petsc_raw::MatSetValuesStencil(self.mat_p, m as i32, idxm.as_ptr(), n as i32,
+            idxn.as_ptr(), v.as_ptr(), addv) };
+        Petsc::check_error(self.world, ierr)
+    }
+
     /// Computes the matrix-vector product, y = Ax
     pub fn mult(&self, x: &Vector, y: &mut Vector) -> Result<()> {
         let ierr = unsafe { petsc_raw::MatMult(self.mat_p, x.vec_p, y.vec_p) };
@@ -251,6 +281,26 @@ impl<'a> Mat<'a> {
         // implements `Sum` so we can use the sum method and `()` does not.
         let _num_inserts = iter_builder.into_iter().map(|(idxm, idxn, v)| {
             self.set_values(std::slice::from_ref(&idxm), std::slice::from_ref(&idxn),
+                std::slice::from_ref(&v), addv).map(|_| 1)
+        }).sum::<Result<i32>>()?;
+        // Note, `sum()` will short-circuit the iterator if an error is encountered.
+
+        self.assembly_begin(assembly_type)?;
+        self.assembly_end(assembly_type)
+    }
+
+    /// Allows you to give an iter that will be use to make a series of calls to [`Mat::set_values_stencil()`].
+    /// Then is followed by both [`Mat::assembly_begin()`] and [`Mat::assembly_end()`].
+    ///
+    /// This functions identically to [`Mat::assemble_with()`] but uses [`Mat::set_values_stencil()`].
+    pub fn assemble_with_stencil<I>(&mut self, iter_builder: I, addv: InsertMode, assembly_type: MatAssemblyType) -> Result<()>
+    where
+        I: IntoIterator<Item = (MatStencil, MatStencil, f64)>
+    {
+        // We don't actually care about the num_inserts value, we just need something that
+        // implements `Sum` so we can use the sum method and `()` does not.
+        let _num_inserts = iter_builder.into_iter().map(|(idxm, idxn, v)| {
+            self.set_values_stencil(std::slice::from_ref(&idxm), std::slice::from_ref(&idxn),
                 std::slice::from_ref(&v), addv).map(|_| 1)
         }).sum::<Result<i32>>()?;
         // Note, `sum()` will short-circuit the iterator if an error is encountered.

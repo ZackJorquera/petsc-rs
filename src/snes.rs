@@ -20,8 +20,7 @@ pub struct SNES<'a, 'tl> {
     world: &'a dyn Communicator,
     pub(crate) snes_p: *mut petsc_raw::_p_SNES,
 
-    #[doc(hidden)]
-    ksp: Option<KSP<'a>>,
+    ksp: Option<KSP<'a, 'tl>>,
 
     function_trampoline_data: Option<Pin<Box<SNESFunctionTrampolineData<'a, 'tl>>>>,
     jacobian_trampoline_data: Option<SNESJacobianTrampolineData<'a, 'tl>>,
@@ -33,7 +32,7 @@ struct SNESFunctionTrampolineData<'a, 'tl> {
     // The usage of the pointer/reference is all handled on the c side.
     // However, we might want to use it for something like `get_residuals()`
     _vec: Vector<'a>,
-    user_f: Box<dyn FnMut(&SNES, &Vector, &mut Vector) -> Result<()> + 'tl>,
+    user_f: Box<dyn FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>,
 }
 
 enum SNESJacobianTrampolineData<'a,'tl> {
@@ -44,14 +43,14 @@ enum SNESJacobianTrampolineData<'a,'tl> {
 struct SNESJacobianSingleTrampolineData<'a, 'tl> {
     world: &'a dyn Communicator,
     _ap_mat: Mat<'a>,
-    user_f: Box<dyn FnMut(&SNES, &Vector, &mut Mat) -> Result<()> + 'tl>,
+    user_f: Box<dyn FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a>) -> Result<()> + 'tl>,
 }
 
 struct SNESJacobianDoubleTrampolineData<'a, 'tl> {
     world: &'a dyn Communicator,
     _a_mat: Mat<'a>,
     _p_mat: Mat<'a>,
-    user_f: Box<dyn FnMut(&SNES, &Vector, &mut Mat, &mut Mat) -> Result<()> + 'tl>,
+    user_f: Box<dyn FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a>, &mut Mat<'a>) -> Result<()> + 'tl>,
 }
 
 pub use petsc_raw::SNESConvergedReason;
@@ -84,7 +83,7 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
     /// Sets a [`KSP`](KSP) context for the SNES object to use.
     ///
     /// if you change the ksp by calling set again, then the original will be dropped.
-    pub fn set_ksp(&mut self, ksp: KSP<'a>) -> Result<()>
+    pub fn set_ksp(&mut self, ksp: KSP<'a, 'tl>) -> Result<()>
     {
         
         let ierr = unsafe { petsc_raw::SNESSetKSP(self.snes_p, ksp.ksp_p) };
@@ -97,7 +96,7 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
     }
 
     /// Returns a reference to the [`KSP`](KSP) context.
-    pub fn get_ksp<'c>(&'c mut self) -> Result<&'c KSP<'a>>
+    pub fn get_ksp<'c>(&'c mut self) -> Result<&'c KSP<'a, 'tl>>
     {
         // TODO: should we even have a non mut one (or only `get_ksp_mut`)
 
@@ -121,7 +120,7 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
     }
 
     /// Returns a mutable reference to the [`KSP`](KSP) context.
-    pub fn get_ksp_mut<'c>(&'c mut self) -> Result<&'c mut KSP<'a>>
+    pub fn get_ksp_mut<'c>(&'c mut self) -> Result<&'c mut KSP<'a, 'tl>>
     {
         if let Some(ref mut ksp) = self.ksp
         {
@@ -200,7 +199,7 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
     /// ```
     pub fn set_function<F>(&mut self, input_vec: Vector<'a>, user_f: F) -> Result<()>
     where
-        F: FnMut(&SNES, &Vector, &mut Vector) -> Result<()> + 'tl
+        F: FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
     {
         // TODO: should input_vec be consumed or passed by mut ref? We want to take mutable access for
         // it until the SNES is dropped. so either way its not like we can return mutable access to the
@@ -313,7 +312,7 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
     /// ```
     pub fn set_jacobian_single_mat<F>(&mut self, ap_mat: Mat<'a>, user_f: F) -> Result<()>
     where
-        F: FnMut(&SNES, &Vector, &mut Mat) -> Result<()> + 'tl,
+        F: FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a>) -> Result<()> + 'tl,
     {
         // TODO: should we make ap_mat an `Rc<RefCell<Mat>>`
 
@@ -418,7 +417,7 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
     /// ```
     pub fn set_jacobian<F>(&mut self, a_mat: Mat<'a>, p_mat: Mat<'a>, user_f: F) -> Result<()>
     where
-        F: FnMut(&SNES, &Vector, &mut Mat, &mut Mat) -> Result<()> + 'tl
+        F: FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a>, &mut Mat<'a>) -> Result<()> + 'tl
     {
         // TODO: should we make a/p_mat an `Rc<RefCell<Mat>>`
         let closure_anchor = Box::new(user_f);
