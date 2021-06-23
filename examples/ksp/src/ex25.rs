@@ -73,7 +73,7 @@ fn main() -> petsc_rs::Result<()> {
         {
             let mut b_view = dm.da_vec_view_mut(b)?;
             if xs == 0 { b_view[0] = 0.0; }
-            if xs + xm == mx { b_view[mx as usize -1] = 0.0; }
+            if xs + xm == mx { b_view[xm as usize -1] = 0.0; }
         }
 
         b.assemble()?;
@@ -128,8 +128,8 @@ fn main() -> petsc_rs::Result<()> {
     let iters = ksp.get_iteration_number()?;
     petsc_println!(petsc.world(), "Iters {}", iters);
 
-    //ksp.view_with(&petsc.viewer_create_ascii_stdout()?)?;
-    x.view_with(&petsc.viewer_create_ascii_stdout()?)?;
+    //ksp.view_with(Some(&petsc.viewer_create_ascii_stdout()?))?;
+    x.view_with(Some(&petsc.viewer_create_ascii_stdout()?))?;
     petsc_println_all!(petsc.world(), "Process [{}]\n{:.5e}", petsc.world().rank(), *ksp.get_dm()?.da_vec_view(&x)?);
 
     // return

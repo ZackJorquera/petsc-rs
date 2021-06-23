@@ -95,14 +95,14 @@ fn main() -> petsc_rs::Result<()> {
     local.scale(petsc.world().rank() as f64 + 1.0)?;
     dm.local_to_global(&local, InsertMode::ADD_VALUES, &mut global)?;
 
-    dm.view_with(&viewer)?;
+    dm.view_with(Some(&viewer))?;
     if view_global {
         petsc_println_all!(petsc.world(), "(Process: {}) global vec (flat):\n{:?}", petsc.world().rank(), global.view()?);
 
         petsc_println_all!(petsc.world(), "(Process: {}) global vec:\n{:?}", petsc.world().rank(), dm.da_vec_view(&global)?);
 
         // Note, this might print the vector in a different order than the above two
-        global.view_with(&viewer)?;
+        global.view_with(Some(&viewer))?;
     }
 
     // return

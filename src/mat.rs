@@ -122,7 +122,7 @@ impl<'a> Mat<'a> {
     /// mat.assembly_end(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
     /// # // for debugging
     /// # let viewer = Viewer::create_ascii_stdout(petsc.world())?;
-    /// # mat.view_with(&viewer)?;
+    /// # mat.view_with(Some(&viewer))?;
     ///
     /// for i in 0..n {
     ///     let v = [i as f64 , i as f64 + 3.0, i as f64 + 6.0];
@@ -132,7 +132,7 @@ impl<'a> Mat<'a> {
     /// mat2.assembly_begin(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
     /// mat2.assembly_end(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
     /// # // for debugging
-    /// # mat2.view_with(&viewer)?;
+    /// # mat2.view_with(Some(&viewer))?;
     /// 
     /// assert_eq!(&mat.get_values(0..n, 0..n).unwrap()[..], &mat2.get_values(0..n, 0..n).unwrap()[..]);
     /// assert_eq!(&mat.get_values(0..n, 0..n).unwrap()[..], &[ 0.0,  1.0,  2.0,
@@ -263,7 +263,7 @@ impl<'a> Mat<'a> {
     ///     InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY);
     /// # // for debugging
     /// # let viewer = Viewer::create_ascii_stdout(petsc.world())?;
-    /// # mat.view_with(&viewer)?;
+    /// # mat.view_with(Some(&viewer))?;
     /// 
     /// assert_eq!(&mat.get_values(0..n, 0..n).unwrap()[..], &[ 2.0, -1.0,  0.0,  0.0,  0.0,
     ///                                                        -1.0,  2.0, -1.0,  0.0,  0.0,
@@ -339,7 +339,7 @@ impl<'a> Mat<'a> {
     ///     InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY);
     /// # // for debugging
     /// # let viewer = Viewer::create_ascii_stdout(petsc.world())?;
-    /// # mat.view_with(&viewer)?;
+    /// # mat.view_with(Some(&viewer))?;
     /// 
     /// assert_eq!(&mat.get_values(0..n, 0..n).unwrap()[..], &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
     /// assert_eq!(&mat.get_values(0..n, [0]).unwrap()[..], &[0.0, 3.0, 6.0]);
@@ -370,6 +370,13 @@ impl<'a> Mat<'a> {
         Petsc::check_error(self.world, ierr)?;
 
         Ok(out_vec)
+    }
+}
+
+impl Clone for Mat<'_> {
+    /// Same as [`x.duplicate(MatDuplicateOption::MAT_COPY_VALUES)`](Mat::duplicate()).
+    fn clone(&self) -> Self {
+        self.duplicate(MatDuplicateOption::MAT_COPY_VALUES).unwrap()
     }
 }
 

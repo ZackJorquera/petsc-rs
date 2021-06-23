@@ -196,8 +196,8 @@ fn main() -> petsc_rs::Result<()> {
     let iters = ksp.get_iteration_number()?;
     petsc_println!(petsc.world(), "Iters {}", iters);
 
-    //ksp.view_with(&petsc.viewer_create_ascii_stdout()?)?;
-    x.view_with(&petsc.viewer_create_ascii_stdout()?)?;
+    //ksp.view_with(Some(&petsc.viewer_create_ascii_stdout()?))?;
+    x.view_with(Some(&petsc.viewer_create_ascii_stdout()?))?;
     petsc_println_all!(petsc.world(), "Process [{}]\n{:.5e}", petsc.world().rank(), *ksp.get_dm()?.da_vec_view(&x)?);
 
     // return

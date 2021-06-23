@@ -134,8 +134,8 @@ fn main() -> petsc_rs::Result<()> {
     if hard_flg {
         //todo!();
         let viewer = Viewer::create_ascii_stdout(petsc.world())?;
-        x.view_with(&viewer)?;
-        //r.view_with(&viewer)?;
+        x.view_with(Some(&viewer))?;
+        //r.view_with(Some(&viewer))?;
         // TODO: view x, r, and f (f is from SNESGetFunction)
     }
     

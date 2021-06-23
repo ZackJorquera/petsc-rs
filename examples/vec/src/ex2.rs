@@ -46,7 +46,7 @@ fn main() -> petsc_rs::Result<()> {
     x.assemble()?;
 
     let viewer = Viewer::create_ascii_stdout(petsc.world())?;
-    x.view_with(&viewer)?;
+    x.view_with(Some(&viewer))?;
 
     // return
     Ok(())

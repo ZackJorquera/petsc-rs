@@ -14,6 +14,10 @@ path = "src/ex1.rs"
 name = "ex2"
 path = "src/ex2.rs"
 
+[[bin]]
+name = "ex3"
+path = "src/ex3.rs"
+
 [dependencies]
 # adding libffi-sys is a work around, mpi requeres libffi which will fail to compile on WSL2 without 
 # the `system` feature so we require libffi to be already be install everywhere. This seems to be an

@@ -1,5 +1,5 @@
 //! DM objects are used to manage communication between the algebraic structures in PETSc ([`Vector`] and [`Mat`])
-//! and mesh data structures in PDE-based (or other) simulations. See, for example, [`DM::da_create()`].
+//! and mesh data structures in PDE-based (or other) simulations. See, for example, [`DM::da_create_1d()`].
 //!
 //! The DMDA class encapsulates a Cartesian structured mesh, with interfaces for both topology and geometry.
 //! It is capable of parallel refinement and coarsening. Some support for parallel redistribution is
@@ -7,8 +7,8 @@
 //! which require this information.
 //!
 //! PETSc C API docs: <https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/DM/index.html>
-
-use crate::prelude::*;
+//!
+//! Also: <https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/DMDA/DMDA.html#DMDA>
 
 use ndarray::{ArrayView, ArrayViewMut};
 
@@ -18,9 +18,11 @@ pub struct DM<'a> {
     pub(crate) dm_p: *mut petsc_raw::_p_DM,
 }
 
-pub use petsc_raw::DMBoundaryType;
-pub use petsc_raw::DMDAStencilType;
-pub use petsc_raw::DMTypeEnum as DMType;
+pub use crate::petsc_raw::DMBoundaryType;
+pub use crate::petsc_raw::DMDAStencilType;
+pub use crate::petsc_raw::DMTypeEnum as DMType;
+
+use crate::prelude::*;
 
 impl<'a> Drop for DM<'a> {
     fn drop(&mut self) {
@@ -216,13 +218,13 @@ impl<'a> DM<'a> {
     /// let gs = global.get_global_size()?;
     /// let osr = global.get_ownership_range()?;
     /// let osr_usize = osr.start as usize ..osr.end as usize;
-    /// // Note, this follows the global PETSc ordering (note the global natural ordering).
+    /// // Note, this follows the global PETSc ordering (not the global natural ordering).
     /// global.assemble_with((0..gs)
     ///         .filter(|i| osr.contains(i))
     ///         .map(|i| (i, i as f64)),
     ///     InsertMode::INSERT_VALUES)?;
     /// # let viewer = Viewer::create_ascii_stdout(petsc.world())?;
-    /// # global.view_with(&viewer)?;
+    /// # global.view_with(Some(&viewer))?;
     ///
     /// // creates immutable 2d view
     /// let g_view = dm.da_vec_view(&global)?;
@@ -453,7 +455,7 @@ impl<'a> DM<'a> {
         // TODO: would it be nicer to have this take in a Range<f64>?
         DMDASetUniformCoordinates, da_set_uniform_coordinates, dm_p, input f64, x_min, input f64, x_max, input f64, y_min,
             input f64, y_max, input f64, z_min, input f64, z_max, #[doc = "Sets a DMDA coordinates to be a uniform grid.\n\n\
-            `y` and `z` value will be ignored for 1 and 2 dimensional problems."];
+            `y` and `z` values will be ignored for 1 and 2 dimensional problems."];
     }
 }
 

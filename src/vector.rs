@@ -62,7 +62,9 @@ impl<'a> Vector<'a> {
     /// Creates a new vector of the same type as an existing vector.
     ///
     /// [`duplicate`](Vector::duplicate) DOES NOT COPY the vector entries, but rather 
-    /// allocates storage for the new vector. Use [`Vector::copy_values`](#) to copy a vector.
+    /// allocates storage for the new vector. Use [`Vector::copy_data_from()`] to copy a vector.
+    ///
+    /// Note, if you want to duplicate and copy data you should use [`Vector::clone()`].
     pub fn duplicate(&self) -> Result<Self> {
         let mut vec2_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::VecDuplicate(self.vec_p, vec2_p.as_mut_ptr()) };
@@ -327,6 +329,19 @@ impl<'a> Vector<'a> {
         Ok(array_iter.zip(slice_iter_p1).map(|(s,e)| *s..*e).collect())
     }
 
+    /// Copies a vector. self <- x
+    ///
+    /// For default parallel PETSc vectors, both x and y MUST be distributed in the same manner;
+    /// only local copies are done.
+    ///
+    /// Note, the vector dont need to have the same type and comm because we allow one of the vectors
+    /// to be sequential and one to be parallel so long as both have the same local sizes. This is
+    /// used in some internal functions in PETSc.
+    pub fn copy_data_from(&mut self, x: &Vector) -> Result<()> {
+        let ierr = unsafe { petsc_raw::VecCopy(x.vec_p, self.vec_p) };
+        Petsc::check_error(self.world, ierr)
+    }
+
     /// Create an immutable view of the this processor's portion of the vector.
     ///
     /// # Implementation Note
@@ -458,6 +473,19 @@ impl<'a> Vector<'a> {
         v.assembly_end()?;
 
         Ok(v)
+    }
+}
+
+impl Clone for Vector<'_> {
+    /// Will use [`Vector::duplicate()`] and [`Vector::copy_data_from()`].
+    fn clone(&self) -> Self {
+        let mut new_vec = self.duplicate().unwrap();
+        // TODO: only copy data if data has been set. It is hard to tell if data has been set.
+        // We could maybe use something like `PetscObjectStateGet` to check if the vec has been modified
+        // it seems like this is only incremented when data is changed so it could work. The problem is
+        // that this is hidden in a private header so we can use it with the way we create raw bindings.
+        new_vec.copy_data_from(self).unwrap();
+        new_vec
     }
 }
 

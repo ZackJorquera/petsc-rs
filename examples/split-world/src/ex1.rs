@@ -211,7 +211,7 @@ fn do_ksp_ex2(petsc: &Petsc, m: i32, n: i32, view_exact_sol: bool) -> petsc_rs::
     if view_exact_sol
     {
         let viewer = Viewer::create_ascii_stdout(petsc.world())?;
-        u.view_with(&viewer)?;
+        u.view_with(Some(&viewer))?;
     }
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -251,7 +251,7 @@ fn do_ksp_ex2(petsc: &Petsc, m: i32, n: i32, view_exact_sol: bool) -> petsc_rs::
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
                         Solve the linear system
         - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
-    ksp.solve(&b, &mut x)?;
+    ksp.solve(Some(&b), &mut x)?;
 
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -369,7 +369,7 @@ fn do_ksp_ex23(petsc: &Petsc, n: i32, view_ksp: bool) -> petsc_rs::Result<()> {
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
                         Solve the linear system
         - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
-    ksp.solve(&b, &mut x)?;
+    ksp.solve(Some(&b), &mut x)?;
 
     /*
         View solver info; we could instead use the option -ksp_view to
@@ -377,7 +377,7 @@ fn do_ksp_ex23(petsc: &Petsc, n: i32, view_ksp: bool) -> petsc_rs::Result<()> {
     */
     if view_ksp {
         let viewer = Viewer::create_ascii_stdout(petsc.world())?;
-        ksp.view_with(&viewer)?;
+        ksp.view_with(Some(&viewer))?;
     }
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -

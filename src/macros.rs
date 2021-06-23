@@ -175,8 +175,14 @@ macro_rules! impl_petsc_view_func {
         impl<'a> $struct_name<'a, $( $add_lt ),*>
         {
             /// Views the object with a viewer
-            pub fn view_with(&self, viewer: &crate::viewer::Viewer) -> crate::Result<()> {
-                
+            pub fn view_with(&self, viewer: Option<&crate::viewer::Viewer>) -> crate::Result<()> {
+                let owned_viewer;
+                let viewer = if let Some(viewer) = viewer {
+                    viewer
+                } else {
+                    owned_viewer = Some(crate::viewer::Viewer::create_ascii_stdout(self.world)?);
+                    owned_viewer.as_ref().unwrap()
+                };
                 let ierr = unsafe { crate::petsc_raw::$raw_view_func(self.$raw_ptr_var, viewer.viewer_p) };
                 Petsc::check_error(self.world, ierr)
             }

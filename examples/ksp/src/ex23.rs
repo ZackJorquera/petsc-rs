@@ -155,7 +155,7 @@ fn main() -> petsc_rs::Result<()> {
         print this info to the screen at the conclusion of KSPSolve().
     */
     let viewer = Viewer::create_ascii_stdout(petsc.world())?;
-    ksp.view_with(&viewer)?;
+    ksp.view_with(Some(&viewer))?;
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
                       Check the solution and clean up
