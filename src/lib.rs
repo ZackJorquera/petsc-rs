@@ -20,6 +20,13 @@
 //! be the complex type, [`PetscComplex`]. If disabled then the scalar type is the real type, [`PetscReal`].
 //! - **`petsc-int-i32`** *(enabled by default)* — Sets the integer type, [`PetscInt`], to be `i32`.
 //! - **`petsc-int-i64`** — Sets the integer type, [`PetscInt`], to be `i64`.
+//! 
+//! As an example, if you wanted to use a petsc install that uses PETSc with 64-bit integers,
+//! 32-bit floats (single precision), and complex numbers for scalars you would put the following
+//! in your `Cargo.toml`
+//! ```text
+//! petsc-rs = { version = "*", default-features = false, features = ["petsc-real-f32", "petsc-int-i64", "petsc-use-complex"] }
+//! ```
 
 use std::os::raw::c_char;
 use std::vec;

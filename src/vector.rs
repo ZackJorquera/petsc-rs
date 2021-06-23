@@ -574,14 +574,14 @@ impl<'a, 'b> VectorView<'a, 'b> {
 // TODO: im not sure if i like this, it would make more sense for Vector::view to return an ArrayView
 // Be also we need to run out own custom drop.
 impl<'b> Deref for VectorViewMut<'_, 'b> {
-    type Target = ArrayViewMut<'b, f64, ndarray::IxDyn>;
-    fn deref(&self) -> &ArrayViewMut<'b, f64, ndarray::IxDyn> {
+    type Target = ArrayViewMut<'b, PetscScalar, ndarray::IxDyn>;
+    fn deref(&self) -> &ArrayViewMut<'b, PetscScalar, ndarray::IxDyn> {
         &self.ndarray
     }
 }
 
 impl<'b> DerefMut for VectorViewMut<'_, 'b> {
-    fn deref_mut(&mut self) -> &mut ArrayViewMut<'b, f64, ndarray::IxDyn> {
+    fn deref_mut(&mut self) -> &mut ArrayViewMut<'b, PetscScalar, ndarray::IxDyn> {
         &mut self.ndarray
     }
 }

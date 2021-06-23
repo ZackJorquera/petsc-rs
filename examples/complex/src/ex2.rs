@@ -185,7 +185,7 @@ fn main() -> petsc_rs::Result<()> {
     if view_exact_sol
     {
         let viewer = Viewer::create_ascii_stdout(petsc.world())?;
-        u.view_with(&viewer)?;
+        u.view_with(Some(&viewer))?;
     }
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -225,7 +225,7 @@ fn main() -> petsc_rs::Result<()> {
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
                         Solve the linear system
         - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
-    ksp.solve(&b, &mut x)?;
+    ksp.solve(Some(&b), &mut x)?;
 
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -

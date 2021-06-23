@@ -32,11 +32,11 @@ use opt::*;
 struct Opt {
     /// The conductivity
     #[structopt(short, default_value = "1")]
-    k: i32, // real
+    k: PetscInt,
 
     /// The width of the Gaussian source
     #[structopt(short, default_value = "0.99")]
-    e: f64, // real
+    e: PetscReal,
 
     /// use `-- -help` for petsc help
     #[structopt(subcommand)]
@@ -65,15 +65,15 @@ fn main() -> petsc_rs::Result<()> {
     ksp.set_compute_rhs(|_ksp, dm, b| {
         // We will define the forcing function $f = e^{-x^2/\nu} e^{-y^2/\nu}$
         let (_, mx, _, _, _, _, _, _, _, _, _, _, _) = dm.da_get_info()?;
-        let h = 1.0 / (mx as f64 - 1.0);
+        let h = 1.0 / (PetscScalar::from(mx as PetscReal) - 1.0);
         let (xs, _, _, xm, _, _) = dm.da_get_corners()?;
 
         b.set_all(h)?;
 
         {
             let mut b_view = dm.da_vec_view_mut(b)?;
-            if xs == 0 { b_view[0] = 0.0; }
-            if xs + xm == mx { b_view[xm as usize -1] = 0.0; }
+            if xs == 0 { b_view[0] = PetscScalar::from(0.0); }
+            if xs + xm == mx { b_view[xm as usize -1] = PetscScalar::from(0.0); }
         }
 
         b.assemble()?;
@@ -83,8 +83,9 @@ fn main() -> petsc_rs::Result<()> {
 
     ksp.set_compute_operators(|_ksp, dm, _, jac| {
         let (_, mx, _, _, _, _, _, _, _, _, _, _, _) = dm.da_get_info()?;
-        let h = 1.0 / (mx as f64 - 1.0);
+        let h = 1.0 / (PetscScalar::from(mx as PetscReal) - 1.0);
         let (xs, _, _, xm, _, _) = dm.da_get_corners()?;
+        let pi = PetscScalar::from(std::f64::consts::PI as PetscReal);
 
         jac.assemble_with_stencil((xs..xs+xm)
                 .map(|i| {
@@ -92,16 +93,16 @@ fn main() -> petsc_rs::Result<()> {
                     if i == 0 || i == mx-1 {
                         vec![(row, row, 2.0/h)]
                     } else {
-                        let xlow  = h* i as f64 - 0.5*h;
+                        let xlow  = h* i as PetscReal - 0.5*h;
                         let xhigh  = xlow + h;
                         vec![
                             (row, MatStencil { i: i-1, j: 0, c: 0, k: 0 },
-                                (-1.0 - e * f64::sin(2.0 * std::f64::consts::PI * k as f64 * xlow))/h),
+                                (-1.0 - e * PetscScalar::sin(2.0 * pi * k as PetscReal * xlow))/h),
                             (row, row,
-                                (2.0 + e * f64::sin(2.0 * std::f64::consts::PI * k as f64 * xlow) 
-                                + e * f64::sin(2.0 * std::f64::consts::PI * k as f64 * xhigh))/h),
+                                (2.0 + e * PetscScalar::sin(2.0 * pi * k as PetscReal * xlow) 
+                                + e * PetscScalar::sin(2.0 * pi * k as PetscReal * xhigh))/h),
                             (row, MatStencil { i: i+1, j: 0, c: 0, k: 0 },
-                                (-1.0 - e * f64::sin(2.0 * std::f64::consts::PI * k as f64 * xhigh))/h),
+                                (-1.0 - e * PetscScalar::sin(2.0 * pi * k as PetscReal * xhigh))/h),
                         ]
                     }
                 }).flatten(), 

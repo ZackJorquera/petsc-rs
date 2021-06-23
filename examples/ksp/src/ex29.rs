@@ -59,11 +59,11 @@ impl fmt::Display for BCType {
 struct Opt {
     /// The conductivity
     #[structopt(short, long, default_value = "1.0")]
-    rho: f64, // real
+    rho: PetscReal,
 
     /// The width of the Gaussian source
     #[structopt(short, long, default_value = "0.1")]
-    nu: f64, // real
+    nu: PetscReal,
 
     /// Type of boundary condition
     #[structopt(short, long, default_value = "DIRICHLET")]
@@ -104,7 +104,8 @@ fn main() -> petsc_rs::Result<()> {
     ksp.set_compute_rhs(|_ksp, dm, b| {
         // We will define the forcing function $f = e^{-x^2/\nu} e^{-y^2/\nu}$
         let (_, mx, my, _, _, _, _, _, _, _, _, _, _) = dm.da_get_info()?;
-        let (hx, hy) = (1.0 / (mx as f64 - 1.0), 1.0 / (my as f64 - 1.0));
+        let (hx, hy) = (1.0 / (PetscScalar::from(mx as PetscReal) - 1.0), 
+            1.0 / (PetscScalar::from(my as PetscReal) - 1.0));
         let (xs, ys, _, _xm, _ym, _) = dm.da_get_corners()?;
 
         {
@@ -112,10 +113,10 @@ fn main() -> petsc_rs::Result<()> {
 
             b_view.indexed_iter_mut().map(|(pat, v)| { 
                     let s = pat.slice();
-                    (((s[0]+xs as usize) as f64, (s[1]+ys as usize) as f64), v) 
+                    (((s[0]+xs as usize) as PetscReal, (s[1]+ys as usize) as PetscReal), v) 
                 })
                 .for_each(|((i,j), v)| {
-                    *v = f64::exp(-(i*hx)*(i*hx)/nu)*f64::exp(-(j*hy)*(j*hy)/nu)*hx*hy;
+                    *v = PetscScalar::exp(-(i*hx)*(i*hx)/nu)*PetscScalar::exp(-(j*hy)*(j*hy)/nu)*hx*hy;
                 });
         }
 
@@ -137,7 +138,8 @@ fn main() -> petsc_rs::Result<()> {
 
     ksp.set_compute_operators(|_ksp, dm, _, jac| {
         let (_, mx, my, _, _, _, _, _, _, _, _, _, _) = dm.da_get_info()?;
-        let (hx, hy) = (1.0 / (mx as f64 - 1.0), 1.0 / (my as f64 - 1.0));
+        let (hx, hy) = (1.0 / (PetscScalar::from(mx as PetscReal) - 1.0), 
+            1.0 / (PetscScalar::from(my as PetscReal) - 1.0));
         let (hxdhy, hydhx) = (hx/hy, hy/hx);
         let (xs, ys, _, xm, ym, _) = dm.da_get_corners()?;
 
@@ -155,7 +157,7 @@ fn main() -> petsc_rs::Result<()> {
                             if i != 0 { vec.push((row, MatStencil { i: i-1, j, c: 0, k: 0 }, -rho*hydhx)); numx += 1; }
                             if i != mx-1 { vec.push((row, MatStencil { i: i+1, j, c: 0, k: 0 }, -rho*hydhx)); numx += 1; }
                             if j != my-1 { vec.push((row, MatStencil { i, j: j+1, c: 0, k: 0 }, -rho*hxdhy)); numy += 1; }
-                            vec.push((row, row, numx as f64 *rho*hydhx + numy as f64*rho*hxdhy));
+                            vec.push((row, row, numx as PetscReal *rho*hydhx + numy as PetscReal*rho*hxdhy));
                             vec
                         }
                     } else {
@@ -204,9 +206,9 @@ fn main() -> petsc_rs::Result<()> {
     Ok(())
 }
 
-fn compute_rho(i: i32, j: i32, mx: i32, my: i32, center_rho: f64) -> f64 {
-    if (i as f64) > (mx as f64/3.0) && (i as f64) < (2.0*mx as f64/3.0)
-        && (j as f64) > (my as f64/3.0) && (j as f64) < (2.0 * (my as f64) / 3.0) {
+fn compute_rho(i: PetscInt, j: PetscInt, mx: PetscInt, my: PetscInt, center_rho: PetscReal) -> PetscReal {
+    if (i as PetscReal) > (mx as PetscReal/3.0) && (i as PetscReal) < (2.0*mx as PetscReal/3.0)
+        && (j as PetscReal) > (my as PetscReal/3.0) && (j as PetscReal) < (2.0 * (my as PetscReal) / 3.0) {
       center_rho
     } else {
       1.0

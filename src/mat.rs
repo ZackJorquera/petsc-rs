@@ -174,12 +174,12 @@ impl<'a> Mat<'a> {
     /// 1 dimensional problems the `k` and `j` entries are ignored). The `c` represents the the degrees
     /// of freedom at each grid point (the dof argument to DMDASetDOF()). If dof is 1 then this entry
     /// is ignored.
-    pub fn set_values_stencil(&mut self, idxm: &[MatStencil], idxn: &[MatStencil], v: &[f64], addv: InsertMode) -> Result<()> {
+    pub fn set_values_stencil(&mut self, idxm: &[MatStencil], idxn: &[MatStencil], v: &[PetscScalar], addv: InsertMode) -> Result<()> {
         let m = idxm.len();
         let n = idxn.len();
         assert_eq!(v.len(), m*n);
-        let ierr = unsafe { petsc_raw::MatSetValuesStencil(self.mat_p, m as i32, idxm.as_ptr(), n as i32,
-            idxn.as_ptr(), v.as_ptr(), addv) };
+        let ierr = unsafe { petsc_raw::MatSetValuesStencil(self.mat_p, m as PetscInt, idxm.as_ptr(), n as PetscInt,
+            idxn.as_ptr(), v.as_ptr() as *mut _, addv) };
         Petsc::check_error(self.world, ierr)
     }
 
@@ -301,14 +301,14 @@ impl<'a> Mat<'a> {
     /// This functions identically to [`Mat::assemble_with()`] but uses [`Mat::set_values_stencil()`].
     pub fn assemble_with_stencil<I>(&mut self, iter_builder: I, addv: InsertMode, assembly_type: MatAssemblyType) -> Result<()>
     where
-        I: IntoIterator<Item = (MatStencil, MatStencil, f64)>
+        I: IntoIterator<Item = (MatStencil, MatStencil, PetscScalar)>
     {
         // We don't actually care about the num_inserts value, we just need something that
         // implements `Sum` so we can use the sum method and `()` does not.
         let _num_inserts = iter_builder.into_iter().map(|(idxm, idxn, v)| {
             self.set_values_stencil(std::slice::from_ref(&idxm), std::slice::from_ref(&idxn),
                 std::slice::from_ref(&v), addv).map(|_| 1)
-        }).sum::<Result<i32>>()?;
+        }).sum::<Result<PetscInt>>()?;
         // Note, `sum()` will short-circuit the iterator if an error is encountered.
 
         self.assembly_begin(assembly_type)?;

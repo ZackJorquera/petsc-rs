@@ -88,18 +88,18 @@ fn main() -> petsc_rs::Result<()> {
     let mut global = dm.create_global_vector()?;
     let mut local = dm.create_local_vector()?;
 
-    global.set_all(-3.0)?;
+    global.set_all(PetscScalar::from(-3.0))?;
 
     dm.global_to_local(&global, InsertMode::INSERT_VALUES, &mut local)?;
 
-    local.scale(petsc.world().rank() as f64 + 1.0)?;
+    local.scale(PetscScalar::from(petsc.world().rank() as PetscReal) + 1.0)?;
     dm.local_to_global(&local, InsertMode::ADD_VALUES, &mut global)?;
 
     dm.view_with(Some(&viewer))?;
     if view_global {
-        petsc_println_all!(petsc.world(), "(Process: {}) global vec (flat):\n{:?}", petsc.world().rank(), global.view()?);
+        petsc_println_all!(petsc.world(), "(Process: {}) global vec (flat):\n{}", petsc.world().rank(), *global.view()?);
 
-        petsc_println_all!(petsc.world(), "(Process: {}) global vec:\n{:?}", petsc.world().rank(), dm.da_vec_view(&global)?);
+        petsc_println_all!(petsc.world(), "(Process: {}) global vec:\n{}", petsc.world().rank(), *dm.da_vec_view(&global)?);
 
         // Note, this might print the vector in a different order than the above two
         global.view_with(Some(&viewer))?;

@@ -69,7 +69,7 @@ impl<'a> DM<'a> {
     /// * `lx` _(optional)_ - array containing number of nodes in the x direction on each processor, or `None`.
     /// If `Some(...)`, must be of length as the number of processes in the MPI world (i.e. `world.size()`).
     /// The sum of these entries must equal `nx`.
-    pub fn da_create_1d(world: &'a dyn Communicator, bx: DMBoundaryType, nx: i32, dof: i32, s: i32, lx: Option<&[i32]>) -> Result<Self> {
+    pub fn da_create_1d(world: &'a dyn Communicator, bx: DMBoundaryType, nx: PetscInt, dof: PetscInt, s: PetscInt, lx: Option<&[PetscInt]>) -> Result<Self> {
         assert!(lx.map_or(true, |lx| lx.len() == world.size() as usize));
         let mut dm_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMDACreate1d(world.as_raw(), bx, nx,
@@ -95,12 +95,12 @@ impl<'a> DM<'a> {
     /// corresponding `px` and `py` cannot be `None`. The sum of the `lx` entries must be `nx`, and
     /// the sum of the `ly` entries must be `ny`.
     pub fn da_create_2d(world: &'a dyn Communicator, bx: DMBoundaryType, by: DMBoundaryType, stencil_type: DMDAStencilType, 
-        nx: i32, ny: i32, px: Option<i32>, py: Option<i32>, dof: i32, s: i32, lx: Option<&[i32]>, ly: Option<&[i32]>) -> Result<Self>
+        nx: PetscInt, ny: PetscInt, px: Option<PetscInt>, py: Option<PetscInt>, dof: PetscInt, s: PetscInt, lx: Option<&[PetscInt]>, ly: Option<&[PetscInt]>) -> Result<Self>
     {
-        let px = px.unwrap_or(petsc_raw::PETSC_DECIDE);
-        let py = py.unwrap_or(petsc_raw::PETSC_DECIDE);
-        assert!(lx.map_or(true, |lx| lx.len() as i32 == px));
-        assert!(ly.map_or(true, |ly| ly.len() as i32 == py));
+        let px = px.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
+        let py = py.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
+        assert!(lx.map_or(true, |lx| lx.len() as PetscInt == px));
+        assert!(ly.map_or(true, |ly| ly.len() as PetscInt == py));
 
         let mut dm_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMDACreate2d(world.as_raw(), bx, by, stencil_type, nx, ny, px, py,
@@ -126,14 +126,15 @@ impl<'a> DM<'a> {
     /// corresponding `px`, `py`, and `pz` cannot be `None`. The sum of the `lx` entries must be `nx`,
     /// the sum of the `ly` entries must be `ny`, and the sum of the `lz` entries must be `nz`.
     pub fn da_create_3d(world: &'a dyn Communicator, bx: DMBoundaryType, by: DMBoundaryType, bz: DMBoundaryType, stencil_type: DMDAStencilType, 
-        nx: i32, ny: i32, nz: i32, px: Option<i32>, py: Option<i32>, pz: Option<i32>, dof: i32, s: i32, lx: Option<&[i32]>, ly: Option<&[i32]>, lz: Option<&[i32]>) -> Result<Self>
+        nx: PetscInt, ny: PetscInt, nz: PetscInt, px: Option<PetscInt>, py: Option<PetscInt>, pz: Option<PetscInt>, dof: PetscInt, s: PetscInt,
+        lx: Option<&[PetscInt]>, ly: Option<&[PetscInt]>, lz: Option<&[PetscInt]>) -> Result<Self>
     {
-        let px = px.unwrap_or(petsc_raw::PETSC_DECIDE);
-        let py = py.unwrap_or(petsc_raw::PETSC_DECIDE);
-        let pz = pz.unwrap_or(petsc_raw::PETSC_DECIDE);
-        assert!(lx.map_or(true, |lx| lx.len() as i32 == px));
-        assert!(ly.map_or(true, |ly| ly.len() as i32 == py));
-        assert!(lz.map_or(true, |lz| lz.len() as i32 == pz));
+        let px = px.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
+        let py = py.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
+        let pz = pz.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
+        assert!(lx.map_or(true, |lx| lx.len() as PetscInt == px));
+        assert!(ly.map_or(true, |ly| ly.len() as PetscInt == py));
+        assert!(lz.map_or(true, |lz| lz.len() as PetscInt == pz));
 
         let mut dm_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMDACreate3d(world.as_raw(), bx, by, bz, stencil_type, nx, ny, nz, px, py, pz,
@@ -205,6 +206,9 @@ impl<'a> DM<'a> {
     /// // note, cargo wont run tests with mpi so this will always be run with
     /// // a single processor, but this example will also work in a multiprocessor
     /// // comm world.
+    ///
+    /// // Note, right now this example only works when `PetscScalar` is `PetscReal`.
+    /// // It will fail to compile if `PetscScalar` is `PetscComplex`.
     /// let (m, n) = (5,2);
     /// 
     /// let mut dm = DM::da_create_2d(petsc.world(), DMBoundaryType::DM_BOUNDARY_NONE,
@@ -221,7 +225,7 @@ impl<'a> DM<'a> {
     /// // Note, this follows the global PETSc ordering (not the global natural ordering).
     /// global.assemble_with((0..gs)
     ///         .filter(|i| osr.contains(i))
-    ///         .map(|i| (i, i as f64)),
+    ///         .map(|i| (i, i as PetscReal)),
     ///     InsertMode::INSERT_VALUES)?;
     /// # let viewer = Viewer::create_ascii_stdout(petsc.world())?;
     /// # global.view_with(Some(&viewer))?;
@@ -293,8 +297,8 @@ impl<'a> DM<'a> {
                 format!("DMDA dimension not 1, 2, or 3, it is {}\n",dim))?;
         }
 
-        let mut array = MaybeUninit::<*const f64>::uninit();
-        let ierr = unsafe { petsc_raw::VecGetArrayRead(vec.vec_p, array.as_mut_ptr()) };
+        let mut array = MaybeUninit::uninit();
+        let ierr = unsafe { petsc_raw::VecGetArrayRead(vec.vec_p, array.as_mut_ptr() as *mut _) };
         Petsc::check_error(vec.world, ierr)?;
 
         //let dims = [(gxm*dof) as usize, gym as usize, gzm as usize];
@@ -327,9 +331,11 @@ impl<'a> DM<'a> {
     /// # use ndarray::{Dimension, array, s};
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
-    /// // note, cargo wont run tests with mpi so this will always be run with
+    /// // Note, cargo wont run tests with mpi so this will always be run with
     /// // a single processor, but this example will also work in a multiprocessor
     /// // comm world.
+    ///
+    /// // Note, right now this example only works when `PetscScalar` is `PetscReal`.
     /// let (m, n) = (5,2);
     /// 
     /// let mut dm = DM::da_create_2d(petsc.world(), DMBoundaryType::DM_BOUNDARY_NONE,
@@ -357,7 +363,7 @@ impl<'a> DM<'a> {
     ///         let s = pat.slice(); 
     ///         ((s[0]+gxs as usize, s[1]+gys as usize), v) 
     ///     })
-    ///     .for_each(|((i,j), v)| *v = (i*2+j) as f64);
+    ///     .for_each(|((i,j), v)| *v = (i*2+j) as PetscReal);
     ///
     /// let rhs_array = array![[0.0, 1.0], 
     ///                        [2.0, 3.0], 
@@ -392,8 +398,8 @@ impl<'a> DM<'a> {
                 format!("DMDA dimension not 1, 2, or 3, it is {}\n",dim))?;
         }
 
-        let mut array = MaybeUninit::<*mut f64>::uninit();
-        let ierr = unsafe { petsc_raw::VecGetArray(vec.vec_p, array.as_mut_ptr()) };
+        let mut array = MaybeUninit::uninit();
+        let ierr = unsafe { petsc_raw::VecGetArray(vec.vec_p, array.as_mut_ptr() as *mut _) };
         Petsc::check_error(vec.world, ierr)?;
 
         //let dims = [(gxm*dof) as usize, gym as usize, gzm as usize];
@@ -416,7 +422,7 @@ impl<'a> DM<'a> {
     /// * `nf` - field number for the DMDA (0, 1, ... dof-1), where dof indicates the number of
     /// degrees of freedom per node within the DMDA.
     /// * `name` - the name of the field (component)
-    pub fn da_set_feild_name<T: ToString>(&mut self, nf: i32, name: T) -> crate::Result<()> {
+    pub fn da_set_feild_name<T: ToString>(&mut self, nf: PetscInt, name: T) -> crate::Result<()> {
         let name_cs = CString::new(name.to_string()).expect("`CString::new` failed");
         
         let ierr = unsafe { petsc_raw::DMDASetFieldName(self.dm_p, nf, name_cs.as_ptr()) };
@@ -429,10 +435,10 @@ impl<'a> DM<'a> {
     wrap_simple_petsc_member_funcs! {
         DMSetFromOptions, set_from_options, dm_p, takes mut, #[doc = "Sets various SNES and KSP parameters from user options."];
         DMSetUp, set_up, dm_p, takes mut, #[doc = "Sets up the internal data structures for the later use of a nonlinear solver. This will be automatically called with [`SNES::solve()`]."];
-        DMGetDimension, get_dimension, dm_p, output i32, dim, #[doc = "Return the topological dimension of the DM"];
+        DMGetDimension, get_dimension, dm_p, output PetscInt, dim, #[doc = "Return the topological dimension of the DM"];
         
-        DMDAGetInfo, da_get_info, dm_p, output i32, dim, output i32, bm, output i32, bn, output i32, bp, output i32, m,
-            output i32, n, output i32, p, output i32, dof, output i32, s, output DMBoundaryType, bx, output DMBoundaryType, by,
+        DMDAGetInfo, da_get_info, dm_p, output PetscInt, dim, output PetscInt, bm, output PetscInt, bn, output PetscInt, bp, output PetscInt, m,
+            output PetscInt, n, output PetscInt, p, output PetscInt, dof, output PetscInt, s, output DMBoundaryType, bx, output DMBoundaryType, by,
             output DMBoundaryType, bz, output DMDAStencilType, st,
             #[doc = "Gets information about a given distributed array.\n\n\
             # Outputs (in order)\n\n\
@@ -442,19 +448,19 @@ impl<'a> DM<'a> {
             * `dof` - number of degrees of freedom per node\n\
             * `s` - stencil width\n * `bx,by,bz` - type of ghost nodes at boundary\n\
             * `st` - stencil type"];
-        DMDAGetCorners, da_get_corners, dm_p, output i32, x, output i32, y, output i32, z, output i32, m, output i32, n, output i32, p,
+        DMDAGetCorners, da_get_corners, dm_p, output PetscInt, x, output PetscInt, y, output PetscInt, z, output PetscInt, m, output PetscInt, n, output PetscInt, p,
             #[doc = "Returns the global (x,y,z) indices of the lower left corner and size of the local region, excluding ghost points.\n\n\
             # Outputs (in order)\n\n\
             * `x,y,z` - the corner indices (where y and z are optional; these are used for 2D and 3D problems)\n\
             * `m,n,p` - widths in the corresponding directions (where n and p are optional; these are used for 2D and 3D problems)"];
-        DMDAGetGhostCorners, da_get_ghost_corners, dm_p, output i32, x, output i32, y, output i32, z, output i32, m, output i32, n, output i32, p,
+        DMDAGetGhostCorners, da_get_ghost_corners, dm_p, output PetscInt, x, output PetscInt, y, output PetscInt, z, output PetscInt, m, output PetscInt, n, output PetscInt, p,
             #[doc = "Returns the global (x,y,z) indices of the lower left corner and size of the local region, including ghost points.\n\n\
             # Outputs (in order)\n\n\
             * `x,y,z` - the corner indices (where y and z are optional; these are used for 2D and 3D problems)\n\
             * `m,n,p` - widths in the corresponding directions (where n and p are optional; these are used for 2D and 3D problems)"];
-        // TODO: would it be nicer to have this take in a Range<f64>?
-        DMDASetUniformCoordinates, da_set_uniform_coordinates, dm_p, input f64, x_min, input f64, x_max, input f64, y_min,
-            input f64, y_max, input f64, z_min, input f64, z_max, #[doc = "Sets a DMDA coordinates to be a uniform grid.\n\n\
+        // TODO: would it be nicer to have this take in a Range<PetscReal>?
+        DMDASetUniformCoordinates, da_set_uniform_coordinates, dm_p, input PetscReal, x_min, input PetscReal, x_max, input PetscReal, y_min,
+            input PetscReal, y_max, input PetscReal, z_min, input PetscReal, z_max, #[doc = "Sets a DMDA coordinates to be a uniform grid.\n\n\
             `y` and `z` values will be ignored for 1 and 2 dimensional problems."];
     }
 }

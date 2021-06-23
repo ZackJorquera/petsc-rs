@@ -1,6 +1,6 @@
 //! Concepts: SNES^basic parallel example
 //! Concepts: SNES^setting a user-defined monitoring routine
-//! Processors: 1
+//! Processors: n
 //!
 //! To run:
 //! ```text
@@ -25,7 +25,7 @@ fn main() -> petsc_rs::Result<()> {
         .help_msg(HELP_MSG)
         .init()?;
 
-    let h = 1.0/(n as f64 - 1.0);
+    let h = 1.0/(PetscScalar::from(n as PetscReal) - 1.0);
 
     let mut da = DM::da_create_1d(petsc.world(), DMBoundaryType::DM_BOUNDARY_NONE, n, 1, 1, None)?;
     da.set_from_options()?;
@@ -44,7 +44,7 @@ fn main() -> petsc_rs::Result<()> {
         let mut ff = da.da_vec_view_mut(&mut f)?;
         let mut uu = da.da_vec_view_mut(&mut u)?;
 
-        let _ = (xs..xs+xm).fold(h*xs as f64, |xp,i| {
+        let _ = (0..xm).fold(h*xs as PetscReal, |xp,i| {
             ff[i as usize] = 6.0*xp + (xp+1.0e-12).powi(6);
             uu[i as usize] = xp*xp*xp;
             xp+h
@@ -67,21 +67,24 @@ fn main() -> petsc_rs::Result<()> {
 
         let (_, m, _, _, _, _, _, _, _, _, _, _, _) = da.da_get_info()?;
         let (xs, _, _, _xm, _, _) = da.da_get_corners()?;
+        let (gxs, _, _, _gxm, _, _) = da.da_get_ghost_corners()?;
+        let ghost_point_offset = xs-gxs;
 
         let d = 1.0/(h*h);
 
-        let x_view = da.da_vec_view(&x)?;
+        let x_view = da.da_vec_view(&x_local)?;
         let mut y_view = da.da_vec_view_mut(y)?;
         let f_view = da.da_vec_view(&f)?;
 
-        y_view.indexed_iter_mut().map(|(pat, v)| (pat[0]+xs as usize, v) )
+        y_view.indexed_iter_mut().map(|(pat, v)| (pat[0], v) )
             .for_each(|(i, v)| {
-                if i == 0 {
-                    *v = x_view[i];
-                } else if i == (m-1) as usize {
-                    *v = x_view[i] - 1.0;
+                let ii = i+ghost_point_offset as usize;
+                if i + xs as usize == 0 {
+                    *v = x_view[ii];
+                } else if i + xs as usize == (m-1) as usize {
+                    *v = x_view[ii] - 1.0;
                 } else {
-                    *v = d * (x_view[i-1] - 2.0 * x_view[i] + x_view[i+1]) + x_view[i] * x_view[i] - f_view[i];
+                    *v = d * (x_view[ii-1] - 2.0 * x_view[ii] + x_view[ii+1]) + x_view[ii] * x_view[ii] - f_view[i];
                 }
             });
 
@@ -110,12 +113,12 @@ fn main() -> petsc_rs::Result<()> {
 
         jac.assemble_with((xs..xs+xm).map(|i| {
                 if i == 0 { 
-                    vec![ (i, i, 1.0) ]
+                    vec![ (i, i, PetscScalar::from(1.0)) ]
                 } else if i == m-1 {
-                    vec![ (i, i, 1.0) ]
+                    vec![ (i, i, PetscScalar::from(1.0)) ]
                 } else {
                     vec![(i,i-1,d),
-                         (i,i,-2.0*d+2.0*xx[i as usize]),
+                         (i,i,-2.0*d+2.0*xx[(i-xs) as usize]),
                          (i,i+1,d)]
                 }
             }).flatten(),
@@ -166,13 +169,13 @@ fn main() -> petsc_rs::Result<()> {
     petsc_println!(petsc.world(), "atol={:.5e}, rtol={:.5e}, stol={:.5e}, maxit={}, maxf={}",
         tols.0, tols.1, tols.2, tols.3, tols.4);
 
-    x.set_all(0.5)?;
+    x.set_all(PetscScalar::from(0.5))?;
 
     snes.solve(None, &mut x)?;
     let it_num = snes.get_iteration_number()?;
     petsc_println!(petsc.world(), "Number of SNES iterations = {}", it_num);
 
-    x.axpy(-1.0, &u)?;
+    x.axpy(PetscScalar::from(-1.0), &u)?;
     let norm = x.norm(NormType::NORM_2)?;
     
     petsc_println!(petsc.world(), "Norm of error {:.5e} Iterations {}", norm, it_num);
