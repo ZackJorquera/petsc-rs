@@ -136,7 +136,7 @@ fn main() {
 
         .allowlist_function("[A-Z][a-zA-Z0-9]*")
         .allowlist_type("[A-Z][a-zA-Z0-9]*")
-        .allowlist_var("[A-Z][a-zA-Z]*")
+        .allowlist_var("[A-Z][a-zA-Z0-9]*")
         .allowlist_var("[A-Z0-9_]*")
 
         .opaque_type("FILE")

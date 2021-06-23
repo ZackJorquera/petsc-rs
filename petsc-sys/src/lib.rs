@@ -139,6 +139,45 @@ pub enum PCTypeEnum {
     PCHARA,
 }
 
+// Redefined stuff from `petscpctypes.h`
+/// This table is from: <https://petsc.org/release/docs/manualpages/PC/PCType.html#PCType>
+pub static DMTYPE_TABLE: &'static [&str] = &[
+    "da",
+    "composite",
+    "sliced",
+    "shell",
+    "plex",
+    "redundant",
+    "patch",
+    "moab",
+    "network",
+    "forest",
+    "p4est",
+    "p8est",
+    "swarm",
+    "product",
+    "stag",
+];
+
+/// This enum is from: <https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/DM/DMType.html#DMType>
+pub enum DMTypeEnum {
+    DMDA = 0,
+    DMCOMPOSITE,
+    DMSLICED,
+    DMSHELL,
+    DMPLEX,
+    DMREDUNDANT,
+    DMPATCH,
+    DMMOAB,
+    DMNETWORK,
+    DMFOREST,
+    DMP4EST,
+    DMP8EST,
+    DMSWARM,
+    DMPRODUCT,
+    DMSTAG,
+}
+
 // TODO: num_complex::Complex docs say:
 // "Note that Complex<F> where F is a floating point type is only memory layout compatible with C’s
 // complex types, not necessarily calling convention compatible. This means that for FFI you can

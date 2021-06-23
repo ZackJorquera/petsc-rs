@@ -6,6 +6,8 @@ use std::ops::{Deref, DerefMut};
 
 use crate::prelude::*;
 
+use ndarray::{ArrayView, ArrayViewMut};
+
 /// Abstract PETSc vector object
 pub struct Vector<'a> {
     pub(crate) world: &'a dyn Communicator,
@@ -15,14 +17,16 @@ pub struct Vector<'a> {
 
 /// A immutable view of a Vector with Deref to slice.
 pub struct VectorView<'a, 'b> {
-    vec: &'b Vector<'a>,
-    array: *const PetscScalar,
+    pub(crate) vec: &'b Vector<'a>,
+    pub(crate) array: *const PetscScalar,
+    pub(crate) ndarray: ArrayView<'b, PetscScalar, ndarray::IxDyn>,
 }
 
 /// A mutable view of a Vector with Deref to slice.
 pub struct VectorViewMut<'a, 'b> {
-    vec: &'b mut Vector<'a>,
-    array: *mut PetscScalar,
+    pub(crate) vec: &'b mut Vector<'a>,
+    pub(crate) array: *mut PetscScalar,
+    pub(crate) ndarray: ArrayViewMut<'b, PetscScalar, ndarray::IxDyn>,
 }
 
 impl<'a> Drop for Vector<'a> {
@@ -58,7 +62,9 @@ impl<'a> Vector<'a> {
     /// Creates a new vector of the same type as an existing vector.
     ///
     /// [`duplicate`](Vector::duplicate) DOES NOT COPY the vector entries, but rather 
-    /// allocates storage for the new vector. Use [`Vector::copy_values`](#) to copy a vector.
+    /// allocates storage for the new vector. Use [`Vector::copy_data_from()`] to copy a vector.
+    ///
+    /// Note, if you want to duplicate and copy data you should use [`Vector::clone()`].
     pub fn duplicate(&self) -> Result<Self> {
         let mut vec2_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::VecDuplicate(self.vec_p, vec2_p.as_mut_ptr()) };
@@ -313,8 +319,8 @@ impl<'a> Vector<'a> {
     ///
     /// let v_view = v.view()?;
     /// let v2_view = v2.view()?;
-    /// assert_eq!(&v_view[..], &values[vec_ownership_range_usize.clone()]);
-    /// assert_eq!(&v_view[..], &v2_view[..]);
+    /// assert_eq!(v_view.as_slice().unwrap(), &values[vec_ownership_range_usize.clone()]);
+    /// assert_eq!(v_view.as_slice().unwrap(), v2_view.as_slice().unwrap());
     /// # Ok(())
     /// # }
     /// ```
@@ -344,6 +350,19 @@ impl<'a> Vector<'a> {
         let mut slice_iter_p1 = slice_from_array.iter();
         let _ = slice_iter_p1.next();
         Ok(array_iter.zip(slice_iter_p1).map(|(s,e)| *s..*e).collect())
+    }
+
+    /// Copies a vector. self <- x
+    ///
+    /// For default parallel PETSc vectors, both x and y MUST be distributed in the same manner;
+    /// only local copies are done.
+    ///
+    /// Note, the vector dont need to have the same type and comm because we allow one of the vectors
+    /// to be sequential and one to be parallel so long as both have the same local sizes. This is
+    /// used in some internal functions in PETSc.
+    pub fn copy_data_from(&mut self, x: &Vector) -> Result<()> {
+        let ierr = unsafe { petsc_raw::VecCopy(x.vec_p, self.vec_p) };
+        Petsc::check_error(self.world, ierr)
     }
 
     /// Create an immutable view of the this processor's portion of the vector.
@@ -380,7 +399,7 @@ impl<'a> Vector<'a> {
     ///
     /// {
     ///     let mut v_view = v.view()?;
-    ///     assert_eq!(&v_view[..], &[1.1,0.0,0.0,2.2,0.0,0.0,0.0,3.3,0.0,4.4]
+    ///     assert_eq!(v_view.as_slice().unwrap(), &[1.1,0.0,0.0,2.2,0.0,0.0,0.0,3.3,0.0,4.4]
     ///         .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
     /// }
     ///
@@ -391,8 +410,8 @@ impl<'a> Vector<'a> {
     /// // It is valid to have multiple immutable views
     /// let v_view = v.view()?;
     /// let v_view2 = v.view()?;
-    /// assert_eq!(&v_view[..], &v_view2[..]);
-    /// assert_eq!(&v_view2[..], &[2.1,0.0,2.0,2.2,0.0,0.0,0.0,3.3,3.0,8.4]
+    /// assert_eq!(v_view.as_slice().unwrap(), v_view2.as_slice().unwrap());
+    /// assert_eq!(v_view2.as_slice().unwrap(), &[2.1,0.0,2.0,2.2,0.0,0.0,0.0,3.3,3.0,8.4]
     ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>()[..]);
     /// # Ok(())
     /// # }
@@ -430,13 +449,13 @@ impl<'a> Vector<'a> {
     ///
     /// {
     ///     let mut v_view = v.view_mut()?;
-    ///     assert_eq!(&v_view[..], &[PetscScalar::from(1.5); 10]);
+    ///     assert_eq!(v_view.as_slice().unwrap(), &[PetscScalar::from(1.5); 10]);
     ///     v_view[2] = PetscScalar::from(9.0);
     /// }
     ///
     /// let v_view = v.view()?;
     /// // We do the map in the case that `PetscScalar` is complex.
-    /// assert_eq!(&v_view[..], &[1.5, 1.5, 9.0, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5]
+    /// assert_eq!(v_view.as_slice().unwrap(), &[1.5, 1.5, 9.0, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5]
     ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>()[..]);
     /// # Ok(())
     /// # }
@@ -475,7 +494,7 @@ impl<'a> Vector<'a> {
     ///
     /// let v_view = v.view()?;
     /// assert_eq!(v.get_local_size()?, values.len() as PetscInt);
-    /// assert_eq!(&v_view[..], &values);
+    /// assert_eq!(v_view.as_slice().unwrap(), &values);
     /// # Ok(())
     /// # }
     /// ```
@@ -490,6 +509,19 @@ impl<'a> Vector<'a> {
         v.assembly_end()?;
 
         Ok(v)
+    }
+}
+
+impl Clone for Vector<'_> {
+    /// Will use [`Vector::duplicate()`] and [`Vector::copy_data_from()`].
+    fn clone(&self) -> Self {
+        let mut new_vec = self.duplicate().unwrap();
+        // TODO: only copy data if data has been set. It is hard to tell if data has been set.
+        // We could maybe use something like `PetscObjectStateGet` to check if the vec has been modified
+        // it seems like this is only incremented when data is changed so it could work. The problem is
+        // that this is hidden in a private header so we can use it with the way we create raw bindings.
+        new_vec.copy_data_from(self).unwrap();
+        new_vec
     }
 }
 
@@ -518,7 +550,10 @@ impl<'a, 'b> VectorViewMut<'a, 'b> {
         let ierr = unsafe { petsc_raw::VecGetArray(vec.vec_p, array.as_mut_ptr() as *mut *mut _) };
         Petsc::check_error(vec.world, ierr)?;
 
-        Ok(Self { vec, array: unsafe { array.assume_init() } })
+        let ndarray = unsafe { 
+            ArrayViewMut::from_shape_ptr(ndarray::IxDyn(&[vec.get_local_size().unwrap() as usize]), array.assume_init()) };
+        
+        Ok(Self { vec, array: unsafe { array.assume_init() }, ndarray })
     }
 }
 
@@ -529,27 +564,44 @@ impl<'a, 'b> VectorView<'a, 'b> {
         let ierr = unsafe { petsc_raw::VecGetArrayRead(vec.vec_p, array.as_mut_ptr() as *mut *const _) };
         Petsc::check_error(vec.world, ierr)?;
 
-        Ok(Self { vec, array: unsafe { array.assume_init() } })
+        let ndarray = unsafe { 
+            ArrayView::from_shape_ptr(ndarray::IxDyn(&[vec.get_local_size().unwrap() as usize]), array.assume_init()) };
+
+        Ok(Self { vec, array: unsafe { array.assume_init() }, ndarray })
     }
 }
 
-impl Deref for VectorViewMut<'_, '_> {
-    type Target = [PetscScalar];
-    fn deref(&self) -> &[PetscScalar] {
-        unsafe { std::slice::from_raw_parts(self.array, self.vec.get_local_size().unwrap() as usize) }
+// TODO: im not sure if i like this, it would make more sense for Vector::view to return an ArrayView
+// Be also we need to run out own custom drop.
+impl<'b> Deref for VectorViewMut<'_, 'b> {
+    type Target = ArrayViewMut<'b, f64, ndarray::IxDyn>;
+    fn deref(&self) -> &ArrayViewMut<'b, f64, ndarray::IxDyn> {
+        &self.ndarray
     }
 }
 
-impl DerefMut for VectorViewMut<'_, '_> {
-    fn deref_mut(&mut self) -> &mut [PetscScalar] {
-        unsafe { std::slice::from_raw_parts_mut(self.array, self.vec.get_local_size().unwrap() as usize) }
+impl<'b> DerefMut for VectorViewMut<'_, 'b> {
+    fn deref_mut(&mut self) -> &mut ArrayViewMut<'b, f64, ndarray::IxDyn> {
+        &mut self.ndarray
     }
 }
 
-impl Deref for VectorView<'_, '_> {
-    type Target = [PetscScalar];
-    fn deref(&self) -> &[PetscScalar] {
-        unsafe { std::slice::from_raw_parts(self.array, self.vec.get_local_size().unwrap() as usize) }
+impl std::fmt::Debug for VectorViewMut<'_, '_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.ndarray.fmt(f)
+    }
+}
+
+impl<'b> Deref for VectorView<'_, 'b> {
+    type Target = ArrayView<'b, PetscScalar, ndarray::IxDyn>;
+    fn deref(&self) -> &ArrayView<'b, PetscScalar, ndarray::IxDyn> {
+        &self.ndarray
+    }
+}
+
+impl std::fmt::Debug for VectorView<'_, '_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.ndarray.fmt(f)
     }
 }
 
@@ -564,6 +616,7 @@ impl<'a> Vector<'a> {
         VecGetLocalSize, get_local_size, vec_p, output PetscInt, ls, #[doc = "Returns the number of elements of the vector stored in local memory."];
         VecGetSize, get_global_size, vec_p, output PetscInt, gs, #[doc = "Returns the global number of elements of the vector."];
         VecNorm, norm, vec_p, input NormType, norm_type, output PetscReal, tmp1, #[doc = "Computes the vector norm."];
+        VecScale, scale, vec_p, input PetscScalar, alpha, takes mut, #[doc = "Scales a vector (`x[i] *= alpha` for each `i`)."];
     }
 }
 

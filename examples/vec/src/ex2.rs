@@ -42,7 +42,7 @@ fn main() -> petsc_rs::Result<()> {
     x.assemble_with((0..size-rank).map(|i| (i, PetscScalar::from(1.0))), InsertMode::ADD_VALUES)?;
 
     let viewer = Viewer::create_ascii_stdout(petsc.world())?;
-    x.view_with(&viewer)?;
+    x.view_with(Some(&viewer))?;
 
     // return
     Ok(())

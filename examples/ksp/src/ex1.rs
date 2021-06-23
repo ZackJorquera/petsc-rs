@@ -142,14 +142,14 @@ fn main() -> petsc_rs::Result<()> {
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
                         Solve the linear system
         - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
-    ksp.solve(&b, &mut x)?;
+    ksp.solve(Some(&b), &mut x)?;
 
     /*
         View solver info; we could instead use the option -ksp_view to
         print this info to the screen at the conclusion of KSPSolve().
     */
     let viewer = Viewer::create_ascii_stdout(petsc.world())?;
-    ksp.view_with(&viewer)?;
+    ksp.view_with(Some(&viewer))?;
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
                       Check the solution and clean up
