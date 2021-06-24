@@ -5,7 +5,7 @@
 //!
 //! read <https://petsc.org/release/documentation/manual/getting_started>
 
-use std::os::raw::c_char;
+use std::os::raw::{c_char, c_int};
 use std::vec;
 
 pub(crate) mod petsc_raw {
@@ -183,36 +183,32 @@ impl PetscBuilder
     /// [`PetscInitialize`]: petsc_raw::PetscInitialize
     pub fn init(self) -> Result<Petsc>
     {
-        let mut argc;
-        let c_argc_p = if let Some(ref args) = self.args { 
-            argc = args.len() as i32;
-            &mut argc as *mut i32
-        } else { 
-            argc = 0;
-            std::ptr::null_mut()
-        };
+        // Note the argc/argv data we give to `PetscInitialize` is used internally and so it  must
+        // live longer than the call to `PetscFinalize`. In other words, it must outlive the `Petsc`
+        // type this method creates.
 
-        // I think we want to leak args because Petsc stores it as a global
-        // At least we need to make sure it lives past the call to `PetscFinalize`
-        // We heap allocate args with a Vec and then leak it
-        let mut args_array = vec![std::ptr::null_mut(); argc as usize];
-        let vec_cap = args_array.capacity();
-        let mut c_args = std::ptr::null_mut();
-        let c_args_p = if let Some(ref args) = self.args {
-            for (arg, c_arg_p) in args.iter().zip(args_array.iter_mut()) {
-                // `CString::into_raw` will leak the data.
-                *c_arg_p = CString::new(arg.to_string()).expect("CString::new failed").into_raw();
-            }
-
-            c_args = args_array.leak().as_mut_ptr() as *mut *mut c_char;
-
-            &mut c_args as *mut *mut *mut c_char
+        // Note, we can drop argc when we are done using the pointer
+        let mut argc_boxed;
+        let c_argc_p = if let Some(ref args) = self.args {
+            argc_boxed = Box::new(args.len() as c_int);
+            &mut *argc_boxed as *mut c_int
         } else {
+            argc_boxed = Box::new(0);
             std::ptr::null_mut()
         };
-        // Note: we leak each arg (as CString) and args_array.
 
-        // We dont have to leak the file string
+        // We only need to drop the following 3 objects to clean up (and also argc)
+        let cstr_args_owned = self.args.as_ref().map_or(vec![], |args| 
+            args.iter().map(|arg| CString::new(arg.to_string()).expect("CString::new failed"))
+                .collect::<Vec<CString>>());
+        let mut c_args_owned = cstr_args_owned.iter().map(|arg| arg.as_ptr() as *mut _)
+            .collect::<Vec<*mut c_char>>();
+        c_args_owned.push(std::ptr::null_mut());
+        let mut c_args_boxed = Box::new(c_args_owned.as_mut_ptr());
+
+        let c_args_p = self.args.as_ref().map_or(std::ptr::null_mut(), |_| &mut *c_args_boxed as *mut _);
+
+        // Note, the file string does not need to outlive the `Petsc` type
         let file_cstring = self.file.map(|ref f| CString::new(f.to_string()).ok()).flatten();
         let file_c_str = file_cstring.as_ref().map_or_else(|| std::ptr::null(), |v| v.as_ptr());
 
@@ -242,7 +238,7 @@ impl PetscBuilder
                 ierr = unsafe { petsc_raw::PetscInitialize(c_argc_p, c_args_p, file_c_str, help_c_str) };
                 Box::new(mpi::topology::SystemCommunicator::world())
             }
-        }, raw_args_vec_data: self.args.map(|_| (c_args, argc as usize, vec_cap)) };
+        }, _arg_data: self.args.as_ref().map(|_| (argc_boxed, cstr_args_owned, c_args_owned, c_args_boxed)) };
         Petsc::check_error(petsc.world(), ierr)?;
 
         Ok(petsc)
@@ -299,8 +295,8 @@ pub struct Petsc {
     // This is functionally the same as `PETSC_COMM_WORLD` in the C api
     pub(crate) world: Box<dyn Communicator>,
 
-    // This is used to drop the args data
-    raw_args_vec_data: Option<(*mut *mut c_char, usize, usize)>,
+    // This is used to drop the argc/args data when Petsc is dropped, we never actually use it
+    _arg_data: Option<(Box<c_int>, Vec<CString>, Vec<*mut c_char>, Box<*mut *mut c_char>)>
 }
 
 // Destructor
@@ -308,14 +304,6 @@ impl Drop for Petsc {
     fn drop(&mut self) {
         unsafe {
             petsc_raw::PetscFinalize();
-        }
-
-        if let Some((ptr, len, cap)) = self.raw_args_vec_data
-        {
-            // SAFETY: The vec ptr was created with `Vec::leak` and the str_ptr's were created
-            // with `CString::into_raw`. Everything should be valid.
-            let vec = unsafe { Vec::from_raw_parts(ptr, len, cap) };
-            vec.iter().for_each(|str_ptr| { let _ = unsafe { CString::from_raw(*str_ptr) }; });
         }
     }
 }
@@ -344,7 +332,7 @@ impl Petsc {
     /// [`Petsc::builder`]: Petsc::builder
     pub fn init_no_args() -> Result<Self> {
         let ierr = unsafe { petsc_raw::PetscInitializeNoArguments() };
-        let petsc = Self { world: Box::new(mpi::topology::SystemCommunicator::world()), raw_args_vec_data: None };
+        let petsc = Self { world: Box::new(mpi::topology::SystemCommunicator::world()), _arg_data: None };
         Petsc::check_error(petsc.world(), ierr)?;
 
         Ok(petsc)

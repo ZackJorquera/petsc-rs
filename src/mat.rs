@@ -393,7 +393,7 @@ impl<'a> Mat<'a> {
 
     // TODO: there is more to each of these allocations that i should add support for
     wrap_prealloc_petsc_member_funcs! {
-        MatSeqAIJSetPreallocation, seq_aij_set_preallocation, mat_p, nz, nzz, #[doc = "For good matrix assembly \
+        MatSeqAIJSetPreallocation, seq_aij_set_preallocation, mat_p, nz nz, nzz, #[doc = "For good matrix assembly \
             performance the user should preallocate the matrix storage by setting the parameter nz (or the array nnz). \
             By setting these parameters accurately, performance during matrix assembly can be increased by more than a \
             factor of 50.\n\n\
@@ -401,17 +401,14 @@ impl<'a> Mat<'a> {
             # Parameters.\n\n\
             * `nz` - number of nonzeros per row (same for all rows)\n\
             * `nnz` - slice containing the number of nonzeros in the various rows (possibly different for each row) or `None`"];
-        MatSeqSELLSetPreallocation, seq_sell_set_preallocation, mat_p, nz, nnz, #[doc = "For good matrix assembly \
+        MatSeqSELLSetPreallocation, seq_sell_set_preallocation, mat_p, nz nz, nnz, #[doc = "For good matrix assembly \
             performance the user should preallocate the matrix storage by setting the parameter nz (or the array nnz). \
             By setting these parameters accurately, performance during matrix assembly can be increased significantly.\n\n\
             Petsc C Docs: <https://petsc.org/release/docs/manualpages/Mat/MatSeqSELLSetPreallocation.html#MatSeqSELLSetPreallocation>\n\n\
             # Parameters.\n\n\
             * `nz` - number of nonzeros per row (same for all rows)\n\
             * `nnz` - slice containing the number of nonzeros in the various rows (possibly different for each row) or `None`"];
-    }
-
-    wrap_prealloc_petsc_member_funcs! {
-        MatMPIAIJSetPreallocation, mpi_aij_set_preallocation, mat_p, d_nz, d_nnz, o_nz, o_nnz, #[doc = "Preallocates memory for a \
+        MatMPIAIJSetPreallocation, mpi_aij_set_preallocation, mat_p, nz d_nz, d_nnz, nz o_nz, o_nnz, #[doc = "Preallocates memory for a \
         sparse parallel matrix in AIJ format (the default parallel PETSc format). For good matrix assembly performance the \
         user should preallocate the matrix storage by setting the parameters d_nz (or d_nnz) and o_nz (or o_nnz). By setting \
         these parameters accurately, performance can be increased by more than a factor of 50.\n\n\
@@ -426,25 +423,19 @@ impl<'a> Mat<'a> {
         * `o_nnz` - array containing the number of nonzeros in the various rows of the OFF-DIAGONAL portion of the local submatrix \
         (possibly different for each row) or `None`, if `o_nz` is used to specify the nonzero structure. The size of this array is \
         equal to the number of local rows, i.e 'm'."];
-        MatMPISELLSetPreallocation, mpi_sell_set_preallocation, mat_p, d_nz, d_nnz, o_nz, o_nnz, #[doc = "Preallocates memory for a \
+        MatMPISELLSetPreallocation, mpi_sell_set_preallocation, mat_p, nz d_nz, d_nnz, nz o_nz, o_nnz, #[doc = "Preallocates memory for a \
         sparse parallel matrix in sell format. For good matrix assembly performance the user should preallocate the matrix storage \
         by setting the parameters `d_nz` (or `d_nnz`) and `o_nz` (or `o_nnz`).\n\n\
         Petsc C Docs: <https://petsc.org/release/docs/manualpages/Mat/MatMPISELLSetPreallocation.html#MatMPISELLSetPreallocation>\n\n\
         # Parameters.\n\n\
         Read docs for [`Mat::mpi_aij_set_preallocation()`](Mat::mpi_aij_set_preallocation())"];
-    }
-
-    wrap_prealloc_petsc_member_funcs! {
-        MatSeqSBAIJSetPreallocation, seq_sb_aij_set_preallocation, mat_p, bs, nz, nnz, #[doc = "Creates a sparse symmetric...\n\n\
+        MatSeqSBAIJSetPreallocation, seq_sb_aij_set_preallocation, mat_p, block bs, nz nz, nnz, #[doc = "Creates a sparse symmetric...\n\n\
         Petsc C Docs: <https://petsc.org/release/docs/manualpages/Mat/MatSeqSBAIJSetPreallocation.html#MatSeqSBAIJSetPreallocation>\n\n\
         # Parameters.\n\n\
         * `bs` - size of block, the blocks are ALWAYS square. One can use `MatSetBlockSizes()` to set a different row and column blocksize \
         but the row blocksize always defines the size of the blocks. The column blocksize sets the blocksize of the vectors obtained with `MatCreateVecs()`\n\
         * Read docs for [`Mat::seq_aij_set_preallocation()`](Mat::seq_aij_set_preallocation())"];
-    }
-
-    wrap_prealloc_petsc_member_funcs! {
-        MatMPISBAIJSetPreallocation, mpi_sb_aij_set_preallocation, mat_p, bs, d_nz, d_nnz, o_nz, o_nnz, #[doc = "For good matrix...\n\n\
+        MatMPISBAIJSetPreallocation, mpi_sb_aij_set_preallocation, mat_p, block bs, nz d_nz, d_nnz, nz o_nz, o_nnz, #[doc = "For good matrix...\n\n\
         Petsc C Docs: <https://petsc.org/release/docs/manualpages/Mat/MatMPISBAIJSetPreallocation.html#MatMPISBAIJSetPreallocation>\n\n\
         # Parameters.\n\n\
         * `bs` - size of block, the blocks are ALWAYS square. One can use `MatSetBlockSizes()` to set a different row and column blocksize \

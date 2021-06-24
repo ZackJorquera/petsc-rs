@@ -3,7 +3,6 @@ extern crate bindgen;
 use std::env;
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::Command;
 
 // TODO: use types from rsmpi when i can over Petsc types
 // from: https://github.com/rsmpi/rsmpi/blob/master/mpi-sys/src/rsmpi.h
@@ -64,24 +63,25 @@ fn main() {
         bindings = bindings.clang_arg(format!("-I{}", dir.to_string_lossy()));
     }
 
-    // this code does not work, because you have to call compile which isn't something we want to do
-    // let mut mpicc_builder = cc::Build::new();
-    // mpicc_builder.compiler("mpicc");
-    // let mpicc_compiler = mpicc_builder.try_get_compiler().ok();
-    // let include_env = mpicc_compiler.map(|compiler| 
-    //     compiler.env().iter().find(|(key, _)| key == "INCLUDE").cloned()).flatten();
-    // if let Some((_, include_paths)) = include_env
-    // {
-    //     bindings = bindings.clang_args(include_paths.to_string_lossy().split(';').map(|i| format!("-I{}", i)));
-    // }
-    //
+    let mpi_lib = match build_probe_mpi::probe() {
+        Ok(lib) => lib,
+        Err(errs) => {
+            eprintln!("Could not find MPI library for various reasons:\n");
+            for (i, err) in errs.iter().enumerate() {
+                eprintln!("Reason #{}:\n{}\n", i, err);
+            }
+            panic!();
+        }
+    };
 
-    // TODO: make better, show i do parsing. There must be a library that can do this
-    // This gets the includes from mpicc
-    if let Ok(output) = Command::new("mpicc").args(&["--show"]).output() {
-        let gcc_command = String::from_utf8_lossy(&output.stdout).into_owned();
-        let include_paths = gcc_command.split(' ').filter(|&s| &s[..2] == "-I");
-        bindings = bindings.clang_args(include_paths);
+    for dir in &mpi_lib.lib_paths {
+        println!("cargo:rustc-link-search=native={}", dir.display());
+    }
+    for lib in &mpi_lib.libs {
+        println!("cargo:rustc-link-lib={}", lib);
+    }
+    for dir in &mpi_lib.include_paths {
+        bindings = bindings.clang_arg(format!("-I{}", dir.to_string_lossy()));
     }
 
     // TODO: get comments somehow

@@ -340,6 +340,31 @@ impl<'a, 'tl> KSP<'a, 'tl> {
         Ok(())
     }
 
+    /// Gets the right-hand-side vector for the linear system to be solved.
+    pub fn get_rhs(&self) -> Result<Rc<Vector<'a>>> {
+        let mut vec_p = MaybeUninit::uninit();
+        let ierr = unsafe { petsc_raw::KSPGetRhs(self.ksp_p, vec_p.as_mut_ptr()) };
+        Petsc::check_error(self.world, ierr)?;
+        let ierr = unsafe { petsc_raw::PetscObjectReference(vec_p.assume_init() as *mut _) };
+        Petsc::check_error(self.world, ierr)?;
+
+        let rhs = Rc::new(Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } });
+
+        Ok(rhs)
+    }
+
+    /// Gets the matrix associated with the linear system and possibly a different
+    /// one associated with the preconditioner.
+    ///
+    /// See also [`PC::get_operators()`].
+    ///
+    /// If the operators have NOT been set with [`KSP`](KSP::set_operators())/[`PC::set_operators()`]
+    /// then the operators are created in the PC and returned to the user. In this case, two DIFFERENT
+    /// operators will be returned.
+    pub fn get_operators(&mut self) -> Result<(Rc<Mat<'a>>, Rc<Mat<'a>>)> {
+        // TODO: this shouldn't have to take `&mut self`
+        self.get_pc()?.get_operators()
+    }
 }
 
 // macro impls

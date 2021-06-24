@@ -115,15 +115,13 @@ fn main() -> petsc_rs::Result<()> {
 
     ksp.solve(None, &mut x)?;
 
-    // TODO add Residual norm calc:
-    // KSPGetOperators(ksp,&A,NULL);
-    // KSPGetSolution(ksp,&x);
-    // KSPGetRhs(ksp,&b);
-    // VecDuplicate(b,&b2);
-    // MatMult(A,x,b2);
-    // VecAXPY(b2,-1.0,b);
-    // VecNorm(b2,NORM_MAX,&nrm);
-    // PetscPrintf(PETSC_COMM_WORLD,"Residual norm %g\n",(double)nrm);
+    let (a_mat,_) = ksp.get_operators()?;
+    let b = ksp.get_rhs()?;
+    let mut b2 = b.duplicate()?;
+    Mat::mult(&a_mat,&x,&mut b2)?;
+    b2.axpy(-1.0, &b)?;
+    let r_norm = b2.norm(NormType::NORM_INFINITY)?;
+    petsc_println!(petsc.world(), "Residual norm: {:.5e}", r_norm);
 
     let iters = ksp.get_iteration_number()?;
     petsc_println!(petsc.world(), "Iters {}", iters);

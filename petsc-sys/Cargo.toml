@@ -13,3 +13,4 @@ mpi = {git = "https://github.com/ZackJorquera/rsmpi.git", branch = "trait_object
 cc = "1.0"
 bindgen = "0.58"
 pkg-config = "0.3"
+build-probe-mpi = "*"
