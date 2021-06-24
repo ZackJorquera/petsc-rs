@@ -6,7 +6,6 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::Command;
 
 use quote::ToTokens;
 
@@ -114,13 +113,25 @@ fn main() {
         bindings = bindings.clang_arg(format!("-I{}", dir.to_string_lossy()));
     }
 
-    // TODO: make better, show i do parsing. There must be a library that can do this
-    // This gets the includes from mpicc
-    // We could probably use the build-probe-mpi crate to get this info.
-    if let Ok(output) = Command::new("mpicc").args(&["--show"]).output() {
-        let gcc_command = String::from_utf8_lossy(&output.stdout).into_owned();
-        let include_paths = gcc_command.split(' ').filter(|&s| &s[..2] == "-I");
-        bindings = bindings.clang_args(include_paths);
+    let mpi_lib = match build_probe_mpi::probe() {
+        Ok(lib) => lib,
+        Err(errs) => {
+            eprintln!("Could not find MPI library for various reasons:\n");
+            for (i, err) in errs.iter().enumerate() {
+                eprintln!("Reason #{}:\n{}\n", i, err);
+            }
+            panic!();
+        }
+    };
+
+    for dir in &mpi_lib.lib_paths {
+        println!("cargo:rustc-link-search=native={}", dir.display());
+    }
+    for lib in &mpi_lib.libs {
+        println!("cargo:rustc-link-lib={}", lib);
+    }
+    for dir in &mpi_lib.include_paths {
+        bindings = bindings.clang_arg(format!("-I{}", dir.to_string_lossy()));
     }
 
     // TODO: get comments somehow

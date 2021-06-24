@@ -97,6 +97,48 @@ impl<'a> PC<'a> {
 
         Ok(())
     }
+    
+    /// Gets the matrix associated with the linear system and possibly a different
+    /// one associated with the preconditioner.
+    ///
+    /// If the operators have NOT been set with [`KSP`](KSP::set_operators())/[`PC::set_operators()`]
+    /// then the operators are created in the PC and returned to the user. In this case, two DIFFERENT
+    /// operators will be returned.
+    pub fn get_operators(&self) -> Result<(Rc<Mat<'a>>, Rc<Mat<'a>>)> {
+        // TODO: maybe this should return Rc<RefCell<T>> so that the caller can edit the matrices
+        // https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/PC/PCGetOperators.html#PCGetOperators
+        // Although that would mean set_operators should also take Rc<RefCell<T>>
+
+        let a_mat = if let Some(ref a_mat) = self.ref_amat {
+            a_mat.clone()
+        }
+        else
+        {
+            let mut a_mat_p = MaybeUninit::uninit();
+            let ierr = unsafe { petsc_raw::PCGetOperators(self.pc_p, a_mat_p.as_mut_ptr(), std::ptr::null_mut()) };
+            Petsc::check_error(self.world, ierr)?;
+            let ierr = unsafe { petsc_raw::PetscObjectReference(a_mat_p.assume_init() as *mut _) };
+            Petsc::check_error(self.world, ierr)?;
+
+            Rc::new(Mat { world: self.world, mat_p: unsafe { a_mat_p.assume_init() } })
+        };
+
+        let p_mat = if let Some(ref p_mat) = self.ref_pmat {
+            p_mat.clone()
+        }
+        else
+        {
+            let mut p_mat_p = MaybeUninit::uninit();
+            let ierr = unsafe { petsc_raw::PCGetOperators(self.pc_p, std::ptr::null_mut(), p_mat_p.as_mut_ptr()) };
+            Petsc::check_error(self.world, ierr)?;
+            let ierr = unsafe { petsc_raw::PetscObjectReference(p_mat_p.assume_init() as *mut _) };
+            Petsc::check_error(self.world, ierr)?;
+
+            Rc::new(Mat { world: self.world, mat_p: unsafe { p_mat_p.assume_init() } })
+        };
+
+        Ok((a_mat, p_mat))
+    }
 
     // /// Sets the matrix associated with the linear system and a (possibly)
     // /// different one associated with the preconditioner.

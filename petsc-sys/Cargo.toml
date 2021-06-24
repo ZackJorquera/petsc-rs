@@ -29,3 +29,4 @@ bindgen = "0.58"
 pkg-config = "0.3"
 syn = { version = "1.0", features = ["full"] }
 quote = "1.0"
+build-probe-mpi = "*"
