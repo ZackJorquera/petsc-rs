@@ -209,7 +209,10 @@ fn main() {
         assert!(petsc_use_idents.contains(&"PETSC_USE_COMPLEX".into()),
                 "PETSc is not compiled to use complex for scalar, but the feature \"petsc-use-complex\" is set.");
 
-        panic!("Using complex numbers as PetscScalar is currently not available. Please disable \"petsc-use-complex\".");
+        let warn_msg = "Using complex numbers as PetscScalar is currently experimental only. The FFI ABI with C is \
+            not guaranteed to be compatible. Use at your own risk or disable \"petsc-use-complex\".";
+        println!("cargo:warning={}", warn_msg);
+        eprintln!("{}", warn_msg);
     } else {
         assert!(!petsc_use_idents.contains(&"PETSC_USE_COMPLEX".into()),
                 "PETSc is compiled to use complex for scalar, but the feature \"petsc-use-complex\" is no set.");
