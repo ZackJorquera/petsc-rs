@@ -153,3 +153,21 @@ pub enum DMTypeEnum {
     DMPRODUCT,
     DMSTAG,
 }
+
+impl Into<bool> for PetscBool {
+    fn into(self) -> bool {
+        match self {
+            PetscBool::PETSC_FALSE => false,
+            PetscBool::PETSC_TRUE => true
+        }
+    }
+}
+
+impl From<bool> for PetscBool {
+    fn from(b: bool) -> Self {
+        match b {
+            false => PetscBool::PETSC_FALSE,
+            true => PetscBool::PETSC_TRUE
+        }
+    }
+}

@@ -172,7 +172,7 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
     /// let mut r = petsc.vec_create()?;
     /// r.set_sizes(None, Some(n))?;
     /// r.set_from_options()?;
-    /// let mut g = r.duplicate()?;
+    /// let g = r.duplicate()?;
     ///
     /// let mut snes = petsc.snes_create()?;
     ///
@@ -388,7 +388,7 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
     /// J.set_from_options()?;
     /// J.seq_aij_set_preallocation(3, None)?;
     /// # #[allow(non_snake_case)]
-    /// let mut P = J.duplicate(MatDuplicateOption::MAT_SHARE_NONZERO_PATTERN)?;
+    /// let P = J.duplicate(MatDuplicateOption::MAT_SHARE_NONZERO_PATTERN)?;
     ///
     /// let mut snes = petsc.snes_create()?;
     ///

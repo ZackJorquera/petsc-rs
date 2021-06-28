@@ -5,6 +5,9 @@
 
 /// Internal macro used to make wrappers of "simple" Petsc function
 ///
+/// Note, using this macro can be unsafe, the methods that it creates use unsafe code and thus if you
+/// incorrectly use the macro you can create code that does not work (but might compile).
+///
 /// This macro wraps a "simple" PETSc function that takes any number of inputs and returns any number of outputs.
 /// You can also set if the function takes a mutable reference to self or immutable.
 /// These can be repeated multiple times to define multiple methods in one macro call.
@@ -23,26 +26,27 @@
 /// }
 /// ```
 ///
-/// For a more general case lets say we have a Petsc function called `TestSetABRetCD`
-/// that is defined as follows: 
-/// `pub unsafe fn TestSetABRetCD(arg1: Test, arg2: PetscInt, arg3: PetscReal, arg4: *mut PetscReal, arg5: *mut PetscInt) -> PetscErrorCode`
+/// For a more general case lets say we have a Petsc function called `VecSetABRetCD`
+/// that is defined as follows (from bindgen): 
+/// `pub unsafe fn VecSetABRetCD(arg1: Vec, arg2: PetscInt, arg3: PetscReal, arg4: *mut PetscReal, arg5: *mut PetscInt) -> PetscErrorCode`
 /// It takes in two inputs `arg2` and `arg3` and returns two outputs with `arg4` and
-/// `arg5`. It acts on the made-up Petsc type `Test` that in rust we define as follows:
+/// `arg5` (through pointers). For refrence the rust `petsc-rs::Vector` type is defined as the following:
 /// ```ignore
-/// pub struct Test<'a> {
+/// pub struct Vector<'a> {
 ///     pub(crate) world: &'a dyn Communicator,
-///     pub(crate) test_p: petsc_raw::Test,
+///     pub(crate) test_p: petsc_raw::Vec,
 /// }
 /// ```
-/// Note, you need to have a member `world: &'a dyn Communicator` for this macro to work.
+/// Note, you need to have a member `world: &'a dyn Communicator` and some pointer type to the C petsc type
+/// for this macro to work.
 ///
 /// We can then using the macro in the following way to create the function 
 /// `pub fn set_ab_ret_cd(&mut self, a: i32, b: f64) -> crate::Result<(f64, i32)>`
-/// 
+/// Note, you should use `PetscInt` and `PetscReal` instead of `i32` and `f64`.
 /// ```ignore
-/// impl<'a> Test<'a> {
+/// impl Vec<'_> {
 ///     wrap_simple_petsc_member_funcs! {
-///         TestSetABRetCD, set_ab_ret_cd, test_p, input i32, a, input f64, b, 
+///         VecSetABRetCD, set_ab_ret_cd, vec_p, input i32, a, input f64, b, 
 /// //         ^                  ^          ^        ^
 /// //      Petsc func name       |   pointer member  |- Then for each input
 /// //                       rust func name          put `input type, param_name,`
@@ -55,28 +59,70 @@
 /// ```
 /// Note, the number of input, the number of outputs, and if it takes a mutable
 /// reference to self is all variable/optional and can be set to what even you need.
+///
+/// ## More Advanced Input
+///
+/// `PetscScalar` can be a complex type, in the pets-rc side we use a different Complex type
+/// than is used by the raw function so some automatic conversion is done for you to accommodate
+/// this for both in input type and the output type.
+///
+/// Note, the input type can differ from the raw input type if `.into()` can be use
+/// for conversion. This is done automatically. If the inputs to the rust wrapper function
+/// is a struct, like `Vector` you can also use the macro to get a member value.
+/// ```ignore
+/// impl Vec<'_> {
+///     wrap_simple_petsc_member_funcs! {
+///         VecAXPY, axpy, vec_p, input PetscScalar, alpha, input &Vector,
+///             other .vec_p, #[doc = "doc-string"];
+/// //                ^ just add `.member_name` after the param_name
+///     }
+/// }
+/// ```
+/// 
+/// If the rust wrapper output type shares the same memory layout as the type used by the
+/// raw Petsc function, than nothing needs to be done as a pointer cast is done
+/// automatically. If you with to do a conversion that requires an into you can do something
+/// like the following.
+/// ```ignore
+/// impl NullSpace<'_> {
+///     wrap_simple_petsc_member_funcs! {
+///         MatNullSpaceTest, test, ns_p, input &Mat, vec .mat_p,
+///         output bool, is_null .into from petsc_raw::PetscBool, #[doc = "doc-string"];
+/// //                           ^      ^      ^
+/// //                    add `.into`   |      |
+/// //                            Then add `from <original_type>`
+///     }
+/// }
+/// ```
+/// Note, the `original_type` is the type that is given to the raw petsc function.
+/// It most likely will be the same type that the raw function wants, but only must
+/// shares the same memory layout as the type used by the raw Petsc function, as a
+/// pointer cast is done automatically.
 macro_rules! wrap_simple_petsc_member_funcs {
-    // This is the most general case for the wrapper macro. It wraps a PETSc function that takes any number of input
-    // and returns any number one output. You can also set if the function takes a mutable reference or not
-    // These can be repeated multiple times to define multiple methods.
-    // TODO: should i switch the order of input out put to take `input $param_name:ident: $param_type:ty,`
-    // There are couple of ways to make this macro more readable, I could also add for parentheses.
     {$(
-        $raw_func:ident, $new_func:ident, $raw_ptr_var:ident, $(input $param_type:ty, $param_name:ident,)* $(output $ret_type:ty, $tmp_ident:ident,)* $(takes $mut_tag:tt,)? #[$doc:meta];
+        $raw_func:ident, $new_func:ident, $raw_ptr_var:ident,
+        $(input $param_type:ty, $param_name:ident $(.$member_name:ident)? ,)*
+        $(output $ret_type:ty, $tmp_ident:ident $(.$into_fn:ident from $raw_ret_type:ty)? ,)*
+        $(takes $mut_tag:tt,)? #[$doc:meta];
     )*} => {
 $(
     #[$doc]
     #[allow(unused_parens)]
-    pub fn $new_func(& $($mut_tag)? self, $( $param_name: $param_type ),*) -> crate::Result<($( $ret_type ),*)>
+    pub fn $new_func(& $($mut_tag)? self, $( $param_name: $param_type ),*)
+        -> crate::Result<($( $ret_type ),*)>
     {
         $(
-            let mut $tmp_ident = ::std::mem::MaybeUninit::<$ret_type>::uninit();
+            let mut $tmp_ident = ::std::mem::MaybeUninit $(::<$raw_ret_type>)? ::uninit();
         )*
-        let ierr = unsafe { crate::petsc_raw::$raw_func(self.$raw_ptr_var, $( $param_name, )* $( $tmp_ident.as_mut_ptr() ),* )};
+        let ierr = unsafe { crate::petsc_raw::$raw_func(
+            self.$raw_ptr_var,
+            $( $param_name $(.$member_name)?.into() , )*
+            $( $tmp_ident.as_mut_ptr() as *mut _ ),*
+        )};
         Petsc::check_error(self.world, ierr)?;
 
         #[allow(unused_unsafe)]
-        crate::Result::Ok(unsafe { ( $( $tmp_ident.assume_init() ),* ) })
+        crate::Result::Ok(unsafe { ( $( $tmp_ident.assume_init() $(.$into_fn())? ),* ) })
     }
 )*
     };

@@ -167,22 +167,22 @@ fn main() -> petsc_rs::Result<()> {
 
     let tols = snes.get_tolerances()?;
     petsc_println!(petsc.world(), "atol={:.5e}, rtol={:.5e}, stol={:.5e}, maxit={}, maxf={}",
-        tols.0, tols.1, tols.2, tols.3, tols.4);
+        tols.0, tols.1, tols.2, tols.3, tols.4)?;
 
     x.set_all(0.5)?;
 
     snes.solve(None, &mut x)?;
     let it_num = snes.get_iteration_number()?;
-    petsc_println!(petsc.world(), "Number of SNES iterations = {}", it_num);
+    petsc_println!(petsc.world(), "Number of SNES iterations = {}", it_num)?;
 
     x.axpy(-1.0, &u)?;
     let norm = x.norm(NormType::NORM_2)?;
     
-    petsc_println!(petsc.world(), "Norm of error {:.5e} Iterations {}", norm, it_num);
+    petsc_println!(petsc.world(), "Norm of error {:.5e} Iterations {}", norm, it_num)?;
     if test_jacobian_domain_error {
         todo!();
         // let snes_type = snes.get_type()?;
-        // petsc_println!(petsc.world(), "SNES type {:?}", snes_type);
+        // petsc_println!(petsc.world(), "SNES type {:?}", snes_type)?;
     }
 
     // return

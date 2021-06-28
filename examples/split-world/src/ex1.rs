@@ -101,7 +101,7 @@ fn main() -> petsc_rs::Result<()> {
     // let petsc = Petsc::init_no_args()?;
 
     // This will print twice, by the odd comm and the even comm
-    petsc_println!(petsc.world(), "Hello parallel world (color: {}) of {} processes!", my_color, petsc.world().size() );
+    petsc_println!(petsc.world(), "Hello parallel world (color: {}) of {} processes!", my_color, petsc.world().size() )?;
 
     // Have the first process group do one thing and the second process group do another
     if my_color == 0 {
@@ -260,7 +260,7 @@ fn do_ksp_ex2(petsc: &Petsc, m: i32, n: i32, view_exact_sol: bool) -> petsc_rs::
     x.axpy(-1.0, &u)?;
     let x_norm = x.norm(NormType::NORM_2)?;
     let iters = ksp.get_iteration_number()?;
-    petsc_println!(petsc.world(), "(ex2) Norm of error {:.5e}, Iters {}", x_norm, iters);
+    petsc_println!(petsc.world(), "(ex2) Norm of error {:.5e}, Iters {}", x_norm, iters)?;
 
     /*
         All PETSc objects are automatically destroyed when they are no longer needed.
@@ -329,7 +329,7 @@ fn do_ksp_ex23(petsc: &Petsc, n: i32, view_ksp: bool) -> petsc_rs::Result<()> {
     */
     u.set_all(1.0)?;
     Mat::mult(&A, &u, &mut b)?;
-    // petsc_println!(petsc, "b: {:?}", b.get_values(0..n)?);
+    // petsc_println!(petsc, "b: {:?}", b.get_values(0..n)?)?;
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
                 Create the linear solver and set various options
@@ -386,7 +386,7 @@ fn do_ksp_ex23(petsc: &Petsc, n: i32, view_ksp: bool) -> petsc_rs::Result<()> {
     x.axpy(-1.0, &u)?;
     let x_norm = x.norm(NormType::NORM_2)?;
     let iters = ksp.get_iteration_number()?;
-    petsc_println!(petsc.world(), "(ex23) Norm of error {:.5e}, Iters {}", x_norm, iters);
+    petsc_println!(petsc.world(), "(ex23) Norm of error {:.5e}, Iters {}", x_norm, iters)?;
 
     /*
         All PETSc objects are automatically destroyed when they are no longer needed.

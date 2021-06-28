@@ -49,7 +49,7 @@ fn main() -> petsc_rs::Result<()> {
     // or init with no options
     // let petsc = Petsc::init_no_args()?;
 
-    petsc_println!(petsc.world(), "(petsc_println!) Hello parallel world of {} processes!", petsc.world().size() );
+    petsc_println!(petsc.world(), "(petsc_println!) Hello parallel world of {} processes!", petsc.world().size() )?;
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
          Compute the matrix and right-hand-side vector that define
@@ -108,7 +108,7 @@ fn main() -> petsc_rs::Result<()> {
     */
     u.set_all(1.0)?;
     Mat::mult(&A, &u, &mut b)?;
-    // petsc_println!(petsc, "b: {:?}", b.get_values(0..n)?);
+    // petsc_println!(petsc, "b: {:?}", b.get_values(0..n)?)?;
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
                 Create the linear solver and set various options
@@ -163,7 +163,7 @@ fn main() -> petsc_rs::Result<()> {
     x.axpy(-1.0, &u)?;
     let x_norm = x.norm(NormType::NORM_2)?;
     let iters = ksp.get_iteration_number()?;
-    petsc_println!(petsc.world(), "Norm of error {:.5e}, Iters {}", x_norm, iters);
+    petsc_println!(petsc.world(), "Norm of error {:.5e}, Iters {}", x_norm, iters)?;
 
     /*
         All PETSc objects are automatically destroyed when they are no longer needed.

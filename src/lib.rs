@@ -4,6 +4,8 @@
 //! # petsc-rs: PETSc rust bindings
 //!
 //! read <https://petsc.org/release/documentation/manual/getting_started>
+//!
+//! Look at <https://github.com/ZackJorquera/petsc-rs>
 
 use std::os::raw::{c_char, c_int};
 use std::vec;
@@ -31,7 +33,7 @@ pub mod prelude {
         petsc_println,
         petsc_println_all,
         vector::{Vector, NormType, VecOption, },
-        mat::{Mat, MatAssemblyType, MatOption, MatDuplicateOption, MatStencil, },
+        mat::{Mat, MatAssemblyType, MatOption, MatDuplicateOption, MatStencil, NullSpace },
         ksp::{KSP, },
         snes::{SNES, },
         pc::{PC, PCType, },
@@ -67,8 +69,8 @@ use prelude::*;
 /// Prints to standard out, only from the first processor in the communicator.
 /// Calls from other processes are ignored.
 ///
-/// Note, the macro internally uses the try operator, `?`, so it can only be used
-/// in functions that return a [`petsc_rs::Result`](Result).
+/// Note, this macro creates a block that evaluates to a [`petsc_rs::Result`](Result), so the try operator, `?`,
+/// can and should be used. 
 ///
 /// # Example
 ///
@@ -77,18 +79,19 @@ use prelude::*;
 /// # fn main() -> petsc_rs::Result<()> {
 /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
 ///
-/// petsc_println!(petsc.world(), "Hello parallel world of {} processes!", petsc.world().size());
+/// // will print once no matter how many processes there are
+/// petsc_println!(petsc.world(), "Hello parallel world of {} processes!", petsc.world().size())?;
 /// // This will print just a new line
-/// petsc_println!(petsc.world());
+/// petsc_println!(petsc.world())?;
 /// # Ok(())
 /// # }
 /// ```
 #[macro_export]
 macro_rules! petsc_println {
-    ($world:expr) => (Petsc::print($world, "\n")?);
+    ($world:expr) => ( Petsc::print($world, "\n") );
     ($world:expr, $($arg:tt)*) => ({
-        Petsc::print($world, format_args!($($arg)*))?;
-        Petsc::print($world, "\n")?;
+        let s = format!("{}\n", format_args!($($arg)*));
+        Petsc::print($world, s)
     })
 }
 
@@ -97,8 +100,8 @@ macro_rules! petsc_println {
 ///
 /// Will automatically call `PetscSynchronizedFlush` after.
 ///
-/// Note, the macro internally uses the try operator, `?`, so it can only be used
-/// in functions that return a [`petsc_rs::Result`](Result).
+/// Note, this macro creates a block that evaluates to a [`petsc_rs::Result`](Result), so the try operator, `?`,
+/// can and should be used.
 ///
 /// # Example
 ///
@@ -107,20 +110,21 @@ macro_rules! petsc_println {
 /// # fn main() -> petsc_rs::Result<()> {
 /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
 ///
+/// // will print multiple times, once for each processor
 /// Petsc::print_all(petsc.world(), format!("Hello parallel world of {} processes from process {}!\n",
 ///     petsc.world().size(), petsc.world().rank()))?;
 /// // or use:
 /// petsc_println_all!(petsc.world(), "Hello parallel world of {} processes from process {}!", 
-///     petsc.world().size(), petsc.world().rank());
+///     petsc.world().size(), petsc.world().rank())?;
 /// # Ok(())
 /// # }
 /// ```
 #[macro_export]
 macro_rules! petsc_println_all {
-    ($world:expr) => (Petsc::print_all($world, "\n")?);
+    ($world:expr) => ( Petsc::print_all($world, "\n") );
     ($world:expr, $($arg:tt)*) => ({
         let s = format!("{}\n", format_args!($($arg)*));
-        Petsc::print_all($world, s)?;
+        Petsc::print_all($world, s)
     })
 }
 
@@ -434,7 +438,7 @@ impl Petsc {
     ///
     /// Petsc::print(petsc.world(), format!("Hello parallel world of {} processes!\n", petsc.world().size()))?;
     /// // or use:
-    /// petsc_println!(petsc.world(), "Hello parallel world of {} processes!", petsc.world().size());
+    /// petsc_println!(petsc.world(), "Hello parallel world of {} processes!", petsc.world().size())?;
     /// # Ok(())
     /// # }
     /// ```
@@ -469,7 +473,7 @@ impl Petsc {
     ///     petsc.world().size(), petsc.world().rank()))?;
     /// // or use:
     /// petsc_println_all!(petsc.world(), "Hello parallel world of {} processes from process {}!", 
-    ///     petsc.world().size(), petsc.world().rank());
+    ///     petsc.world().size(), petsc.world().rank())?;
     /// # Ok(())
     /// # }
     /// ```
