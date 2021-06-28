@@ -11,7 +11,7 @@
 //! Also sets the complex type, [`PetscComplex`], to be `Complex<f64>`.
 //! - **`petsc-real-f32`** — Sets the real type, [`PetscReal`] to be `f32`.
 //! Also sets the complex type, [`PetscComplex`], to be `Complex<f32>`.
-//! - **`petsc-use-complex`** *(disabled by default)* - Sets the scalar type, [`PetscScalar`], to
+//! - **`petsc-use-complex`** *(disabled by default)* *(experimental only)* - Sets the scalar type, [`PetscScalar`], to
 //! be the complex type, [`PetscComplex`]. If disabled then the scalar type is the real type, [`PetscReal`].
 //! - **`petsc-int-i32`** *(enabled by default)* — Sets the integer type, [`PetscInt`], to be `i32`.
 //! - **`petsc-int-i64`** — Sets the integer type, [`PetscInt`], to be `i64`.
@@ -184,9 +184,6 @@ pub enum DMTypeEnum {
 // only pass Complex<F> behind a pointer, not as a value."
 // What does this mean for use? If every function is listed as `extern "C"` are we ok?
 // Petsc function dont take pointers as inputs all the time.
-
-// TODO: i don't really like doing it this way but it seems that that this is how bindgen wants
-// us to do it https://github.com/rust-lang/rust-bindgen/issues/72#issuecomment-258677264
 #[cfg(feature = "petsc-use-complex")]
 impl Into<Complex<PetscReal>> for __BindgenComplex<PetscReal> {
     fn into(self) -> Complex<PetscReal> {

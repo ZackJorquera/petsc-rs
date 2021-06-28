@@ -208,6 +208,8 @@ fn main() {
     if use_complex_feature {
         assert!(petsc_use_idents.contains(&"PETSC_USE_COMPLEX".into()),
                 "PETSc is not compiled to use complex for scalar, but the feature \"petsc-use-complex\" is set.");
+
+        panic!("Using complex numbers as PetscScalar is currently not available. Please disable \"petsc-use-complex\".");
     } else {
         assert!(!petsc_use_idents.contains(&"PETSC_USE_COMPLEX".into()),
                 "PETSc is compiled to use complex for scalar, but the feature \"petsc-use-complex\" is no set.");

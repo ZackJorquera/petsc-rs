@@ -18,16 +18,16 @@
 //! Also sets the complex type, [`PetscComplex`], to be `Complex<f64>`.
 //! - **`petsc-real-f32`** — Sets the real type, [`PetscReal`] to be `f32`.
 //! Also sets the complex type, [`PetscComplex`], to be `Complex<f32>`.
-//! - **`petsc-use-complex`** *(disabled by default)* - Sets the scalar type, [`PetscScalar`], to
+//! - **`petsc-use-complex`** *(disabled by default)* *(experimental only)* - Sets the scalar type, [`PetscScalar`], to
 //! be the complex type, [`PetscComplex`]. If disabled then the scalar type is the real type, [`PetscReal`].
 //! - **`petsc-int-i32`** *(enabled by default)* — Sets the integer type, [`PetscInt`], to be `i32`.
 //! - **`petsc-int-i64`** — Sets the integer type, [`PetscInt`], to be `i64`.
 //! 
 //! As an example, if you wanted to use a petsc install that uses PETSc with 64-bit integers,
-//! 32-bit floats (single precision), and complex numbers for scalars you would put the following
+//! 32-bit floats (single precision), and real numbers for scalars you would put the following
 //! in your `Cargo.toml`
 //! ```text
-//! petsc-rs = { version = "*", default-features = false, features = ["petsc-real-f32", "petsc-int-i64", "petsc-use-complex"] }
+//! petsc-rs = { version = "*", default-features = false, features = ["petsc-real-f32", "petsc-int-i64"] }
 //! ```
 
 use std::os::raw::{c_char, c_int};

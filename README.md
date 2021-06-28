@@ -27,12 +27,25 @@ From here, you should be able to compile your projects using petsc-rs. However, 
 
 If you want to use a PETSc with non-standard precisions for floats or integers, or complex numbers you can include something like the following in your Cargo.toml.
 ```toml
-petsc-rs = { git = "https://github.com/ZackJorquera/petsc-rs/", branch = "int_scalar_features", default-features = false, features = ["petsc-real-f32", "petsc-int-i64", "petsc-use-complex"] }
+petsc-rs = { git = "https://github.com/ZackJorquera/petsc-rs/", branch = "main", default-features = false, features = ["petsc-real-f32", "petsc-int-i64"] }
 ```
 
-The main branch will ONLY work for double precisions floats, 32-bit integers, and real scalars.
+If you want to have a release build you will have to set the `PETSC_ARCH_RELEASE` environment variable with the directory in `PETSC_DIR` where the release build is. Then when compile with release mode, the PETSc release build will be used. 
 
-If you want to have a release build you will have to set the `PETSC_ARCH_RELEASE` environment variable with the directory in `PETSC_DIR` where the release build is (right now, this is only available on the `int_scalar_features` branch). Then when compile with release mode, the PETSc release build will be used. 
+### Features
+
+PETSc has support for multiple different sizes of scalars and integers. To expose this
+to rust, we require you set different features. The following are all the features that
+can be set. Note, you are required to have exactly one scalar feature set and exactly
+one integer feature set. And it must match the PETSc install.
+- **`petsc-real-f64`** *(enabled by default)* — Sets the real type, [`PetscReal`], to be `f64`.
+Also sets the complex type, [`PetscComplex`], to be `Complex<f64>`.
+- **`petsc-real-f32`** — Sets the real type, [`PetscReal`] to be `f32`.
+Also sets the complex type, [`PetscComplex`], to be `Complex<f32>`.
+- **`petsc-use-complex`** *(disabled by default)* *(experimental only)* - Sets the scalar type, [`PetscScalar`], to
+be the complex type, [`PetscComplex`]. If disabled then the scalar type is the real type, [`PetscReal`].
+- **`petsc-int-i32`** *(enabled by default)* — Sets the integer type, [`PetscInt`], to be `i32`.
+- **`petsc-int-i64`** — Sets the integer type, [`PetscInt`], to be `i64`.
 
 ## Running PETSc Programs
 
@@ -53,7 +66,7 @@ mpiexec -n 8 target/debug/petsc_program_name [petsc_options]
 To help the user start using PETSc immediately, we begin with a simple uniprocessor example that solves the one-dimensional Laplacian problem with finite differences. This sequential code, which can be found in `examples/ksp/src/ex1.rs`, illustrates the solution of a linear system with KSP, the interface to the preconditioners, Krylov subspace methods, and direct linear solvers of PETSc.
 
 ```rust
-//! This file will show how to do the kps ex1 example in Rust using the petsc-rs bindings.
+//! This file will show how to do the kps ex1 example in rust using the petsc-rs bindings.
 //!
 //! Concepts: KSP^solving a system of linear equations
 //! Processors: 1
@@ -63,11 +76,13 @@ To help the user start using PETSc immediately, we begin with a simple uniproces
 //!
 //! To run:
 //! ```text
-//! $ cargo build --bin ex1
-//! $ target/debug/ex1
+//! $ cargo build --bin ksp-ex1
+//! $ target/debug/ksp-ex1
 //! Norm of error 2.41202e-15, Iters 5
-//! $ mpiexec -n 1 target/debug/ex1
+//! $ mpiexec -n 1 target/debug/ksp-ex1
 //! Norm of error 2.41202e-15, Iters 5
+//! $ target/debug/ksp-ex1 -n 100
+//! Norm of error 1.14852e-2, Iters 318
 //! ```
 //!
 //! Note:  The corresponding parallel example is ex23.rs
@@ -77,32 +92,26 @@ static HELP_MSG: &str = "Solves a tridiagonal linear system with KSP.\n\n";
 use petsc_rs::prelude::*;
 
 fn main() -> petsc_rs::Result<()> {
+    // TODO: get from args
     let n = 10;
 
-    // optionally initialize mpi
-    // let _univ = mpi::initialize().unwrap();
-    // init with options
     let petsc = Petsc::builder()
         .args(std::env::args())
         .help_msg(HELP_MSG)
         .init()?;
 
-    // or init with no options
-    // let petsc = Petsc::init_no_args()?;
-
     if petsc.world().size() != 1 {
-        Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
+        Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE,
+            "This is a uniprocessor example only!")?;
     }
 
-    /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-         Compute the matrix and right-hand-side vector that define
-         the linear system, Ax = b.
-     - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+    // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    //   Compute the matrix and right-hand-side vector that define
+    //   the linear system, Ax = b.
+    // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-    /*
-        Create vectors.  Note that we form 1 vector from scratch and
-        then duplicate as needed.
-    */
+    // Create vectors.  Note that we form 1 vector from scratch and
+    // then duplicate as needed.
     let mut x = petsc.vec_create()?;
     x.set_name("Solution")?;
     x.set_sizes(None, Some(n))?;
@@ -116,54 +125,49 @@ fn main() -> petsc_rs::Result<()> {
     A.set_from_options()?;
     A.set_up()?;
 
-    /*
-        Assemble matrix
-    */
+    // Assemble matrix:
+    // Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
+    // float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
+    // call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
+    // but if `PetscScalar` is complex it will construct a complex value which the imaginary part being
+    // set to `0`.
     A.assemble_with((0..n).map(|i| (-1..=1).map(move |j| (i,i+j))).flatten()
             .filter(|&(i, j)| i < n && j < n) // we could also filter out negatives, but assemble_with does that for us
-            .map(|(i,j)| if i == j { (i, j, 2.0) }
-                         else { (i, j, -1.0) }),
+            .map(|(i,j)| if i == j { (i, j, PetscScalar::from(2.0)) }
+                         else { (i, j, PetscScalar::from(-1.0)) }),
         InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
 
-    /*
-        Set exact solution; then compute right-hand-side vector.
-    */
-    u.set_all(1.0)?;
+    // Set exact solution; then compute right-hand-side vector.
+    u.set_all(PetscScalar::from(1.0))?;
     Mat::mult(&A, &u, &mut b)?;
 
-    /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-                Create the linear solver and set various options
-     - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+    // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    //          Create the linear solver and set various options
+    // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     let mut ksp = petsc.ksp_create()?;
 
-    /*
-        Set operators. Here the matrix that defines the linear system
-        also serves as the matrix that defines the preconditioner.
-    */
+    // Set operators. Here the matrix that defines the linear system
+    // also serves as the matrix that defines the preconditioner.
     #[allow(non_snake_case)]
     let rc_A = std::rc::Rc::new(A);
     ksp.set_operators(Some(rc_A.clone()), Some(rc_A.clone()))?;
 
-    /*
-        Set linear solver defaults for this problem (optional).
-        - By extracting the KSP and PC contexts from the KSP context,
-          we can then directly call any KSP and PC routines to set
-          various options.
-        - The following four statements are optional; all of these
-          parameters could alternatively be specified at runtime via
-          KSPSetFromOptions();
-    */
+    // Set linear solver defaults for this problem (optional).
+    // - By extracting the KSP and PC contexts from the KSP context,
+    //     we can then directly call any KSP and PC routines to set
+    //     various options.
+    // - The following four statements are optional; all of these
+    //     parameters could alternatively be specified at runtime via
+    //     `KSP::set_from_options()`.
     let pc = ksp.get_pc_mut()?;
     pc.set_type(PCType::PCJACOBI)?;
     ksp.set_tolerances(Some(1.0e-5), None, None, None)?;
 
-    /*
-        Set runtime options, e.g.,
-            `-- -ksp_type <type> -pc_type <type> -ksp_monitor -ksp_rtol <rtol>`
-        These options will override those specified above as long as
-        KSPSetFromOptions() is called _after_ any other customization
-        routines.
-    */
+    // Set runtime options, e.g.,
+    //     `-ksp_type <type> -pc_type <type> -ksp_monitor -ksp_rtol <rtol>`
+    // These options will override those specified above as long as
+    // `KSP::set_from_options()` is called _after_ any other customization
+    // routines.
     ksp.set_from_options()?;
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -171,25 +175,21 @@ fn main() -> petsc_rs::Result<()> {
         - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
     ksp.solve(Some(&b), &mut x)?;
 
-    /*
-        View solver info; we could instead use the option -ksp_view to
-        print this info to the screen at the conclusion of KSPSolve().
-    */
+    // View solver info; we could instead use the option -ksp_view to
+    // print this info to the screen at the conclusion of `KSP::solve()`.
     let viewer = Viewer::create_ascii_stdout(petsc.world())?;
     ksp.view_with(Some(&viewer))?;
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
                       Check the solution and clean up
      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
-    x.axpy(-1.0, &u)?;
+    x.axpy(PetscScalar::from(-1.0), &u)?;
     let x_norm = x.norm(NormType::NORM_2)?;
     let iters = ksp.get_iteration_number()?;
-    petsc_println!(petsc.world(), "Norm of error {:.5e}, Iters {}", x_norm, iters);
+    petsc_println!(petsc.world(), "Norm of error {:.5e}, Iters {}", x_norm, iters)?;
 
-    /*
-        All PETSc objects are automatically destroyed when they are no longer needed.
-        PetscFinalize() is also automatically called.
-    */
+    // All PETSc objects are automatically destroyed when they are no longer needed.
+    // PetscFinalize() is also automatically called.
 
     // return
     Ok(())
@@ -205,9 +205,3 @@ More examples can be found in [`examples/`](examples/)
 - [Getting Started](https://petsc.org/release/documentation/manual/getting_started/)
 
 - [Programming with PETSc/TAO](https://petsc.org/release/documentation/manual/programming/)
-
-## TODO
-
-Here is a list of things im still working on.
-
-- [ ] add the list :)
