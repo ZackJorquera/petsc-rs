@@ -4,9 +4,9 @@
 //!
 //! To run:
 //! ```text
-//! $ cargo build --bin ex3
-//! $ mpiexec -n 1 target/debug/ex3
-//! $ mpiexec -n 2 target/debug/ex3
+//! $ cargo build --bin snes-ex3
+//! $ mpiexec -n 1 target/debug/snes-ex3
+//! $ mpiexec -n 2 target/debug/snes-ex3
 //! ```
 
 static HELP_MSG: &str = "Newton methods to solve u'' + u^{2} = f in parallel.\n\n";
@@ -58,7 +58,7 @@ fn main() -> petsc_rs::Result<()> {
 
     let mut snes = petsc.snes_create()?;
 
-    snes.set_function(r, |_snes, x, y| {
+    snes.set_function(Some(r), |_snes, x, y| {
         // Note, is the ex3.c file, this is a `DMGetLocalVector` not a `DMCreateLocalVector`.
         // TODO: make it use `DMGetLocalVector` to be consistent with c examples
         let mut x_local = da.create_local_vector()?;

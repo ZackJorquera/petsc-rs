@@ -3,8 +3,8 @@
 //!
 //! To run:
 //! ```text
-//! $ cargo build --bin ex1
-//! $ mpiexec -n 1 target/debug/ex1
+//! $ cargo build --bin snes-ex1
+//! $ mpiexec -n 1 target/debug/snes-ex1
 //! ```
 
 static HELP_MSG: &str = "Newton's method for a two-variable system, sequential.\n\n";
@@ -62,7 +62,7 @@ fn main() -> petsc_rs::Result<()> {
         /*
             Set function evaluation routine and vector with closure.
         */
-        snes.set_function(r, |_snes: &SNES, x: &Vector, f: &mut Vector| {
+        snes.set_function(Some(r), |_snes: &SNES, x: &Vector, f: &mut Vector| {
             let x_view = x.view()?;
             let mut f_view = f.view_mut()?;
 
@@ -84,7 +84,7 @@ fn main() -> petsc_rs::Result<()> {
         })?;
     } else {
         // We can also use functions, not closures for input
-        snes.set_function(r, from_function2)?;
+        snes.set_function(Some(r), from_function2)?;
         snes.set_jacobian_single_mat(J, from_jacobian2)?;
     }
 

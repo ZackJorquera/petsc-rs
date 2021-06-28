@@ -326,7 +326,7 @@ impl<'a> Mat<'a> {
     /// let v = [-1.0, 2.0, -1.0];
     /// mat.assemble_with_batched((0..n)
     ///         .map(|i| if i == 0 { ( vec![i], vec![i, i+1], &v[1..] ) }
-    ///                  else if i == n { ( vec![i], vec![i-1, i], &v[..2] ) }
+    ///                  else if i == n-1 { ( vec![i], vec![i-1, i], &v[..2] ) }
     ///                  else { ( vec![i], vec![i-1, i, i+1], &v[..] ) }),
     ///     InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
     /// # // for debugging

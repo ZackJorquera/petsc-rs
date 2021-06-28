@@ -15,9 +15,9 @@
 //!
 //! To run:
 //! ```test
-//! $ cargo build --bin ex29
-//! $ mpiexec -n 1 target/debug/ex29
-//! $ mpiexec -n 2 target/debug/ex29
+//! $ cargo build --bin ksp-ex29
+//! $ mpiexec -n 1 target/debug/ksp-ex29
+//! $ mpiexec -n 2 target/debug/ksp-ex29
 //! ```
 
 static HELP_MSG: &str = "Solves 2D inhomogeneous Laplacian using multigrid.\n\n";

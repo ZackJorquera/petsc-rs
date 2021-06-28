@@ -4,8 +4,8 @@
 //!
 //! To run:
 //! ```text
-//! $ cargo build --bin ex2
-//! $ mpiexec -n 1 target/debug/ex2
+//! $ cargo build --bin snes-ex2
+//! $ mpiexec -n 1 target/debug/snes-ex2
 //! Norm of error 1.49751e-10, Iters 3
 //! ```
 
@@ -81,7 +81,7 @@ fn main() -> petsc_rs::Result<()> {
     /*
         Set function evaluation routine and vector
     */
-    snes.set_function(r, |_snes, x: &Vector, f: &mut Vector| {
+    snes.set_function(Some(r), |_snes, x: &Vector, f: &mut Vector| {
         /*
             Evaluates nonlinear function, F(x).
 

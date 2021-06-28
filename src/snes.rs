@@ -31,7 +31,7 @@ struct SNESFunctionTrampolineData<'a, 'tl> {
     // This field is only used for its ownership.
     // The usage of the pointer/reference is all handled on the c side.
     // However, we might want to use it for something like `get_residuals()`
-    _vec: Vector<'a>,
+    _vec: Option<Vector<'a>>,
     user_f: Box<dyn FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>,
 }
 
@@ -146,7 +146,7 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
     ///
     /// # Parameters
     ///
-    /// * `input_vec` - vector to store function value
+    /// * `input_vec` - vector to store function value (if None, the SNES DM will create it).
     /// * `user_f` - A closure used to convey the nonlinear function to be solved by SNES
     ///     * `snes` - the snes context
     ///     * `x` - state at which to evaluate residual
@@ -176,7 +176,7 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
     ///
     /// let mut snes = petsc.snes_create()?;
     ///
-    /// snes.set_function(r, |_snes, x: &Vector, f: &mut Vector| {
+    /// snes.set_function(Some(r), |_snes, x: &Vector, f: &mut Vector| {
     ///     let x_view = x.view()?;
     ///     let mut f_view = f.view_mut()?;
     ///     let g_view = g.view()?;
@@ -197,7 +197,7 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn set_function<F>(&mut self, input_vec: Vector<'a>, user_f: F) -> Result<()>
+    pub fn set_function<F>(&mut self, input_vec: Option<Vector<'a>>, user_f: F) -> Result<()>
     where
         F: FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
     {
@@ -212,7 +212,7 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
 
         let closure_anchor = Box::new(user_f);
 
-        let input_vec_p = input_vec.vec_p;
+        let input_vec_p = input_vec.as_ref().map_or(std::ptr::null_mut(), |v| v.vec_p);
         // Note, we only store input_vec in the trampoline data so it isn't dropped,
         // we never actually use it.
         let trampoline_data = Box::pin(SNESFunctionTrampolineData { 

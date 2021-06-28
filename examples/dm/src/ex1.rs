@@ -57,8 +57,8 @@
 //!
 //! To run:
 //! ```text
-//! $ cargo build --bin ex1
-//! $ target/debug/ex1
+//! $ cargo build --bin dm-ex1
+//! $ target/debug/dm-ex1
 //! ```
 
 static HELP_MSG: &str = "Tests VecView() contour plotting for 2d DMDAs.\n\n";

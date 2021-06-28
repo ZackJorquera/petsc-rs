@@ -8,9 +8,9 @@
 //!
 //! To run:
 //! ```text
-//! $ cargo build --bin ex2
-//! $ mpiexec -n 1 target/debug/ex2
-//! $ mpiexec -n 5 target/debug/ex2
+//! $ cargo build --bin vec-ex2
+//! $ mpiexec -n 1 target/debug/vec-ex2
+//! $ mpiexec -n 5 target/debug/vec-ex2
 //! ```
 
 static HELP_MSG: &'static str = "Builds a parallel vector with 1 component on the first processor, 2 on the second, etc.\n\

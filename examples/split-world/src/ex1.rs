@@ -5,14 +5,14 @@
 //!
 //! To run:
 //! ```text
-//! $ cargo build --bin ex2
-//! $ mpiexec -n 2 target/debug/ex
+//! $ cargo build --bin sw-ex1
+//! $ mpiexec -n 2 target/debug/sw-ex1
 //! (ex2) Norm of error 1.56044e-4, Iters 6
 //! (ex23) Norm of error 2.41202e-15, Iters 5
-//! $ mpiexec -n 3 target/debug/ex2
+//! $ mpiexec -n 3 target/debug/sw-ex1
 //! (ex2) Norm of error 4.11674e-4, Iters 7
 //! (ex23) Norm of error 2.41202e-15, Iters 5
-//! $ mpiexec -n 5 target/debug/ex -m 80 -n 70 -k 100
+//! $ mpiexec -n 5 target/debug/sw-ex1 -m 80 -n 70 -k 100
 //! (ex2) Norm of error 1.48926e-3, Iters 70
 //! (ex23) Norm of error 1.14852e-2, Iters 318
 //! ```
