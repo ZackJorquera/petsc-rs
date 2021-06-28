@@ -6,3 +6,8 @@ members = [
     "snes",
     "dm",
 ]
+exclude = [
+    # this uses a complex build of PETSc and everything else does not
+    "complex"
+]
+
