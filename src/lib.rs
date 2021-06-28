@@ -20,6 +20,7 @@
 //! Also sets the complex type, [`PetscComplex`], to be `Complex<f32>`.
 //! - **`petsc-use-complex`** *(disabled by default)* *(experimental only)* - Sets the scalar type, [`PetscScalar`], to
 //! be the complex type, [`PetscComplex`]. If disabled then the scalar type is the real type, [`PetscReal`].
+//! You must be using the `complex-scalar` branch to enable this feature.
 //! - **`petsc-int-i32`** *(enabled by default)* — Sets the integer type, [`PetscInt`], to be `i32`.
 //! - **`petsc-int-i64`** — Sets the integer type, [`PetscInt`], to be `i64`.
 //! 

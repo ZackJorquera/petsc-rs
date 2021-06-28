@@ -38,14 +38,15 @@ PETSc has support for multiple different sizes of scalars and integers. To expos
 to rust, we require you set different features. The following are all the features that
 can be set. Note, you are required to have exactly one scalar feature set and exactly
 one integer feature set. And it must match the PETSc install.
-- **`petsc-real-f64`** *(enabled by default)* — Sets the real type, [`PetscReal`], to be `f64`.
-Also sets the complex type, [`PetscComplex`], to be `Complex<f64>`.
-- **`petsc-real-f32`** — Sets the real type, [`PetscReal`] to be `f32`.
-Also sets the complex type, [`PetscComplex`], to be `Complex<f32>`.
-- **`petsc-use-complex`** *(disabled by default)* *(experimental only)* - Sets the scalar type, [`PetscScalar`], to
-be the complex type, [`PetscComplex`]. If disabled then the scalar type is the real type, [`PetscReal`].
-- **`petsc-int-i32`** *(enabled by default)* — Sets the integer type, [`PetscInt`], to be `i32`.
-- **`petsc-int-i64`** — Sets the integer type, [`PetscInt`], to be `i64`.
+- **`petsc-real-f64`** *(enabled by default)* — Sets the real type, `PetscReal`, to be `f64`.
+Also sets the complex type, `PetscComplex`, to be `Complex<f64>`.
+- **`petsc-real-f32`** — Sets the real type, `PetscReal` to be `f32`.
+Also sets the complex type, `PetscComplex`, to be `Complex<f32>`.
+- **`petsc-use-complex`** *(disabled by default)* *(experimental only)* - Sets the scalar type, `PetscScalar`, to
+be the complex type, `PetscComplex`. If disabled then the scalar type is the real type, `PetscReal`.
+You must be using the `complex-scalar` branch to enable this feature.
+- **`petsc-int-i32`** *(enabled by default)* — Sets the integer type, `PetscInt`, to be `i32`.
+- **`petsc-int-i64`** — Sets the integer type, `PetscInt`, to be `i64`.
 
 ## Running PETSc Programs
 
@@ -63,7 +64,7 @@ mpiexec -n 8 target/debug/petsc_program_name [petsc_options]
 
 ## Getting Started Example
 
-To help the user start using PETSc immediately, we begin with a simple uniprocessor example that solves the one-dimensional Laplacian problem with finite differences. This sequential code, which can be found in `examples/ksp/src/ex1.rs`, illustrates the solution of a linear system with KSP, the interface to the preconditioners, Krylov subspace methods, and direct linear solvers of PETSc.
+To help the user start using PETSc immediately, we begin with a simple uniprocessor example that solves the one-dimensional Laplacian problem with finite differences. This sequential code, which can be found in [`examples/ksp/src/ex1.rs`](examples/ksp/src/ex1.rs), illustrates the solution of a linear system with KSP, the interface to the preconditioners, Krylov subspace methods, and direct linear solvers of PETSc.
 
 ```rust
 //! This file will show how to do the kps ex1 example in rust using the petsc-rs bindings.
