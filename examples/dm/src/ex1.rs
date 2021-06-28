@@ -37,16 +37,16 @@
 //!     4 5 8 9
 //!
 //! We can also print out the correct 2d DMDA vector using [`DM::da_vec_view()`] in the following way:
-//! `petsc_println_all!(petsc.world(), "(Process: {}) global vec:\n{:?}", petsc.world().rank(), dm.da_vec_view(&global)?);`
+//! `petsc_println_all!(petsc.world(), "(Process: {}) global vec:\n{:.1}", petsc.world().rank(), *dm.da_vec_view(&global)?);`
 //!
 //! ```text
 //! (Process: 0) global vec: 
 //! [[0.0, 3.0],
 //!  [1.0, 4.0],
-//!  [2.0, 5.0]], shape=[3, 2], strides=[1, 3], layout=Ff (0xa), dynamic ndim=2
+//!  [2.0, 5.0]]
 //! (Process: 1) global vec:
 //! [[9.0, 8.0],
-//!  [7.0, 9.0]], shape=[2, 2], strides=[1, 2], layout=Ff (0xa), dynamic ndim=2
+//!  [7.0, 9.0]]
 //! ```
 //!
 //! Use the options
@@ -97,9 +97,9 @@ fn main() -> petsc_rs::Result<()> {
 
     dm.view_with(Some(&viewer))?;
     if view_global {
-        petsc_println_all!(petsc.world(), "(Process: {}) global vec (flat):\n{}", petsc.world().rank(), *global.view()?);
+        petsc_println_all!(petsc.world(), "(Process: {}) global vec (flat):\n{:0.1}", petsc.world().rank(), *global.view()?)?;
 
-        petsc_println_all!(petsc.world(), "(Process: {}) global vec:\n{}", petsc.world().rank(), *dm.da_vec_view(&global)?);
+        petsc_println_all!(petsc.world(), "(Process: {}) global vec:\n{:0.1}", petsc.world().rank(), *dm.da_vec_view(&global)?)?;
 
         // Note, this might print the vector in a different order than the above two
         global.view_with(Some(&viewer))?;

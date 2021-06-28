@@ -38,6 +38,7 @@ impl<'a> Drop for Vector<'a> {
     }
 }
 
+// TODO: move NormType out of vector mod, it is used my matrix
 pub use petsc_raw::NormType;
 pub use petsc_raw::VecOption;
 
@@ -93,21 +94,6 @@ impl<'a> Vector<'a> {
         Petsc::check_error(self.world, ierr)
     }
 
-    /// Computes self += alpha * other
-    pub fn axpy(&mut self, alpha: PetscScalar, other: &Vector) -> Result<()>
-    {
-        let ierr = unsafe { petsc_raw::VecAXPY(self.vec_p, alpha.into(), other.vec_p) };
-        Petsc::check_error(self.world, ierr)
-    }
-
-    /// Sets an option for controling a vector's behavior.
-    pub fn set_option(&mut self, option: VecOption, flg: bool) -> Result<()>
-    {
-        let ierr = unsafe { petsc_raw::VecSetOption(self.vec_p, 
-            option, if flg {petsc_raw::PetscBool::PETSC_TRUE} else {petsc_raw::PetscBool::PETSC_FALSE}) };
-        Petsc::check_error(self.world, ierr)
-    }
-
     /// Inserts or adds values into certain locations of a vector.
     ///
     /// `ix` and `v` must be the same length or `set_values` will panic.
@@ -120,7 +106,8 @@ impl<'a> Vector<'a> {
     /// These values may be cached, so [`Vector::assembly_begin()`] and [`Vector::assembly_end()`] MUST be
     /// called after all calls to [`Vector::set_values()`] have been completed.
     ///
-    /// You might find [`Vector::assemble_with()`] more useful and more idiomatic.
+    /// You might find [`Vector::assemble_with()`] or [`Vector::assemble_with_batched()`] more useful and
+    /// more idiomatic.
     ///
     /// Parameters.
     /// 
@@ -186,7 +173,6 @@ impl<'a> Vector<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
-    /// # use std::slice::from_ref;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
     /// if petsc.world().size() != 1 {
@@ -225,6 +211,59 @@ impl<'a> Vector<'a> {
             self.set_values(std::slice::from_ref(&ix),
                 std::slice::from_ref(&v), iora).map(|_| 1)
         }).sum::<Result<PetscInt>>()?;
+        // Note, `sum()` will short-circuit the iterator if an error is encountered.
+
+        self.assembly_begin()?;
+        self.assembly_end()
+    }
+
+    /// Allows you to give an iter that will be use to make a series of calls to [`Vector::set_values()`].
+    /// Then is followed by both [`Vector::assembly_begin()`] and [`Vector::assembly_end()`].
+    ///
+    /// [`assemble_with()`](Vector::assemble_with()) will short circuit on the first error
+    /// from [`Vector::set_values()`], returning it.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use petsc_rs::prelude::*;
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// # let petsc = Petsc::init_no_args()?;
+    /// if petsc.world().size() != 1 {
+    ///     // note, cargo wont run tests with mpi so this will never be reached,
+    ///     // but this example will only work in a uniprocessor comm world
+    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
+    /// }
+    ///
+    /// let mut v = petsc.vec_create()?;
+    /// v.set_sizes(None, Some(10))?; // create vector of size 10
+    /// v.set_from_options()?;
+    ///
+    /// v.assemble_with_batched([([0, 3], [PetscScalar::from(1.1), PetscScalar::from(2.2)]),
+    ///                          ([7, 9], [PetscScalar::from(3.3), PetscScalar::from(4.4)])],
+    ///     InsertMode::INSERT_VALUES)?;
+    /// assert_eq!(&v.get_values(0..10)?[..], &[1.1,0.0,0.0,2.2,0.0,0.0,0.0,3.3,0.0,4.4]
+    ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
+    ///
+    /// v.assemble_with_batched(Some(([0, 2, 8, 9], 
+    ///     [PetscScalar::from(1.0), PetscScalar::from(2.0),
+    ///      PetscScalar::from(3.0), PetscScalar::from(4.0)])), InsertMode::ADD_VALUES)?;
+    /// assert_eq!(&v.get_values(0..10)?[..], &[2.1,0.0,2.0,2.2,0.0,0.0,0.0,3.3,3.0,8.4]
+    ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn assemble_with_batched<I, A1, A2>(&mut self, iter_builder: I, iora: InsertMode) -> Result<()>
+    where
+        I: IntoIterator<Item = (A1, A2)>,
+        A1: AsRef<[PetscInt]>,
+        A2: AsRef<[PetscScalar]>,
+    {
+        // We don't actually care about the num_inserts value, we just need something that
+        // implements `Sum` so we can use the sum method and `()` does not.
+        let _num_inserts = iter_builder.into_iter().map(|(ix, v)| {
+            self.set_values(ix.as_ref(), v.as_ref(), iora).map(|_| 1)
+        }).sum::<Result<i32>>()?;
         // Note, `sum()` will short-circuit the iterator if an error is encountered.
 
         self.assembly_begin()?;
@@ -398,7 +437,7 @@ impl<'a> Vector<'a> {
     ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
     ///
     /// {
-    ///     let mut v_view = v.view()?;
+    ///     let v_view = v.view()?;
     ///     assert_eq!(v_view.as_slice().unwrap(), &[1.1,0.0,0.0,2.2,0.0,0.0,0.0,3.3,0.0,4.4]
     ///         .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
     /// }
@@ -490,7 +529,7 @@ impl<'a> Vector<'a> {
     /// let values = [0.0,1.0,2.0,3.0,4.0,5.0,6.0]
     ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>();
     /// // Will set each processor's portion of the vector to `values`
-    /// let mut v = Vector::from_slice(petsc.world(), &values)?;
+    /// let v = Vector::from_slice(petsc.world(), &values)?;
     ///
     /// let v_view = v.view()?;
     /// assert_eq!(v.get_local_size()?, values.len() as PetscInt);
@@ -617,6 +656,16 @@ impl<'a> Vector<'a> {
         VecGetSize, get_global_size, vec_p, output PetscInt, gs, #[doc = "Returns the global number of elements of the vector."];
         VecNorm, norm, vec_p, input NormType, norm_type, output PetscReal, tmp1, #[doc = "Computes the vector norm."];
         VecScale, scale, vec_p, input PetscScalar, alpha, takes mut, #[doc = "Scales a vector (`x[i] *= alpha` for each `i`)."];
+        VecAXPY, axpy, vec_p, input PetscScalar, alpha, input &Vector, other.vec_p, takes mut, #[doc = "Computes `self += alpha * other`."];
+        VecAYPX, aypx, vec_p, input PetscScalar, alpha, input &Vector, other.vec_p, takes mut, #[doc = "Computes `self = other + alpha * self`."];
+        VecAXPBY, axpby, vec_p, input PetscScalar, alpha, input PetscScalar, beta, input &Vector, other.vec_p, takes mut, #[doc = "Computes `self = alpha * other + beta * self`."];
+        VecAXPBYPCZ, axpbypcz, vec_p, input PetscScalar, alpha, input PetscScalar, beta, input PetscScalar, gamma, input &Vector, x.vec_p, input &Vector, y.vec_p, takes mut, #[doc = "Computes `self = alpha * x + beta * y + gamma * self`."];
+        VecDot, dot, vec_p, input &Vector, y.vec_p, output PetscScalar, res, #[doc = "Computes the vector dot product.\n\n\
+            Note, for complex vectors it does `val = (x,y) = y^H x` where `y^H` denotes the conjugate transpose of y.\
+            If you with to force using the transpose you should use [`dot_t`](Vector::dot_t)."];
+        VecTDot, dot_t, vec_p, input &Vector, y.vec_p, output PetscScalar, res, #[doc = "Computes an indefinite vector dot product.\n\n\
+            That is, as opposed to [`dot`](Vector::dot), this routine does NOT use the complex conjugate."];
+        VecSetOption, set_option, vec_p, input VecOption, option, input bool, flg, #[doc = "Sets an option for controling a vector's behavior."];
     }
 }
 

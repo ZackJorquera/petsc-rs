@@ -200,7 +200,7 @@ impl<'a> DM<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
-    /// # use ndarray::{Dimension, IxDyn, ArrayView, Order, array, s};
+    /// # use ndarray::{Dimension, array, s};
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
     /// // note, cargo wont run tests with mpi so this will always be run with

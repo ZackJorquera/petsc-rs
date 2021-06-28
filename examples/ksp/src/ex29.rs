@@ -88,7 +88,7 @@ fn main() -> petsc_rs::Result<()> {
         .help_msg(HELP_MSG)
         .init()?;
 
-    petsc_println!(petsc.world(), "(petsc_println!) Hello parallel world of {} processes!", petsc.world().size() );
+    petsc_println!(petsc.world(), "(petsc_println!) Hello parallel world of {} processes!", petsc.world().size() )?;
 
     let mut ksp = petsc.ksp_create()?;
     let mut da = DM::da_create_2d(petsc.world(), DMBoundaryType::DM_BOUNDARY_NONE, DMBoundaryType::DM_BOUNDARY_NONE,
@@ -123,14 +123,8 @@ fn main() -> petsc_rs::Result<()> {
         b.assemble()?;
 
         if bc_type == BCType::NEUMANN {
-            todo!()
-            /*
-            MatNullSpace nullspace;
-
-            MatNullSpaceCreate(PETSC_COMM_WORLD,PETSC_TRUE,0,0,&nullspace);
-            MatNullSpaceRemove(nullspace,b);
-            MatNullSpaceDestroy(&nullspace);
-            */
+            let nullspace = NullSpace::create(petsc.world(), true, [])?;
+            nullspace.remove_from(b)?;
         }
 
         Ok(())
@@ -177,14 +171,8 @@ fn main() -> petsc_rs::Result<()> {
         }
 
         if bc_type == BCType::NEUMANN {
-            todo!()
-            /*
-            MatNullSpace nullspace;
-
-            MatNullSpaceCreate(PETSC_COMM_WORLD,PETSC_TRUE,0,0,&nullspace);
-            MatSetNullSpace(J,nullspace);
-            MatNullSpaceDestroy(&nullspace);
-            */
+            let nullspace = NullSpace::create(petsc.world(), true, [])?;
+            jac.set_nullspace(Some(std::rc::Rc::new(nullspace)))?;
         }
 
         Ok(())
@@ -196,11 +184,11 @@ fn main() -> petsc_rs::Result<()> {
     ksp.solve(None, &mut x)?;
 
     let iters = ksp.get_iteration_number()?;
-    petsc_println!(petsc.world(), "Iters {}", iters);
+    petsc_println!(petsc.world(), "Iters {}", iters)?;
 
     //ksp.view_with(Some(&petsc.viewer_create_ascii_stdout()?))?;
     x.view_with(Some(&petsc.viewer_create_ascii_stdout()?))?;
-    petsc_println_all!(petsc.world(), "Process [{}]\n{:.5e}", petsc.world().rank(), *ksp.get_dm()?.da_vec_view(&x)?);
+    petsc_println_all!(petsc.world(), "Process [{}]\n{:.5e}", petsc.world().rank(), *ksp.get_dm()?.da_vec_view(&x)?)?;
 
     // return
     Ok(())

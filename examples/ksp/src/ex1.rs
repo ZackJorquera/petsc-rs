@@ -157,7 +157,7 @@ fn main() -> petsc_rs::Result<()> {
     x.axpy(PetscScalar::from(-1.0), &u)?;
     let x_norm = x.norm(NormType::NORM_2)?;
     let iters = ksp.get_iteration_number()?;
-    petsc_println!(petsc.world(), "Norm of error {:.5e}, Iters {}", x_norm, iters);
+    petsc_println!(petsc.world(), "Norm of error {:.5e}, Iters {}", x_norm, iters)?;
 
     /*
         All PETSc objects are automatically destroyed when they are no longer needed.

@@ -52,7 +52,7 @@ fn main() -> petsc_rs::Result<()> {
         .help_msg(HELP_MSG)
         .init()?;
 
-    petsc_println!(petsc.world(), "(petsc_println!) Hello parallel world of {} processes!", petsc.world().size() );
+    petsc_println!(petsc.world(), "(petsc_println!) Hello parallel world of {} processes!", petsc.world().size() )?;
 
     let mut ksp = petsc.ksp_create()?;
     let mut da = DM::da_create_1d(petsc.world(), DMBoundaryType::DM_BOUNDARY_NONE, 128, 1, 1, None)?;
@@ -122,14 +122,14 @@ fn main() -> petsc_rs::Result<()> {
     Mat::mult(&a_mat,&x,&mut b2)?;
     b2.axpy(PetscScalar::from(-1.0), &b)?;
     let r_norm = b2.norm(NormType::NORM_INFINITY)?;
-    petsc_println!(petsc.world(), "Residual norm: {:.5e}", r_norm);
+    petsc_println!(petsc.world(), "Residual norm: {:.5e}", r_norm)?;
 
     let iters = ksp.get_iteration_number()?;
-    petsc_println!(petsc.world(), "Iters {}", iters);
+    petsc_println!(petsc.world(), "Iters {}", iters)?;
 
     //ksp.view_with(Some(&petsc.viewer_create_ascii_stdout()?))?;
     x.view_with(Some(&petsc.viewer_create_ascii_stdout()?))?;
-    petsc_println_all!(petsc.world(), "Process [{}]\n{:.5e}", petsc.world().rank(), *ksp.get_dm()?.da_vec_view(&x)?);
+    petsc_println_all!(petsc.world(), "Process [{}]\n{:.5e}", petsc.world().rank(), *ksp.get_dm()?.da_vec_view(&x)?)?;
 
     // return
     Ok(())
