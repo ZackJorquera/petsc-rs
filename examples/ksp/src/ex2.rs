@@ -5,12 +5,12 @@
 //!
 //! To run:
 //! ```text
-//! $ cargo build --bin ex2
-//! $ mpiexec -n 1 target/debug/ex2
+//! $ cargo build --bin ksp-ex2
+//! $ mpiexec -n 1 target/debug/ksp-ex2
 //! Norm of error 1.56044e-4, Iters 6
-//! $ mpiexec -n 2 target/debug/ex2
+//! $ mpiexec -n 2 target/debug/ksp-ex2
 //! Norm of error 4.11674e-4, Iters 7
-//! $ mpiexec -n 5 target/debug/ex2 -m 80 -n 70
+//! $ mpiexec -n 5 target/debug/ksp-ex2 -m 80 -n 70
 //! Norm of error 2.28509e-3, Iters 83
 //! ```
 

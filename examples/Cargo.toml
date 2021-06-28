@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "vec",
+    "ksp",
+    "split-world",
+    "snes",
+    "dm",
+]

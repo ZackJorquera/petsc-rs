@@ -7,23 +7,23 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [[bin]]
-name = "ex1"
+name = "ksp-ex1"
 path = "src/ex1.rs"
 
 [[bin]]
-name = "ex2"
+name = "ksp-ex2"
 path = "src/ex2.rs"
 
 [[bin]]
-name = "ex23"
+name = "ksp-ex23"
 path = "src/ex23.rs"
 
 [[bin]]
-name = "ex25"
+name = "ksp-ex25"
 path = "src/ex25.rs"
 
 [[bin]]
-name = "ex29"
+name = "ksp-ex29"
 path = "src/ex29.rs"
 
 [dependencies]
