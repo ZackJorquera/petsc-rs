@@ -188,7 +188,8 @@ pub enum DMTypeEnum {
 #[cfg(feature = "petsc-use-complex")]
 impl Into<Complex<PetscReal>> for __BindgenComplex<PetscReal> {
     fn into(self) -> Complex<PetscReal> {
-        // TODO: is this safe?
+        // This should be safe because `__BindgenComplex<T>` and `Complex<T>` are both
+        // memory layout compatible with an array [T; 2]
         unsafe { std::mem::transmute(self) }
     }
 }
@@ -196,7 +197,8 @@ impl Into<Complex<PetscReal>> for __BindgenComplex<PetscReal> {
 #[cfg(feature = "petsc-use-complex")]
 impl From<Complex<PetscReal>> for __BindgenComplex<PetscReal> {
     fn from(ct: Complex<PetscReal>) -> __BindgenComplex<PetscReal> {
-        // Is this safe?
+        // This should be safe because `__BindgenComplex` and `Complex` are both
+        // memory layout compatible with an array [T; 2]
         unsafe { std::mem::transmute(ct) }
     }
 }

@@ -5,10 +5,6 @@
 
 use crate::prelude::*;
 
-// TODO: should we add a builder type so that you have to call some functions
-// I feel like this could also be important for create, set up, assembly, and then finally using it.
-// Because these stages need to be separate.
-
 /// Abstract PETSc matrix object used to manage all linear operators in PETSc, even those
 /// without an explicit sparse representation (such as matrix-free operators).
 pub struct Mat<'a> {
@@ -18,10 +14,8 @@ pub struct Mat<'a> {
 
 impl<'a> Drop for Mat<'a> {
     fn drop(&mut self) {
-        unsafe {
-            let ierr = petsc_raw::MatDestroy(&mut self.mat_p as *mut *mut petsc_raw::_p_Mat);
-            let _ = Petsc::check_error(self.world, ierr); // TODO: should i unwrap or what idk?
-        }
+        let ierr = unsafe { petsc_raw::MatDestroy(&mut self.mat_p as *mut _) };
+        let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
@@ -33,10 +27,8 @@ pub struct NullSpace<'a> {
 
 impl Drop for NullSpace<'_> {
     fn drop(&mut self) {
-        unsafe {
-            let ierr = petsc_raw::MatNullSpaceDestroy(&mut self.ns_p as *mut _);
-            let _ = Petsc::check_error(self.world, ierr); // TODO: should i unwrap or what idk?
-        }
+        let ierr = unsafe { petsc_raw::MatNullSpaceDestroy(&mut self.ns_p as *mut _) };
+        let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
@@ -96,7 +88,7 @@ impl<'a> Mat<'a> {
     /// This allows easily inserting element stiffness matrices with homogeneous Dirchlet boundary
     /// conditions that you don't want represented in the matrix.
     ///
-    /// You might find [`Mat::assemble_with()`] or [`Mat::assemble_with_batched()`] more useful and
+    /// You might find [`Mat::assemble_with()`] or [`Mat::assemble_with_batched()`] to be more useful and
     /// more idiomatic.
     ///
     /// # Parameters
@@ -201,9 +193,11 @@ impl<'a> Mat<'a> {
         Petsc::check_error(self.world, ierr)
     }
 
-    /// Returns the range of matrix rows owned by this processor, assuming that the matrix is laid
-    /// out with the first n1 rows on the first processor, the next n2 rows on the second, etc.
-    /// For certain parallel layouts this range may not be well defined.
+    /// Returns the range of matrix rows owned by this processor.
+    ///
+    /// We assume that the matrix is laid out with the first n1 rows on the first processor,
+    /// the next n2 rows on the second, etc. For certain parallel layouts this range may not
+    /// be well defined.
     pub fn get_ownership_range(&self) -> Result<std::ops::Range<PetscInt>> {
         let mut low = MaybeUninit::<PetscInt>::uninit();
         let mut high = MaybeUninit::<PetscInt>::uninit();
@@ -213,9 +207,11 @@ impl<'a> Mat<'a> {
         Ok(unsafe { low.assume_init()..high.assume_init() })
     }
 
-    /// Returns the range of matrix rows owned by EACH processor, assuming that the matrix is laid
-    /// out with the first n1 rows on the first processor, the next n2 rows on the second, etc.
-    /// For certain parallel layouts this range may not be well defined.
+    /// Returns the range of matrix rows owned by EACH processor.
+    ///
+    /// We assume that the matrix is laid out with the first n1 rows on the first processor,
+    /// the next n2 rows on the second, etc. For certain parallel layouts this range may not
+    /// be well defined.
     pub fn get_ownership_ranges(&self) -> Result<Vec<std::ops::Range<PetscInt>>> {
         let mut array = MaybeUninit::<*const PetscInt>::uninit();
         let ierr = unsafe { petsc_raw::MatGetOwnershipRanges(self.mat_p, array.as_mut_ptr()) };
@@ -237,7 +233,7 @@ impl<'a> Mat<'a> {
     /// a time. If you want to insert multiple at a time, use [`Mat::assemble_with_batched()`].
     ///
     /// [`assemble_with()`](Mat::assemble_with()) will short circuit on the first error
-    /// from [`Mat::set_values`], returning it.
+    /// from [`Mat::set_values`], returning the `Err`.
     ///
     /// # Example
     ///
@@ -303,7 +299,10 @@ impl<'a> Mat<'a> {
     ///
     /// Unlike [`assemble_with()`](Mat::assemble_with()), this will set values in batches, i.e., the
     /// input is given with array like values. They can be [`array`]s, [`slice`]s, [`Vec`]s, or anything that
-    /// implements [`AsRef<[...]>`](AsRef).
+    /// implements [`AsRef<[_]>`](AsRef).
+    ///
+    /// [`assemble_with_batched()`](Mat::assemble_with_batched()) will short circuit on the first error
+    /// from [`Mat::set_values`], returning the `Err`.
     ///
     /// # Example
     ///
@@ -456,6 +455,7 @@ impl<'a> Mat<'a> {
         T1: IntoIterator<Item = PetscInt>,
         T2: IntoIterator<Item = PetscInt>,
     {
+        // TODO: make this return an ndarray
         let idxm_iter = idxm.into_iter();
         let idxm_array = idxm_iter.collect::<Vec<_>>();
         let mi = idxm_array.len();
@@ -481,9 +481,10 @@ impl<'a> Mat<'a> {
         self.assembly_end(assembly_type)
     }
 
-    /// Performs Matrix-Matrix Multiplication C=A*B.
+    /// Performs Matrix-Matrix Multiplication `C=self*other`.
     ///
-    /// 
+    /// Expected fill as ratio of `nnz(C)/(nnz(self) + nnz(other))`, use `None` if you do not have
+    /// a good estimate. If the result is a dense matrix this is irrelevant.
     pub fn mat_mult(&self, other: &Mat, fill: Option<PetscReal>) -> Result<Mat<'a>>{
         let mut mat_out_p = MaybeUninit::uninit();
         // TODO: do we want other MatReuse options
@@ -516,8 +517,6 @@ impl<'a> Mat<'a> {
     ///
     /// Krylov solvers can produce the minimal norm solution to the least squares problem by utilizing
     /// [`NullSpace::remove_from()`].
-    // TODO: I don't like this api, we only force it to be a `Rc` because we dont want the caller editing
-    // the nullspace after they set it (we don't actually use it to reference count).
     pub fn set_left_nullspace(&mut self, nullspace: Option<Rc<NullSpace<'a>>>) -> Result<()> {
         let ierr = unsafe { petsc_raw::MatSetTransposeNullSpace(self.mat_p,
             nullspace.as_ref().map_or(std::ptr::null_mut(), |ns| ns.ns_p)) };
@@ -530,8 +529,6 @@ impl<'a> Mat<'a> {
     ///
     /// This null space is used by the linear solvers. Overwrites any previous null space that may
     /// have been attached. You can remove the null space by calling this routine with `None`.
-    // TODO: I don't like this api, we only force it to be a `Rc` because we dont want the caller editing
-    // the nullspace after they set it (we don't actually use it to reference count).
     pub fn set_near_nullspace(&mut self, nullspace: Option<Rc<NullSpace<'a>>>) -> Result<()> {
         let ierr = unsafe { petsc_raw::MatSetNearNullSpace(self.mat_p,
             nullspace.as_ref().map_or(std::ptr::null_mut(), |ns| ns.ns_p)) };

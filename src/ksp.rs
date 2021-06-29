@@ -42,10 +42,8 @@ struct KSPComputeRHSTrampolineData<'a, 'tl> {
 
 impl<'a> Drop for KSP<'a, '_> {
     fn drop(&mut self) {
-        unsafe {
-            let ierr = petsc_raw::KSPDestroy(&mut self.ksp_p as *mut *mut petsc_raw::_p_KSP);
-            let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
-        }
+        let ierr = unsafe { petsc_raw::KSPDestroy(&mut self.ksp_p as *mut _) };
+        let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
@@ -79,7 +77,7 @@ impl<'a, 'tl> KSP<'a, 'tl> {
         self.get_pc_mut()?.set_operators(a_mat, p_mat)
     }
 
-    /// Sets the [preconditioner](crate::pc) to be used to calculate the application of
+    /// Sets the [preconditioner](crate::pc)([`PC`]) to be used to calculate the application of
     /// the preconditioner on a vector.
     ///
     /// if you change the PC by calling set again, then the original will be dropped.
@@ -95,10 +93,10 @@ impl<'a, 'tl> KSP<'a, 'tl> {
         Ok(())
     }
 
-    /// Returns a reference to the [preconditioner](crate::pc) context set with [`KSP::set_pc()`].
+    /// Returns a reference to the [`PC`] context set with [`KSP::set_pc()`].
     pub fn get_pc<'b>(&'b mut self) -> Result<&'b PC<'a>>
     {
-        // TODO: should we even have a non mut one (or only `get_pc_mut`)
+        // TODO: This shouldn't have to take a mut self (maybe we use a RefCell internally)
 
         // Under the hood, if the pc is already set, i.e. with `set_pc`, then `KSPGetPC` just returns a pointer
         // to that, so we can bypass calling KSPGetPC. However, there shouldn't be any problem with just calling
@@ -118,7 +116,7 @@ impl<'a, 'tl> KSP<'a, 'tl> {
         }
     }
 
-    /// Returns a mutable reference to the [preconditioner](crate::pc) context set with [`KSP::set_pc()`].
+    /// Returns a mutable reference to the [`PC`] context set with [`KSP::set_pc()`].
     pub fn get_pc_mut<'b>(&'b mut self) -> Result<&'b mut PC<'a>>
     {
         if self.pc.is_some() {

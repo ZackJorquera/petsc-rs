@@ -31,15 +31,11 @@ pub struct VectorViewMut<'a, 'b> {
 
 impl<'a> Drop for Vector<'a> {
     fn drop(&mut self) {
-        unsafe {
-            let ierr = petsc_raw::VecDestroy(&mut self.vec_p as *mut *mut petsc_raw::_p_Vec);
-            let _ = Petsc::check_error(self.world, ierr); // TODO should i unwrap or what idk?
-        }
+        let ierr = unsafe { petsc_raw::VecDestroy(&mut self.vec_p as *mut _) };
+        let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
-// TODO: move NormType out of vector mod, it is used my matrix
-pub use petsc_raw::NormType;
 pub use petsc_raw::VecOption;
 
 impl<'a> Vector<'a> {
@@ -310,7 +306,7 @@ impl<'a> Vector<'a> {
     where
         T: IntoIterator<Item = PetscInt>,
     {
-        // TODO: i added Vector::view which returns a slice, do we still need this method?
+        // TODO: i added Vector::view, do we still need this method?
 
         let ix_iter = ix.into_iter();
         let ix_array = ix_iter.collect::<Vec<_>>();
@@ -566,19 +562,15 @@ impl Clone for Vector<'_> {
 
 impl Drop for VectorViewMut<'_, '_> {
     fn drop(&mut self) {
-        unsafe {
-            let ierr = petsc_raw::VecRestoreArray(self.vec.vec_p, &mut self.array as *mut *mut _ as *mut *mut _);
-            let _ = Petsc::check_error(self.vec.world, ierr); // TODO should i unwrap or what idk?
-        }
+        let ierr = unsafe { petsc_raw::VecRestoreArray(self.vec.vec_p, &mut self.array as *mut _) };
+        let _ = Petsc::check_error(self.vec.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
 impl Drop for VectorView<'_, '_> {
     fn drop(&mut self) {
-        unsafe {
-            let ierr = petsc_raw::VecRestoreArrayRead(self.vec.vec_p, &mut self.array as *mut *const _ as *mut *const _);
-            let _ = Petsc::check_error(self.vec.world, ierr); // TODO should i unwrap or what idk?
-        }
+        let ierr = unsafe { petsc_raw::VecRestoreArray(self.vec.vec_p, &mut self.array as *mut _ as *mut _) };
+        let _ = Petsc::check_error(self.vec.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
@@ -610,8 +602,6 @@ impl<'a, 'b> VectorView<'a, 'b> {
     }
 }
 
-// TODO: im not sure if i like this, it would make more sense for Vector::view to return an ArrayView
-// Be also we need to run out own custom drop.
 impl<'b> Deref for VectorViewMut<'_, 'b> {
     type Target = ArrayViewMut<'b, PetscScalar, ndarray::IxDyn>;
     fn deref(&self) -> &ArrayViewMut<'b, PetscScalar, ndarray::IxDyn> {

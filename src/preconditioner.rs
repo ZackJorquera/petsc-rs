@@ -30,10 +30,8 @@ pub struct PC<'a> {
 impl<'a> Drop for PC<'a> {
     // Note, this should only be called if the PC context was created with `PCCreate`.
     fn drop(&mut self) {
-        unsafe {
-            let ierr = petsc_raw::PCDestroy(&mut self.pc_p as *mut *mut petsc_raw::_p_PC);
-            let _ = Petsc::check_error(self.world, ierr); // TODO: should i unwrap or what idk?
-        }
+        let ierr = unsafe { petsc_raw::PCDestroy(&mut self.pc_p as *mut _) };
+        let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
@@ -75,8 +73,7 @@ impl<'a> PC<'a> {
     pub fn set_operators(&mut self, a_mat: Option<Rc<Mat<'a>>>, p_mat: Option<Rc<Mat<'a>>>) -> Result<()>
     {
         // TODO: should we make a_mat an `Rc<RefCell<Mat>>`, `Rc<Mat>`, or just a `Mat`
-
-        // TODO: make `set_operators_single_mat` (if this consumes a_mat and p_mat) so that you can set
+        // if this consumes a_mat and p_mat, make `set_operators_single_mat` so that you can set
         // them to be the same.
 
         // Should this function consume the mats? Right now you have to turn the mats into `Rc`s which
@@ -140,6 +137,7 @@ impl<'a> PC<'a> {
         Ok((a_mat, p_mat))
     }
 
+    // TODO: make a branch to test this out
     // /// Sets the matrix associated with the linear system and a (possibly)
     // /// different one associated with the preconditioner.
     // ///

@@ -175,8 +175,6 @@ macro_rules! impl_petsc_object_funcs {
                 let c_str = unsafe { ::std::ffi::CStr::from_ptr(c_buf.assume_init()) };
                 crate::Result::Ok(c_str.to_string_lossy().to_string())
             }
-
-            // TODO: add PetscObjectRef and PetscObjectDeref, but make them unsafe for now
         }
     };
 }

@@ -27,11 +27,6 @@ name = "ksp-ex29"
 path = "src/ex29.rs"
 
 [dependencies]
-# adding libffi-sys is a work around, mpi requeres libffi which will fail to compile on WSL2 without 
-# the `system` feature so we require libffi to be already be install everywhere. This seems to be an
-# issue with the "user-operations" feature for mpi (which is the default), but `default-features = false`
-# doesn't seem to work.
-libffi-sys = { version = "*", features = ["system"] }
 mpi = {git = "https://github.com/ZackJorquera/rsmpi.git", branch = "trait_object_safety", default-features = false }
 petsc-rs = { path = "../../" }
 structopt = { version = "0.3", default-features = false }

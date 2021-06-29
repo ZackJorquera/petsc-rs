@@ -26,10 +26,8 @@ use crate::prelude::*;
 
 impl<'a> Drop for DM<'a> {
     fn drop(&mut self) {
-        unsafe {
-            let ierr = petsc_raw::DMDestroy(&mut self.dm_p as *mut _);
-            let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
-        }
+        let ierr = unsafe { petsc_raw::DMDestroy(&mut self.dm_p as *mut _) };
+        let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
@@ -145,7 +143,6 @@ impl<'a> DM<'a> {
         Ok(DM::new(world, unsafe { dm_p.assume_init() }))
     }
 
-    // TODO: what do these do? and is the world usage correct?
     /// Creates a global vector from a DM object
     pub fn create_global_vector(&self) -> Result<Vector<'a>> {
         let mut vec_p = MaybeUninit::uninit();
@@ -155,6 +152,8 @@ impl<'a> DM<'a> {
         Ok(Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } })
     }
 
+    // TODO: what do these do? and is the world usage correct? Like do we use the
+    // world of the DM or just a single processes from it? or does it not matter?
     /// Creates a local vector from a DM object
     pub fn create_local_vector(&self) -> Result<Vector<'a>> {
         let mut vec_p = MaybeUninit::uninit();
@@ -402,13 +401,11 @@ impl<'a> DM<'a> {
         let ierr = unsafe { petsc_raw::VecGetArray(vec.vec_p, array.as_mut_ptr() as *mut _) };
         Petsc::check_error(vec.world, ierr)?;
 
-        //let dims = [(gxm*dof) as usize, gym as usize, gzm as usize];
         let dims_r = [gzm as usize, gym as usize, (gxm*dof) as usize];
 
         let ndarray = unsafe {
             ArrayViewMut::from_shape_ptr(ndarray::IxDyn(&dims_r[(3-dim as usize)..]), array.assume_init())
-                .reversed_axes() }; // TODO: add comments (e.x. why `reversed_axes()` and stuff)
-                                    // https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/DMDA/DMDAVecGetArray.html#DMDAVecGetArray
+                .reversed_axes() };
 
         Ok(crate::vector::VectorViewMut { vec, array: unsafe { array.assume_init() }, ndarray })
     }
@@ -458,7 +455,7 @@ impl<'a> DM<'a> {
             # Outputs (in order)\n\n\
             * `x,y,z` - the corner indices (where y and z are optional; these are used for 2D and 3D problems)\n\
             * `m,n,p` - widths in the corresponding directions (where n and p are optional; these are used for 2D and 3D problems)"];
-        // TODO: would it be nicer to have this take in a Range<PetscReal>?
+        // TODO: would it be nicer to have this take in a Range<PetscReal>? (then we couldn't use the macro)
         DMDASetUniformCoordinates, da_set_uniform_coordinates, dm_p, input PetscReal, x_min, input PetscReal, x_max, input PetscReal, y_min,
             input PetscReal, y_max, input PetscReal, z_min, input PetscReal, z_max, #[doc = "Sets a DMDA coordinates to be a uniform grid.\n\n\
             `y` and `z` values will be ignored for 1 and 2 dimensional problems."];

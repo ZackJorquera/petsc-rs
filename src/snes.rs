@@ -57,10 +57,8 @@ pub use petsc_raw::SNESConvergedReason;
 
 impl<'a> Drop for SNES<'a, '_> {
     fn drop(&mut self) {
-        unsafe {
-            let ierr = petsc_raw::SNESDestroy(&mut self.snes_p as *mut _);
-            let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
-        }
+        let ierr = unsafe { petsc_raw::SNESDestroy(&mut self.snes_p as *mut _) };
+        let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
@@ -150,7 +148,7 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
     /// * `user_f` - A closure used to convey the nonlinear function to be solved by SNES
     ///     * `snes` - the snes context
     ///     * `x` - state at which to evaluate residual
-    ///     * `f` - vector to put residual (function value)
+    ///     * `f` *(output)* - vector to put residual (function value)
     ///
     /// # Note
     ///
@@ -235,7 +233,9 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
             // of the underlining types (i.e. *mut petsc_raw::_p_SNES) into references
             // of the rust wrapper types.
             // Note, SNES has optional members that might have to be dropped, but because
-            // we only give immutable access to the user_f we don't have to worry about that.
+            // we only give immutable access to the user_f we don't have to worry about that
+            // as they will all stay `None`.
+            // If `Vector` ever has optional parameters, they MUST be dropped manually.
             let snes = ManuallyDrop::new(SNES::new(trampoline_data.world, snes_p));
             let x = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: x_p });
             let mut f = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: f_p });
@@ -267,13 +267,13 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
     /// * `user_f` - A closure used to convey the Jacobian evaluation routine.
     ///     * `snes` - the snes context
     ///     * `x` - input vector, the Jacobian is to be computed at this value
-    ///     * `ap_mat` - the matrix to be used in constructing the (approximate) Jacobian as well as
+    ///     * `ap_mat` *(output)* - the matrix to be used in constructing the (approximate) Jacobian as well as
     ///     the preconditioner.
     ///
     /// # Note
     ///
     /// You are expected to call [`Mat::assembly_begin()`] and [`Mat::assembly_end()`] at the end of
-    /// `user_f`. Or you can [`Mat::assemble_with()`].
+    /// `user_f`. Or you can something like [`Mat::assemble_with()`].
     ///
     /// # Example
     ///
@@ -335,6 +335,7 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
             // We don't want to drop anything, we are just using this to turn pointers 
             // of the underlining types (i.e. *mut petsc_raw::_p_SNES) into references
             // of the rust wrapper types.
+            // If `Mat` ever has optional parameters, they MUST be dropped manually.
             let snes = ManuallyDrop::new(SNES::new(trampoline_data.world, snes_p));
             let x = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: vec_p });
             let mut a_mat = ManuallyDrop::new(Mat { world: trampoline_data.world, mat_p: mat1_p });
@@ -355,7 +356,7 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
 
     /// Sets the function to compute Jacobian as well as the location to store the matrix.
     ///
-    /// Allows you to set a function to define what the Jacobian matrix is and when the preconditioner
+    /// Allows you to set a function to define what the Jacobian matrix is and what the preconditioner
     /// matrix is separately.
     ///
     /// # Parameters
@@ -366,8 +367,8 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
     /// * `user_f` - A closure used to convey the Jacobian evaluation routine.
     ///     * `snes` - the snes context
     ///     * `x` - input vector, the Jacobian is to be computed at this value
-    ///     * `a_mat` - the matrix that defines the (approximate) Jacobian.
-    ///     * `p_mat` - the matrix to be used in constructing the preconditioner.
+    ///     * `a_mat` *(output)* - the matrix that defines the (approximate) Jacobian.
+    ///     * `p_mat` *(output)* - the matrix to be used in constructing the preconditioner.
     ///
     /// # Note
     ///
@@ -439,6 +440,7 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
 
             // We don't want to drop anything, we are just using this to turn pointers 
             // of the underlining types (i.e. *mut petsc_raw::_p_SNES) into references.
+            // If `Mat` ever has optional parameters, they MUST be dropped manually.
             let snes = ManuallyDrop::new(SNES::new(trampoline_data.world, snes_p));
             let x = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: vec_p });
             let mut a_mat = ManuallyDrop::new(Mat { world: trampoline_data.world, mat_p: mat1_p });
@@ -492,7 +494,6 @@ impl<'a> SNES<'a, '_> {
     }
 }
 
-// TODO: Because we have two different lifetime params, these macros dont work
 impl_petsc_object_funcs!{ SNES, snes_p, '_ }
 
 impl_petsc_view_func!{ SNES, snes_p, SNESView, '_ }

@@ -3,14 +3,15 @@
 
 //! # petsc-rs: PETSc rust bindings
 //!
-//! read <https://petsc.org/release/documentation/manual/getting_started>
+//! read <https://petsc.org/release/documentation/manual/getting_started> for a quick start using the C API.
+//! TODO: take some topic and add them here (or in the README.md).
 //!
-//! Look at <https://github.com/ZackJorquera/petsc-rs>
+//! Also look at <https://github.com/ZackJorquera/petsc-rs>.
 //!
 //! # Features
 //! 
-//! PETSc has support for multiple different sizes of scalars and integers. To expose this
-//! to rust, we require you set different features. The following are all the features that
+//! PETSc has support for multiple different sizes of scalars and integers. This is exposed
+//! to rust with different features that you can set. The following are all the features that
 //! can be set. Note, you are required to have exactly one scalar feature set and exactly
 //! one integer feature set. And it must match the PETSc install.
 //!
@@ -39,6 +40,7 @@ pub(crate) mod petsc_raw {
 }
 
 pub use petsc_raw::{PetscInt, PetscReal};
+pub use petsc_raw::NormType;
 
 pub(crate) mod macros;
 
@@ -62,13 +64,14 @@ pub mod prelude {
         PetscComplex,
         petsc_println,
         petsc_println_all,
-        vector::{Vector, NormType, VecOption, },
+        vector::{Vector, VecOption, },
         mat::{Mat, MatAssemblyType, MatOption, MatDuplicateOption, MatStencil, NullSpace },
         ksp::{KSP, },
         snes::{SNES, },
         pc::{PC, PCType, },
         dm::{DM, DMBoundaryType, DMDAStencilType, DMType, },
         viewer::{Viewer, PetscViewerFormat, },
+        NormType,
     };
     pub use mpi::traits::*;
     pub(crate) use crate::Result;
@@ -86,15 +89,10 @@ use num_complex::Complex;
 
 // https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Sys/index.html
 
-// TODO: should all Petsc types be reference counted, or should we force functions that create refrences 
-// (i.e. call `PetscObjectReference`) to take `Rc`s (or `Arc`s, idk if it needs to be thread safe (i would 
-// guess not)). Or should it all be handled under the hood. It seems like this is not really a public
-// facing function. And it is unclear how to remove a reference count, like it seems that calling destroy
-// or PetscObjectDereference will decrement the count.
-
 // TODO: add wrappers for PetscOptionsGet* functions or work on a better way to get params.
 
 /// Prints to standard out, only from the first processor in the communicator.
+///
 /// Calls from other processes are ignored.
 ///
 /// Note, this macro creates a block that evaluates to a [`petsc_rs::Result`](Result), so the try operator, `?`,
@@ -161,9 +159,7 @@ pub type Result<T> = std::result::Result<T, PetscError>;
 
 /// PETSc Error type.
 ///
-/// Can be used with [`Petsc::set_error`].
-///
-/// [`Petsc::set_error`]: Petsc::set_error
+/// You can create an error with [`Petsc::set_error()`].
 #[derive(Debug)]
 pub struct PetscError {
     pub(crate) kind: PetscErrorKind,
@@ -208,7 +204,8 @@ pub struct PetscBuilder
 impl PetscBuilder
 {
     /// Calls [`PetscInitialize`] with the options given.
-    /// Initializes the PETSc database and MPI. Will also call MPI_Init() if that has
+    ///
+    /// Initializes the PETSc database and MPI. Will also call `MPI_Init()` if that has
     /// yet to be called, so this routine should always be called near the beginning
     /// of your program -- usually the very first line!
     ///
@@ -266,7 +263,7 @@ impl PetscBuilder
                 world
             }, 
             _ => {
-                // Note, in this case MPI has not been initialized, it is initialized with PETSc
+                // Note, in this case MPI has not been initialized, it will be initialized by PETSc
                 ierr = unsafe { petsc_raw::PetscInitialize(c_argc_p, c_args_p, file_c_str, help_c_str) };
                 Box::new(mpi::topology::SystemCommunicator::world())
             }
@@ -277,6 +274,7 @@ impl PetscBuilder
     }
 
     /// The command line arguments
+    ///
     /// Must start with the name of the program (the first `String` of `std::env::args()`).
     /// Most of the time just use `std::env::args()` as input.
     pub fn args<T>(mut self, args: T) -> Self
@@ -322,12 +320,14 @@ impl PetscBuilder
 }
 
 /// A Petsc is a wrapper around PETSc initialization and Finalization.
+///
 /// Also stores a reference to the the `MPI_COMM_WORLD`/`PETSC_COMM_WORLD` variable.
 pub struct Petsc {
     // This is functionally the same as `PETSC_COMM_WORLD` in the C api
     pub(crate) world: Box<dyn Communicator>,
 
     // This is used to drop the argc/args data when Petsc is dropped, we never actually use it
+    // on the rust side.
     _arg_data: Option<(Box<c_int>, Vec<CString>, Vec<*mut c_char>, Box<*mut *mut c_char>)>
 }
 
@@ -348,20 +348,14 @@ impl Petsc {
     }
 
     /// Calls [`PetscInitialize`] without the command line arguments.
-    /// Will call [`PetscFinalize`] on drop.
     ///
-    /// Same as [`PetscInitializeNoArguments`]
-    ///
-    /// If you want to pass in Arguments use [`Petsc::builder`].
+    /// If you want to pass in Arguments use [`Petsc::builder()`].
     ///
     /// ```
     /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
     /// ```
     ///
     /// [`PetscInitialize`]: petsc_raw::PetscInitialize
-    /// [`PetscFinalize`]: petsc_raw::PetscFinalize
-    /// [`PetscInitializeNoArguments`]: petsc_raw::PetscInitializeNoArguments
-    /// [`Petsc::builder`]: Petsc::builder
     pub fn init_no_args() -> Result<Self> {
         let ierr = unsafe { petsc_raw::PetscInitializeNoArguments() };
         let petsc = Self { world: Box::new(mpi::topology::SystemCommunicator::world()), _arg_data: None };
@@ -372,20 +366,17 @@ impl Petsc {
 
     /// Gets a reference to the PETSc comm world. 
     ///
-    /// This is effectively equivalent to  [`mpi::topology::SystemCommunicator::world()`]
+    /// This is effectively equivalent to [`mpi::topology::SystemCommunicator::world()`]
     /// if you haven't set the comm world to something other that the system communicator 
     /// during petsc initialization using a [`PetscBuilder`].
     ///
     /// The value is functionally the same as the `PETSC_COMM_WORLD` global in the C
     /// API. If you want to use a different comm world, then you have to define that outside
     /// of the [`Petsc`] object. Read docs for [`PetscBuilder::world()`] for more information.
-    ///
-    /// [`mpi::topology::SystemCommunicator::world`]: mpi::topology::SystemCommunicator::world
     pub fn world<'a>(&'a self) -> &'a dyn Communicator {
         self.world.as_ref()
     }
 
-    // TODO: should we move this out of `Petsc`, it is a static function
     /// Internal error checker
     /// replacement for the CHKERRQ macro in the C api
     #[doc(hidden)]
@@ -417,10 +408,11 @@ impl Petsc {
         return Err(error);
     }
 
-    // TODO: should we move this out of `Petsc`, it is a static function
     /// Function to call when an error has been detected.
+    ///
     /// replacement for the SETERRQ macro in the C api.
-    /// Will always return an `Err`.
+    ///
+    /// Note, this will always return an `Err`.
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
@@ -451,11 +443,12 @@ impl Petsc {
         return Err(error);
     }
 
-    // TODO: should we move this out of `Petsc`, it is a static function
-    /// replacement for the `PetscPrintf` function in the C api. You can also use the [`petsc_println`] macro
-    /// to have string formatting.
+    /// replacement for the `PetscPrintf` function in the C api. 
     ///
-    /// Prints to standard out, only from the first processor in the communicator. Calls from other processes are ignored.
+    /// You can also use the [`petsc_println!`] macro to have string formatting.
+    ///
+    /// Prints to standard out, only from the first processor in the communicator.
+    /// Calls from other processes are ignored.
     ///
     /// # Example
     ///
@@ -470,8 +463,6 @@ impl Petsc {
     /// # Ok(())
     /// # }
     /// ```
-    ///
-    /// [`petsc_println`]: petsc_println
     pub fn print<T: ToString>(world: &dyn Communicator, msg: T) -> Result<()> {
         let msg_cs = ::std::ffi::CString::new(msg.to_string()).expect("`CString::new` failed");
 
@@ -482,8 +473,9 @@ impl Petsc {
         Petsc::check_error(world, ierr)
     }
 
-    /// Replacement for the `PetscSynchronizedPrintf` function in the C api. You can also use the [`petsc_println_all`]
-    /// macro to have rust string formatting.
+    /// Replacement for the `PetscSynchronizedPrintf` function in the C api.
+    ///
+    /// You can also use the [`petsc_println_all!`] macro to have rust string formatting.
     ///
     /// Prints synchronized output from several processors. Output of the first processor is followed by
     /// that of the second, etc.
@@ -523,7 +515,8 @@ impl Petsc {
     /// Note, it will use the default comm world from [`Petsc::world()`].
     ///
     /// The type can then be set with [`Vector::set_type`](#), or [`Vector::set_from_options`].
-    /// Same as [`Vector::create`].
+    ///
+    /// Note, this is the same as using [`Vector::create(petsc.world())`](Vector::create).
     ///
     /// # Example
     ///
@@ -540,6 +533,8 @@ impl Petsc {
     ///
     /// Note, it will use the default comm world from [`Petsc::world()`].
     ///
+    /// Note, this is the same as using [`Mat::create(petsc.world())`](Mat::create).
+    ///
     /// # Example
     ///
     /// ```
@@ -554,6 +549,8 @@ impl Petsc {
     /// Creates the default KSP context.
     ///
     /// Note, it will use the default comm world from [`Petsc::world()`].
+    ///
+    /// Note, this is the same as using [`KSP::create(petsc.world())`](KSP::create).
     ///
     /// # Example
     ///
@@ -570,6 +567,8 @@ impl Petsc {
     ///
     /// Note, it will use the default comm world from [`Petsc::world()`].
     ///
+    /// Note, this is the same as using [`SNES::create(petsc.world())`](SNES::create).
+    ///
     /// # Example
     ///
     /// ```
@@ -584,6 +583,8 @@ impl Petsc {
     /// Creates a viewer context the prints to stdout
     ///
     /// A replacement the the C API's `PETSC_VIEWER_STDOUT_WORLD`.
+    ///
+    /// Note, this is the same as using [`Viewer::create_ascii_stdout(petsc.world())`](Viewer::create_ascii_stdout()).
     pub fn viewer_create_ascii_stdout(&self) -> Result<crate::Viewer> {
         Viewer::create_ascii_stdout(self.world())
     }
@@ -591,7 +592,7 @@ impl Petsc {
 
 // We want to expose the complex type using the num-complex Complex type
 // which has the same memory layout as the one bindgen creates, `__BindgenComplex`.
-// TODO: is this the best way to do this. If we are just going to transmute to convert 
+// TODO: is this the best way to do this? If we are just going to transmute to convert 
 // why dont we ignore these types from bindgen a manually define them our selves like
 // we did for MPI_Comm.
 
