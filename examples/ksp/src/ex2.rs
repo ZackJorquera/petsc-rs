@@ -18,45 +18,46 @@ static HELP_MSG: &str = "Solves a linear system in parallel with KSP.
 Input parameters include:\n\n";
 
 use petsc_rs::prelude::*;
-use structopt::StructOpt;
 
-mod opt;
-use opt::*;
-
-#[derive(Debug, StructOpt)]
-#[structopt(name = "ex2", about = HELP_MSG)]
+// TODO: make this a derive macro like stuctopt
+// #[derive(PetscOpt)]
+// #[petscopt(name = "ex2", about = HELP_MSG)]
 struct Opt {
     /// number of mesh points in x-direction
-    #[structopt(short, default_value = "8")]
+    // #[petscopt(short = "m", default_value = "8")]
     m: PetscInt,
     
     /// number of mesh points in y-direction
-    #[structopt(short, default_value = "7")]
+    // #[petscopt(short = "n", default_value = "7")]
     n: PetscInt,
 
     /// write exact solution vector to stdout
-    #[structopt(short, long)]
+    // #[petscopt(short, long)]
     view_exact_sol: bool,
+}
 
-    /// use `-- -help` for petsc help
-    #[structopt(subcommand)]
-    sub: Option<PetscOpt>,
+impl PetscOpt for Opt {
+    fn from_petsc(petsc: &Petsc) -> petsc_rs::Result<Self> {
+        let m = petsc.options_try_get_int("-m")?.unwrap_or(8);
+        let n = petsc.options_try_get_int("-n")?.unwrap_or(7);
+        let view_exact_sol = petsc.options_try_get_bool("-view_exact_sol")?.unwrap_or(false);
+        Ok(Opt { m, n, view_exact_sol })
+    }
 }
 
 fn main() -> petsc_rs::Result<()> {
-    let Opt {m, n, view_exact_sol, sub: ext_args} = Opt::from_args();
-    let petsc_args = PetscOpt::petsc_args(ext_args); // Is there an easier way to do this
-
     // optionally initialize mpi
     // let _univ = mpi::initialize().unwrap();
     // init with no options
     let petsc = Petsc::builder()
-        .args(petsc_args)
+        .args(std::env::args())
         .help_msg(HELP_MSG)
         .init()?;
 
     // or init with no options
     // let petsc = Petsc::init_no_args()?;
+
+    let Opt {m, n, view_exact_sol} = Opt::from_petsc(&petsc)?;
 
     petsc_println!(petsc.world(), "Hello parallel world of {} processes!", petsc.world().size() )?;
 

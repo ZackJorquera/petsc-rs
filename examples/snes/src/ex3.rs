@@ -13,17 +13,30 @@ static HELP_MSG: &str = "Newton methods to solve u'' + u^{2} = f in parallel.\n\
 
 use petsc_rs::prelude::*;
 
-fn main() -> petsc_rs::Result<()> {
-    // TODO: make these be command line inputs
-    let n = 5;
-    let test_jacobian_domain_error = false;
-    let view_initial = true;
-    let user_precond = false;
+struct Opt {
+    n: PetscInt,
+    test_jacobian_domain_error: bool,
+    view_initial: bool,
+    user_precond: bool,
+}
 
+impl PetscOpt for Opt {
+    fn from_petsc(petsc: &Petsc) -> petsc_rs::Result<Self> {
+        let n = petsc.options_try_get_int("-n")?.unwrap_or(5);
+        let test_jacobian_domain_error = petsc.options_try_get_bool("-test_err")?.unwrap_or(false);
+        let view_initial = petsc.options_try_get_bool("-view_initial")?.unwrap_or(false);
+        let user_precond = petsc.options_try_get_bool("-user_precond")?.unwrap_or(false);
+        Ok(Opt { n, test_jacobian_domain_error, view_initial, user_precond })
+    }
+}
+
+fn main() -> petsc_rs::Result<()> {
     let petsc = Petsc::builder()
         .args(std::env::args())
         .help_msg(HELP_MSG)
         .init()?;
+    
+    let Opt { n, test_jacobian_domain_error, view_initial, user_precond } = Opt::from_petsc(&petsc)?;
 
     let h = 1.0/(PetscScalar::from(n as PetscReal) - 1.0);
 

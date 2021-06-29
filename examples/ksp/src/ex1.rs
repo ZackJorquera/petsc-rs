@@ -24,13 +24,12 @@ static HELP_MSG: &str = "Solves a tridiagonal linear system with KSP.\n\n";
 use petsc_rs::prelude::*;
 
 fn main() -> petsc_rs::Result<()> {
-    // TODO: get from args
-    let n = 10;
-
     let petsc = Petsc::builder()
         .args(std::env::args())
         .help_msg(HELP_MSG)
         .init()?;
+
+    let n = petsc.options_try_get_int("-n")?.unwrap_or(10);
 
     if petsc.world().size() != 1 {
         Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE,
@@ -48,8 +47,8 @@ fn main() -> petsc_rs::Result<()> {
     x.set_name("Solution")?;
     x.set_sizes(None, Some(n))?;
     x.set_from_options()?;
-    let mut b = x.duplicate()?;
-    let mut u = x.duplicate()?;
+    let mut b = x.clone();
+    let mut u = x.clone();
 
     #[allow(non_snake_case)]
     let mut A = petsc.mat_create()?;
@@ -102,9 +101,9 @@ fn main() -> petsc_rs::Result<()> {
     // routines.
     ksp.set_from_options()?;
 
-    /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-                        Solve the linear system
-        - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+    // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    //                  Solve the linear system
+    // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     ksp.solve(Some(&b), &mut x)?;
 
     // View solver info; we could instead use the option -ksp_view to
@@ -112,9 +111,9 @@ fn main() -> petsc_rs::Result<()> {
     let viewer = Viewer::create_ascii_stdout(petsc.world())?;
     ksp.view_with(Some(&viewer))?;
 
-    /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-                      Check the solution and clean up
-     - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+    // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    //                Check the solution and clean up
+    // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     x.axpy(PetscScalar::from(-1.0), &u)?;
     let x_norm = x.norm(NormType::NORM_2)?;
     let iters = ksp.get_iteration_number()?;

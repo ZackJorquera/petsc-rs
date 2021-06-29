@@ -65,16 +65,28 @@ static HELP_MSG: &str = "Tests VecView() contour plotting for 2d DMDAs.\n\n";
 
 use petsc_rs::prelude::*;
 
-fn main() -> petsc_rs::Result<()> {
-    let star_stencil = false;
-    let view_global = true;
+struct Opt {
+    star_stencil: bool,
+    view_global: bool,
+}
 
+impl PetscOpt for Opt {
+    fn from_petsc(petsc: &Petsc) -> petsc_rs::Result<Self> {
+        let star_stencil = petsc.options_try_get_bool("-test_solver")?.unwrap_or(false);
+        let view_global = petsc.options_try_get_bool("-check_matis")?.unwrap_or(false);
+        Ok(Opt { star_stencil, view_global })
+    }
+}
+
+fn main() -> petsc_rs::Result<()> {
     let (m, n) = (10, 8);
 
     let petsc = Petsc::builder()
         .args(std::env::args())
         .help_msg(HELP_MSG)
         .init()?;
+
+    let Opt { star_stencil, view_global } = Opt::from_petsc(&petsc)?;
     
     let viewer = petsc.viewer_create_ascii_stdout()?;
 

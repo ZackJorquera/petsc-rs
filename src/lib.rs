@@ -72,13 +72,14 @@ pub mod prelude {
         dm::{DM, DMBoundaryType, DMDAStencilType, DMType, },
         viewer::{Viewer, PetscViewerFormat, },
         NormType,
+        PetscOpt,
     };
     pub use mpi::traits::*;
     pub(crate) use crate::Result;
     pub(crate) use mpi::{self, traits::*};
     pub(crate) use crate::petsc_raw;
     pub(crate) use std::mem::MaybeUninit;
-    pub(crate) use std::ffi::CString;
+    pub(crate) use std::ffi::{CString, CStr, };
     pub(crate) use std::rc::Rc;
 }
 
@@ -88,8 +89,6 @@ use prelude::*;
 use num_complex::Complex;
 
 // https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Sys/index.html
-
-// TODO: add wrappers for PetscOptionsGet* functions or work on a better way to get params.
 
 /// Prints to standard out, only from the first processor in the communicator.
 ///
@@ -176,7 +175,7 @@ pub use petsc_raw::InsertMode;
 ///
 /// # Examples
 ///
-/// ```
+/// ```no_run
 /// # use petsc_rs::prelude::*;
 /// let univ = mpi::initialize().unwrap();
 /// let petsc = Petsc::builder()
@@ -185,6 +184,7 @@ pub use petsc_raw::InsertMode;
 ///     // then there is no need to use the world method as we do here.
 ///     .world(Box::new(univ.world()))
 ///     .help_msg("Hello, this is a help message\n")
+///     .file("path/to/database/file")
 ///     .init().unwrap();
 /// ```
 ///
@@ -510,6 +510,99 @@ impl Petsc {
         Petsc::check_error(world, ierr)
     }
 
+    /// Gets the integer value for a particular option in the database.
+    pub fn options_try_get_int<T: ToString>(&self, name: T) -> Result<Option<PetscInt>> {
+        let name_cs = CString::new(name.to_string()).expect("`CString::new` failed");
+        let mut opt_val = MaybeUninit::uninit();
+        let mut set = MaybeUninit::uninit();
+        let ierr = unsafe { 
+            petsc_raw::PetscOptionsGetInt(std::ptr::null_mut(), std::ptr::null(),
+            name_cs.as_ptr(), opt_val.as_mut_ptr(), set.as_mut_ptr()) };
+        Petsc::check_error(self.world(), ierr)?;
+
+        Ok(if unsafe { set.assume_init().into() } { Some(unsafe { opt_val.assume_init() }) } 
+            else { None } )
+    }
+
+    /// Gets the Logical (true or false) value for a particular option in the database.
+    ///
+    /// Note, TRUE, true, YES, yes, no string, and 1 all translate to `true`.
+    /// FALSE, false, NO, no, and 0 all translate to `false`
+    pub fn options_try_get_bool<T: ToString>(&self, name: T) -> Result<Option<bool>> {
+        let name_cs = CString::new(name.to_string()).expect("`CString::new` failed");
+        let mut opt_val = MaybeUninit::uninit();
+        let mut set = MaybeUninit::uninit();
+        let ierr = unsafe { 
+            petsc_raw::PetscOptionsGetBool(std::ptr::null_mut(), std::ptr::null(),
+            name_cs.as_ptr(), opt_val.as_mut_ptr(), set.as_mut_ptr()) };
+        Petsc::check_error(self.world(), ierr)?;
+
+        Ok(if unsafe { set.assume_init().into() } { Some(unsafe { opt_val.assume_init().into() }) } 
+            else { None } )
+    }
+
+    /// Gets the floating point value for a particular option in the database..
+    pub fn options_try_get_real<T: ToString>(&self, name: T) -> Result<Option<PetscReal>> {
+        let name_cs = CString::new(name.to_string()).expect("`CString::new` failed");
+        let mut opt_val = MaybeUninit::uninit();
+        let mut set = MaybeUninit::uninit();
+        let ierr = unsafe { 
+            petsc_raw::PetscOptionsGetReal(std::ptr::null_mut(), std::ptr::null(),
+            name_cs.as_ptr(), opt_val.as_mut_ptr(), set.as_mut_ptr()) };
+        Petsc::check_error(self.world(), ierr)?;
+
+        Ok(if unsafe { set.assume_init().into() } { Some(unsafe { opt_val.assume_init() }) } 
+            else { None } )
+    }
+
+    /// Gets the string value for a particular option in the database.
+    ///
+    /// Gets, at most, 127 characters.
+    pub fn options_try_get_string<T: ToString>(&self, name: T) -> Result<Option<String>> {
+        let name_cs = CString::new(name.to_string()).expect("`CString::new` failed");
+        // TODO: is this big enough
+        const BUF_LEN: usize = 128;
+        let mut buf = [0 as u8; BUF_LEN];
+        let mut set = MaybeUninit::uninit();
+        let ierr = unsafe { 
+            petsc_raw::PetscOptionsGetString(std::ptr::null_mut(), std::ptr::null(),
+            name_cs.as_ptr(), buf.as_mut_ptr() as *mut _, BUF_LEN as u64, set.as_mut_ptr()) };
+        Petsc::check_error(self.world(), ierr)?;
+
+        Ok(if unsafe { set.assume_init().into() } {
+            let nul_term = buf.iter().position(|&v| v == 0).unwrap();
+            let c_str: &CStr = CStr::from_bytes_with_nul(&buf[..nul_term+1]).unwrap();
+            let str_slice: &str = c_str.to_str().unwrap();
+            let string: String = str_slice.to_owned();
+            Some(string)
+        } else {
+            None
+        })
+    }
+
+    /// Gets an option in the database (as a string), then converts to type `E`.
+    ///
+    /// Note, If the [`from_str`](std::str::FromStr::from_str()) fails, then
+    /// [`default()`](Default::default()) is used.
+    pub fn options_try_get_from_string<T: ToString, E>(&self, name: T) -> Result<Option<E>>
+    where
+        E: Default + std::str::FromStr,
+    {
+        let as_str = self.options_try_get_string(name)?;
+        if let Some(as_str) = as_str {
+            Ok(Some(E::from_str(as_str.as_str()).unwrap_or(E::default())))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Gets multiple values from the options database.
+    ///
+    /// Uses [`PetscOpt::from_petsc()`].
+    pub fn options_try_get<T: PetscOpt>(&self) -> Result<T> {
+        PetscOpt::from_petsc(self)
+    }
+
     /// Creates an empty vector object.
     ///
     /// Note, it will use the default comm world from [`Petsc::world()`].
@@ -588,6 +681,45 @@ impl Petsc {
     pub fn viewer_create_ascii_stdout(&self) -> Result<crate::Viewer> {
         Viewer::create_ascii_stdout(self.world())
     }
+}
+
+// TODO: make into a derive macro
+/// This trait is used to define how to get the options in a struct from the petsc object.
+///
+/// # Example
+///
+/// ```
+/// # use petsc_rs::prelude::*;
+/// struct Opt {
+///     m: PetscInt,
+///     n: PetscInt,
+///     view_exact_sol: bool,
+/// }
+/// 
+/// impl PetscOpt for Opt {
+///     fn from_petsc(petsc: &Petsc) -> petsc_rs::Result<Self> {
+///         let m = petsc.options_try_get_int("-m")?.unwrap_or(8);
+///         let n = petsc.options_try_get_int("-n")?.unwrap_or(7);
+///         let view_exact_sol = petsc.options_try_get_bool("-view_exact_sol")?.unwrap_or(false);
+///         Ok(Opt { m, n, view_exact_sol })
+///     }
+/// }
+///
+/// # fn main() -> petsc_rs::Result<()> {
+/// let petsc = Petsc::builder()
+///     .args(std::env::args())
+///     .init()?;
+///
+/// let Opt { m, n, view_exact_sol } = Opt::from_petsc(&petsc)?;
+/// # Ok(())
+/// # }
+/// ```
+pub trait PetscOpt
+where
+    Self: Sized
+{
+    /// Builds the struct from a [`Petsc`] object.
+    fn from_petsc(petsc: &Petsc) -> Result<Self>;
 }
 
 // We want to expose the complex type using the num-complex Complex type

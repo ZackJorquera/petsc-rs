@@ -23,13 +23,9 @@
 static HELP_MSG: &str = "Solves 2D inhomogeneous Laplacian using multigrid.\n\n";
 
 use petsc_rs::prelude::*;
-use structopt::StructOpt;
 use ndarray::prelude::*;
 
 use std::fmt;
-
-mod opt;
-use opt::*;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 enum BCType { DIRICHLET, NEUMANN }
@@ -54,39 +50,44 @@ impl fmt::Display for BCType {
     }
 }
 
-#[derive(Debug, StructOpt)]
-#[structopt(name = "ex29", about = "Options for the inhomogeneous Poisson equation")]
+impl Default for BCType {
+    fn default() -> Self { BCType::DIRICHLET }
+}
+
 struct Opt {
     /// The conductivity
-    #[structopt(short, long, default_value = "1.0")]
     rho: PetscReal,
 
     /// The width of the Gaussian source
-    #[structopt(short, long, default_value = "0.1")]
     nu: PetscReal,
 
     /// Type of boundary condition
-    #[structopt(short, long, default_value = "DIRICHLET")]
     bc_type: BCType,
 
     /// Run solver multiple times, useful for performance studies of solver
-    #[structopt(short, long)]
     test_solver: bool,
 
-    /// use `-- -help` for petsc help
-    #[structopt(subcommand)]
-    sub: Option<PetscOpt>,
+    check_matis: bool,
+}
+
+impl PetscOpt for Opt {
+    fn from_petsc(petsc: &Petsc) -> petsc_rs::Result<Self> {
+        let rho = petsc.options_try_get_real("-rho")?.unwrap_or(1.0);
+        let nu = petsc.options_try_get_real("-nu")?.unwrap_or(0.1);
+        let bc_type = petsc.options_try_get_from_string("-bc_type")?.unwrap_or(BCType::DIRICHLET);
+        let test_solver = petsc.options_try_get_bool("-test_solver")?.unwrap_or(false);
+        let check_matis = petsc.options_try_get_bool("-check_matis")?.unwrap_or(false);
+        Ok(Opt { rho, nu, bc_type, test_solver, check_matis })
+    }
 }
 
 fn main() -> petsc_rs::Result<()> {
-    let Opt {rho, nu, bc_type, test_solver: _, sub: ext_args} = Opt::from_args();
-    let petsc_args = PetscOpt::petsc_args(ext_args); // Is there an easier way to do this
-    let check_matis = false;
-
     let petsc = Petsc::builder()
-        .args(petsc_args)
+        .args(std::env::args())
         .help_msg(HELP_MSG)
         .init()?;
+
+    let Opt { rho, nu, bc_type, test_solver: _test_solver, check_matis } = Opt::from_petsc(&petsc)?;
 
     petsc_println!(petsc.world(), "(petsc_println!) Hello parallel world of {} processes!", petsc.world().size() )?;
 

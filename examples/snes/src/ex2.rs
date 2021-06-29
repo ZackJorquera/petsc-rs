@@ -15,9 +15,6 @@ This example employs a user-defined monitoring routine.\n\n";
 use petsc_rs::prelude::*;
 
 fn main() -> petsc_rs::Result<()> {
-    // TODO: make n be a command line input
-    let n = 5;
-
     // optionally initialize mpi
     // let _univ = mpi::initialize().unwrap();
     // init with no options
@@ -29,8 +26,9 @@ fn main() -> petsc_rs::Result<()> {
     // or init with no options
     // let petsc = Petsc::init_no_args()?;
 
-    if petsc.world().size() != 1
-    {
+    let n = petsc.options_try_get_int("-n")?.unwrap_or(5);
+
+    if petsc.world().size() != 1 {
         Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
     }
 

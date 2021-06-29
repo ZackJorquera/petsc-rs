@@ -22,6 +22,7 @@
 #![allow(dead_code)]
 #![allow(non_snake_case)]
 #![allow(missing_docs)]
+#![allow(deref_nullptr)] // this is done in bindgen tests
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
 #[cfg(feature = "petsc-use-complex")]

@@ -13,5 +13,4 @@ path = "src/ex1.rs"
 [dependencies]
 mpi = {git = "https://github.com/ZackJorquera/rsmpi.git", branch = "trait_object_safety", default-features = false }
 petsc-rs = { path = "../../" }
-structopt = { version = "0.3", default-features = false }
 ndarray = "*"

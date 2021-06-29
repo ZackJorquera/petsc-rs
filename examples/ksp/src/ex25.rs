@@ -22,35 +22,30 @@
 static HELP_MSG: &str = "Solves 1D variable coefficient Laplacian using multigrid.\n\n";
 
 use petsc_rs::prelude::*;
-use structopt::StructOpt;
 
-mod opt;
-use opt::*;
-
-#[derive(Debug, StructOpt)]
-#[structopt(name = "ex25", about = HELP_MSG)]
 struct Opt {
     /// The conductivity
-    #[structopt(short, default_value = "1")]
     k: PetscInt,
 
     /// The width of the Gaussian source
-    #[structopt(short, default_value = "0.99")]
     e: PetscReal,
+}
 
-    /// use `-- -help` for petsc help
-    #[structopt(subcommand)]
-    sub: Option<PetscOpt>,
+impl PetscOpt for Opt {
+    fn from_petsc(petsc: &Petsc) -> petsc_rs::Result<Self> {
+        let k = petsc.options_try_get_int("-k")?.unwrap_or(1);
+        let e = petsc.options_try_get_real("-e")?.unwrap_or(0.99);
+        Ok(Opt { k, e })
+    }
 }
 
 fn main() -> petsc_rs::Result<()> {
-    let Opt {k, e, sub: ext_args} = Opt::from_args();
-    let petsc_args = PetscOpt::petsc_args(ext_args); // Is there an easier way to do this
-
     let petsc = Petsc::builder()
-        .args(petsc_args)
+        .args(std::env::args())
         .help_msg(HELP_MSG)
         .init()?;
+        
+    let Opt {k, e} = Opt::from_petsc(&petsc)?;
 
     petsc_println!(petsc.world(), "(petsc_println!) Hello parallel world of {} processes!", petsc.world().size() )?;
 

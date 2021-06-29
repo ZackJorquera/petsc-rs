@@ -23,59 +23,32 @@ Input parameters include:\n\n";
 use mpi;
 use mpi::topology::Color;
 use petsc_rs::prelude::*;
-use structopt::StructOpt;
 
-#[derive(Debug, PartialEq, StructOpt)]
-pub enum PetscOpt {
-    /// use `-- -help` for petsc help
-    #[structopt(name = "Petsc Args", external_subcommand)]
-    PetscArgs(Vec<String>),
-}
-
-impl PetscOpt
-{
-    pub fn petsc_args(self_op: Option<Self>) -> Vec<String>
-    {
-        match self_op
-        {
-            Some(PetscOpt::PetscArgs(mut vec)) => {
-                vec.push(std::env::args().next().unwrap());
-                vec.rotate_right(1);
-                vec
-            },
-            _ => vec![std::env::args().next().unwrap()]
-        }
-    }
-}
-
-#[derive(Debug, StructOpt)]
-#[structopt(name = "ex2", about = HELP_MSG)]
 struct Opt {
     /// number of mesh points in x-direction (for ex2)
-    #[structopt(short, default_value = "8")]
     m: PetscInt,
     
     /// number of mesh points in y-direction (for ex2)
-    #[structopt(short, default_value = "7")]
     n: PetscInt,
 
     /// write exact solution vector to stdout (for ex2)
-    #[structopt(short, long)]
     view_stuff: bool,
 
     /// Size of the vector and matrix (for ex23)
-    #[structopt(short = "k", long, default_value = "10")]
     num_elems: PetscInt,
+}
 
-    /// use `-- -help` for petsc help
-    #[structopt(subcommand)]
-    sub: Option<PetscOpt>,
+impl PetscOpt for Opt {
+    fn from_petsc(petsc: &Petsc) -> petsc_rs::Result<Self> {
+        let m = petsc.options_try_get_int("-m")?.unwrap_or(8);
+        let n = petsc.options_try_get_int("-n")?.unwrap_or(7);
+        let view_stuff = petsc.options_try_get_bool("-view_stuff")?.unwrap_or(false);
+        let num_elems = petsc.options_try_get_int("-k")?.unwrap_or(10);
+        Ok(Opt { m, n, view_stuff, num_elems })
+    }
 }
 
 fn main() -> petsc_rs::Result<()> {
-    let Opt {m, n, view_stuff, num_elems, sub: ext_args} = Opt::from_args();
-    let petsc_args = PetscOpt::petsc_args(ext_args); // Is there an easier way to do this
-
     // optionally initialize mpi
     let univ = mpi::initialize().unwrap();
     let world = univ.world();
@@ -92,10 +65,12 @@ fn main() -> petsc_rs::Result<()> {
 
     // init with no options
     let petsc = Petsc::builder()
-        .args(petsc_args)
+        .args(std::env::args())
         .world(Box::new(comm))
         .help_msg(HELP_MSG)
         .init()?;
+
+    let Opt { m, n, view_stuff, num_elems } = Opt::from_petsc(&petsc)?;
 
     // or init with no options
     // let petsc = Petsc::init_no_args()?;

@@ -13,8 +13,6 @@ use petsc_rs::prelude::*;
 
 fn main() -> petsc_rs::Result<()> {
     let n = 2;
-    // TODO: make `hard` be a command line input
-    let hard_flg = true;
 
     // optionally initialize mpi
     // let _univ = mpi::initialize().unwrap();
@@ -26,6 +24,8 @@ fn main() -> petsc_rs::Result<()> {
 
     // or init with no options
     // let petsc = Petsc::init_no_args()?;
+
+    let hard_flg = petsc.options_try_get_bool("-hard_flg")?.unwrap_or(false);
 
     if petsc.world().size() != 1
     {

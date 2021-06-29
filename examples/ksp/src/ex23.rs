@@ -17,37 +17,20 @@
 static HELP_MSG: &str = "Solves a tridiagonal linear system with KSP.\n\n";
 
 use petsc_rs::prelude::*;
-use structopt::StructOpt;
-
-mod opt;
-use opt::*;
-
-#[derive(Debug, StructOpt)]
-#[structopt(name = "ex23", about = HELP_MSG)]
-struct Opt {
-    /// Size of the vector and matrix
-    #[structopt(short, long, default_value = "10")]
-    num_elems: PetscInt,
-
-    /// use `-- -help` for petsc help
-    #[structopt(subcommand)]
-    sub: Option<PetscOpt>,
-}
 
 fn main() -> petsc_rs::Result<()> {
-    let Opt {num_elems: n, sub: ext_args} = Opt::from_args();
-    let petsc_args = PetscOpt::petsc_args(ext_args); // Is there an easier way to do this
-
     // optionally initialize mpi
     // let _univ = mpi::initialize().unwrap();
     // init with no options
     let petsc = Petsc::builder()
-        .args(petsc_args)
+        .args(std::env::args())
         .help_msg(HELP_MSG)
         .init()?;
 
     // or init with no options
     // let petsc = Petsc::init_no_args()?;
+
+    let n = petsc.options_try_get_int("-n")?.unwrap_or(10);
 
     petsc_println!(petsc.world(), "(petsc_println!) Hello parallel world of {} processes!", petsc.world().size() )?;
 
