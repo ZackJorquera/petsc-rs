@@ -148,7 +148,7 @@ fn main() -> petsc_rs::Result<()> {
     Ok(())
 }
 
-fn from_function2(_snes: &SNES, x: &Vector, f: &mut Vector) -> petsc_rs::Result<()> {
+fn from_function2(_snes: &SNES, x: &Vector, f: &mut Vector) -> Result<(), petsc_rs::snes::DomainOrPetscError> {
     let x_view = x.view()?;
     let mut f_view = f.view_mut()?;
 
@@ -158,7 +158,7 @@ fn from_function2(_snes: &SNES, x: &Vector, f: &mut Vector) -> petsc_rs::Result<
     Ok(())
 }
 
-fn from_jacobian2(_snes: &SNES, x: &Vector, jac: &mut Mat) -> petsc_rs::Result<()> {
+fn from_jacobian2(_snes: &SNES, x: &Vector, jac: &mut Mat) -> Result<(), petsc_rs::snes::DomainOrPetscError> {
     let x_view = x.view()?;
 
     jac.assemble_with([(0,0,3.0*PetscScalar::cos(3.0*x_view[0])+1.0), (1,1,PetscScalar::from(1.0))],

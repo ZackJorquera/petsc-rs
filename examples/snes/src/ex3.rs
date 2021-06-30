@@ -23,7 +23,7 @@ struct Opt {
 impl PetscOpt for Opt {
     fn from_petsc(petsc: &Petsc) -> petsc_rs::Result<Self> {
         let n = petsc.options_try_get_int("-n")?.unwrap_or(5);
-        let test_jacobian_domain_error = petsc.options_try_get_bool("-test_err")?.unwrap_or(false);
+        let test_jacobian_domain_error = petsc.options_try_get_bool("-test_jacobian_domain_error")?.unwrap_or(false);
         let view_initial = petsc.options_try_get_bool("-view_initial")?.unwrap_or(false);
         let user_precond = petsc.options_try_get_bool("-user_precond")?.unwrap_or(false);
         Ok(Opt { n, test_jacobian_domain_error, view_initial, user_precond })
@@ -112,11 +112,6 @@ fn main() -> petsc_rs::Result<()> {
     J.mpi_aij_set_preallocation(3, None, 3, None)?;
 
     snes.set_jacobian_single_mat(J, |_snes, x, jac| {
-        if test_jacobian_domain_error {
-            todo!();
-            // return Ok(());
-        }
-
         let xx = da.da_vec_view(&x)?;
 
         let (_, m, _, _, _, _, _, _, _, _, _, _, _) = da.da_get_info()?;
@@ -137,13 +132,19 @@ fn main() -> petsc_rs::Result<()> {
             }).flatten(),
         InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
 
-        Ok(())
+        
+        if test_jacobian_domain_error {
+            Err(DomainErr)
+        } else {
+            Ok(())
+        }
     })?;
 
     if user_precond {
         let pc = snes.get_ksp_mut()?.get_pc_mut()?;
         pc.set_type(PCType::PCSHELL)?;
-        todo!()
+        // Identity preconditioner:
+        pc.shell_set_apply(|_pc, xin, xout| xout.copy_data_from(xin) )?;
     }
 
     // TODO: set monitor:
@@ -151,7 +152,7 @@ fn main() -> petsc_rs::Result<()> {
     
     snes.set_from_options()?;
 
-    // TODO: linesearch studd
+    // TODO: linesearch stuff
     // SNESGetLineSearch(snes, &linesearch);
     //
     // PetscOptionsHasName(NULL,NULL,"-post_check_iterates",&post_check);
@@ -193,9 +194,8 @@ fn main() -> petsc_rs::Result<()> {
     
     petsc_println!(petsc.world(), "Norm of error {:.5e} Iterations {}", norm, it_num)?;
     if test_jacobian_domain_error {
-        todo!();
-        // let snes_type = snes.get_type()?;
-        // petsc_println!(petsc.world(), "SNES type {:?}", snes_type)?;
+        let snes_type = snes.get_type()?;
+        petsc_println!(petsc.world(), "SNES type: {}", snes_type)?;
     }
 
     // return

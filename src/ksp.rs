@@ -22,7 +22,7 @@ pub struct KSP<'a, 'tl> {
     // As far as Petsc is concerned we own a reference to the PC as it is reference counted under the hood.
     // But it should be fine to keep it here as an owned reference because we can control access and the 
     // default `KSPDestroy` accounts for references.
-    pc: Option<PC<'a>>,
+    pc: Option<PC<'a, 'tl>>,
 
     dm: Option<DM<'a>>,
 
@@ -81,7 +81,7 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     /// the preconditioner on a vector.
     ///
     /// if you change the PC by calling set again, then the original will be dropped.
-    pub fn set_pc(&mut self, pc: PC<'a>) -> Result<()>
+    pub fn set_pc(&mut self, pc: PC<'a, 'tl>) -> Result<()>
     {
         
         let ierr = unsafe { petsc_raw::KSPSetPC(self.ksp_p, pc.pc_p) };
@@ -94,7 +94,7 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     }
 
     /// Returns a reference to the [`PC`] context set with [`KSP::set_pc()`].
-    pub fn get_pc<'b>(&'b mut self) -> Result<&'b PC<'a>>
+    pub fn get_pc<'b>(&'b mut self) -> Result<&'b PC<'a, 'tl>>
     {
         // TODO: This shouldn't have to take a mut self (maybe we use a RefCell internally)
 
@@ -117,7 +117,7 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     }
 
     /// Returns a mutable reference to the [`PC`] context set with [`KSP::set_pc()`].
-    pub fn get_pc_mut<'b>(&'b mut self) -> Result<&'b mut PC<'a>>
+    pub fn get_pc_mut<'b>(&'b mut self) -> Result<&'b mut PC<'a, 'tl>>
     {
         if self.pc.is_some() {
             Ok(self.pc.as_mut().unwrap())

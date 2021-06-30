@@ -8,12 +8,14 @@
 //!
 //! PETSc C API docs: <https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/PC/index.html>
 
+use std::{mem::ManuallyDrop, pin::Pin};
+
 use crate::prelude::*;
 
 pub use crate::petsc_raw::PCTypeEnum as PCType;
 
 /// Abstract PETSc object that manages all preconditioners including direct solvers such as PCLU
-pub struct PC<'a> {
+pub struct PC<'a, 'tl> {
     pub(crate) world: &'a dyn Communicator,
     pub(crate) pc_p: *mut petsc_raw::_p_PC, // I could use petsc_raw::PC which is the same thing, but i think using a pointer is more clear
 
@@ -25,9 +27,16 @@ pub struct PC<'a> {
     // C api accesses the operators behind the scenes.
     ref_amat: Option<Rc<Mat<'a>>>,
     ref_pmat: Option<Rc<Mat<'a>>>,
+
+    shell_set_apply_trampoline_data: Option<Pin<Box<PCShellSetApplyTrampolineData<'a, 'tl>>>>,
 }
 
-impl<'a> Drop for PC<'a> {
+struct PCShellSetApplyTrampolineData<'a, 'tl> {
+    world: &'a dyn Communicator,
+    user_f: Box<dyn FnMut(&PC<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>,
+}
+
+impl<'a> Drop for PC<'a, '_> {
     // Note, this should only be called if the PC context was created with `PCCreate`.
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::PCDestroy(&mut self.pc_p as *mut _) };
@@ -35,10 +44,11 @@ impl<'a> Drop for PC<'a> {
     }
 }
 
-impl<'a> PC<'a> {
+impl<'a, 'tl> PC<'a, 'tl> {
     /// Same as `PC { ... }` but sets all optional params to `None`
     pub(crate) fn new(world: &'a dyn Communicator, pc_p: *mut petsc_raw::_p_PC) -> Self {
-        PC { world, pc_p, ref_amat: None, ref_pmat: None }
+        PC { world, pc_p, ref_amat: None, ref_pmat: None,
+            shell_set_apply_trampoline_data: None }
     }
 
     /// Creates a preconditioner context.
@@ -167,14 +177,78 @@ impl<'a> PC<'a> {
     //
     //     Ok(())
     // }
+
+    /// Sets routine to use as preconditioner. 
+    ///
+    /// # Parameters
+    ///
+    /// * `user_f` - A closure used to convey the Jacobian evaluation routine.
+    ///     * `pc` - the preconditioner context
+    ///     * `xin` - input vector
+    ///     * `xout` *(output)* - output vector
+    pub fn shell_set_apply<F>(&mut self, user_f: F) -> Result<()>
+    where
+        F: FnMut(&PC<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
+    {
+        // TODO: look at how rsmpi did the trampoline stuff:
+        // https://github.com/rsmpi/rsmpi/blob/master/src/collective.rs#L1684
+        // They used libffi, that could be a safer way to do it.
+
+        let closure_anchor = Box::new(user_f);
+
+        let trampoline_data = Box::pin(PCShellSetApplyTrampolineData { 
+            world: self.world, user_f: closure_anchor });
+
+        // drop old trampoline_data
+        let _ = self.shell_set_apply_trampoline_data.take();
+
+        unsafe extern "C" fn pc_shell_set_apply_trampoline(pc_p: *mut petsc_raw::_p_PC, xin_p: *mut petsc_raw::_p_Vec,
+            xout_p: *mut petsc_raw::_p_Vec) -> petsc_raw::PetscErrorCode
+        {
+            let mut ctx = MaybeUninit::uninit();
+            let ierr = petsc_raw::PCShellGetContext(pc_p, ctx.as_mut_ptr());
+            assert_eq!(ierr, 0);
+
+            // SAFETY: We construct ctx to be a Pin<Box<KSPComputeOperatorsTrampolineData>> but pass it in as a *void
+            // Box<T> is equivalent to *T (or &T) for ffi. Because the KSP owns the closure we can make sure
+            // everything in it (and the closure its self) lives for at least as long as this function can be
+            // called.
+            // We don't construct a Box<> because we dont want to drop anything
+            let trampoline_data: Pin<&mut PCShellSetApplyTrampolineData> = std::mem::transmute(ctx.assume_init());
+
+            // We don't want to drop anything, we are just using this to turn pointers 
+            // of the underlining types (i.e. *mut petsc_raw::_p_SNES) into references
+            // of the rust wrapper types.
+            // If `Vector` ever has optional parameters, they MUST be dropped manually.
+            let pc = ManuallyDrop::new(PC::new(trampoline_data.world, pc_p));
+            let xin = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: xin_p });
+            let mut xout = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: xout_p });
+            
+            (trampoline_data.get_unchecked_mut().user_f)(&pc, &xin, &mut xout)
+                .map_or_else(|err| err.kind as i32, |_| 0)
+        }
+
+        let ierr = unsafe { petsc_raw::PCShellSetApply(
+            self.pc_p, Some(pc_shell_set_apply_trampoline)) };
+        Petsc::check_error(self.world, ierr)?;
+        let ierr = unsafe { petsc_raw::PCShellSetContext(self.pc_p,
+            std::mem::transmute(trampoline_data.as_ref())) }; // this will also erase the lifetimes
+        Petsc::check_error(self.world, ierr)?;
+        
+        self.shell_set_apply_trampoline_data = Some(trampoline_data);
+
+        Ok(())
+    }
 }
 
 // Macro impls
-impl<'a> PC<'a> {
+impl<'a> PC<'a, '_> {
     wrap_simple_petsc_member_funcs! {
         PCSetFromOptions, set_from_options, pc_p, takes mut, #[doc = "Sets PC options from the options database. This routine must be called before PCSetUp() if the user is to be allowed to set the preconditioner method."];
         PCSetUp, set_up, pc_p, takes mut, #[doc = "Prepares for the use of a preconditioner."];
     }
 }
 
-impl_petsc_object_funcs!{ PC, pc_p }
+impl_petsc_object_funcs!{ PC, pc_p, '_ }
+
+impl_petsc_view_func!{ PC, pc_p, PCView, '_ }

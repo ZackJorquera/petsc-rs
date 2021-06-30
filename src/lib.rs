@@ -67,7 +67,7 @@ pub mod prelude {
         vector::{Vector, VecOption, },
         mat::{Mat, MatAssemblyType, MatOption, MatDuplicateOption, MatStencil, NullSpace },
         ksp::{KSP, },
-        snes::{SNES, },
+        snes::{SNES, DomainOrPetscError::DomainErr, },
         pc::{PC, PCType, },
         dm::{DM, DMBoundaryType, DMDAStencilType, DMType, },
         viewer::{Viewer, PetscViewerFormat, },

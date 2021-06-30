@@ -26,13 +26,40 @@ pub struct SNES<'a, 'tl> {
     jacobian_trampoline_data: Option<SNESJacobianTrampolineData<'a, 'tl>>,
 }
 
+/// A PETSc error type with a [`DomainErr`] variant.
+///
+/// Implements [`From<PetscError>`](From), so it works nicely with the try operator, `?`,
+/// on [`Err(PetscError)`](crate::PetscError).
+///
+/// Used with function that compute operators like [`SNES::set_function()`] or [`SNES::set_jacobian()`]
+/// That can have the input out of the domain.
+pub enum DomainOrPetscError {
+    /// Used to indicate that there was a domain error.
+    ///
+    /// This will not create a `PetscError` internally unless you spesify that there should be an 
+    /// error if not converged (i.e. with [`SNES::set_error_if_not_converged()`]).
+    DomainErr,
+    /// Normal PetscError.
+    ///
+    /// You should not need to create this variant as [`DomainOrPetscError`]
+    /// implements [`From<PetscError>`](From), so it works nicely with the try operator, `?`,
+    /// on [`Err(PetscError)`](crate::PetscError).
+    PetscErr(crate::PetscError)
+}
+
+impl From<crate::PetscError> for DomainOrPetscError {
+    fn from(pe: crate::PetscError) -> DomainOrPetscError {
+        DomainOrPetscError::PetscErr(pe)
+    }
+}
+
 struct SNESFunctionTrampolineData<'a, 'tl> {
     world: &'a dyn Communicator,
     // This field is only used for its ownership.
     // The usage of the pointer/reference is all handled on the c side.
     // However, we might want to use it for something like `get_residuals()`
     _vec: Option<Vector<'a>>,
-    user_f: Box<dyn FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>,
+    user_f: Box<dyn FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl>,
 }
 
 enum SNESJacobianTrampolineData<'a,'tl> {
@@ -43,14 +70,14 @@ enum SNESJacobianTrampolineData<'a,'tl> {
 struct SNESJacobianSingleTrampolineData<'a, 'tl> {
     world: &'a dyn Communicator,
     _ap_mat: Mat<'a>,
-    user_f: Box<dyn FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a>) -> Result<()> + 'tl>,
+    user_f: Box<dyn FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl>,
 }
 
 struct SNESJacobianDoubleTrampolineData<'a, 'tl> {
     world: &'a dyn Communicator,
     _a_mat: Mat<'a>,
     _p_mat: Mat<'a>,
-    user_f: Box<dyn FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a>, &mut Mat<'a>) -> Result<()> + 'tl>,
+    user_f: Box<dyn FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a>, &mut Mat<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl>,
 }
 
 pub use petsc_raw::SNESConvergedReason;
@@ -197,7 +224,7 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
     /// ```
     pub fn set_function<F>(&mut self, input_vec: Option<Vector<'a>>, user_f: F) -> Result<()>
     where
-        F: FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
+        F: FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl
     {
         // TODO: should input_vec be consumed or passed by mut ref? We want to take mutable access for
         // it until the SNES is dropped. so either way its not like we can return mutable access to the
@@ -236,13 +263,24 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
             // we only give immutable access to the user_f we don't have to worry about that
             // as they will all stay `None`.
             // If `Vector` ever has optional parameters, they MUST be dropped manually.
-            let snes = ManuallyDrop::new(SNES::new(trampoline_data.world, snes_p));
+            // SAFETY: even though snes is mut and thus we can set optional parameters, we don't
+            // as we dont expose the mut to the user closure, we only use it with `set_jacobian_domain_error`
+            let mut snes = ManuallyDrop::new(SNES::new(trampoline_data.world, snes_p));
             let x = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: x_p });
             let mut f = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: f_p });
             
             // TODO: is this safe, can we move the data in user_f by calling it
-            (trampoline_data.get_unchecked_mut().user_f)(&snes, &x, &mut f)
-                .map_or_else(|err| err.kind as i32, |_| 0)
+            (trampoline_data.get_unchecked_mut().user_f)(&snes, &x, &mut f,)
+                .map_or_else(|err| match err {
+                    DomainOrPetscError::DomainErr => {
+                        let perr = snes.set_function_domain_error();
+                        match perr {
+                            Ok(_) => 0,
+                            Err(perr) => perr.kind as i32
+                        }
+                    },
+                    DomainOrPetscError::PetscErr(perr) => perr.kind as i32
+                }, |_| 0)
         }
 
         let ierr = unsafe { petsc_raw::SNESSetFunction(
@@ -312,7 +350,7 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
     /// ```
     pub fn set_jacobian_single_mat<F>(&mut self, ap_mat: Mat<'a>, user_f: F) -> Result<()>
     where
-        F: FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a>) -> Result<()> + 'tl,
+        F: FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl,
     {
         // TODO: should we make ap_mat an `Rc<RefCell<Mat>>`
 
@@ -336,12 +374,23 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
             // of the underlining types (i.e. *mut petsc_raw::_p_SNES) into references
             // of the rust wrapper types.
             // If `Mat` ever has optional parameters, they MUST be dropped manually.
-            let snes = ManuallyDrop::new(SNES::new(trampoline_data.world, snes_p));
+            // SAFETY: even though snes is mut and thus we can set optional parameters, we don't
+            // as we dont expose the mut to the user closure, we only use it with `set_jacobian_domain_error`
+            let mut snes = ManuallyDrop::new(SNES::new(trampoline_data.world, snes_p));
             let x = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: vec_p });
             let mut a_mat = ManuallyDrop::new(Mat { world: trampoline_data.world, mat_p: mat1_p });
             
             (trampoline_data.get_unchecked_mut().user_f)(&snes, &x, &mut a_mat)
-                .map_or_else(|err| err.kind as i32, |_| 0)
+                .map_or_else(|err| match err {
+                    DomainOrPetscError::DomainErr => {
+                        let perr = snes.set_jacobian_domain_error();
+                        match perr {
+                            Ok(_) => 0,
+                            Err(perr) => perr.kind as i32
+                        }
+                    },
+                    DomainOrPetscError::PetscErr(perr) => perr.kind as i32
+                }, |_| 0)
         }
 
         let ierr = unsafe { petsc_raw::SNESSetJacobian(
@@ -418,7 +467,7 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
     /// ```
     pub fn set_jacobian<F>(&mut self, a_mat: Mat<'a>, p_mat: Mat<'a>, user_f: F) -> Result<()>
     where
-        F: FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a>, &mut Mat<'a>) -> Result<()> + 'tl
+        F: FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a>, &mut Mat<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl
     {
         // TODO: should we make a/p_mat an `Rc<RefCell<Mat>>`
         let closure_anchor = Box::new(user_f);
@@ -441,13 +490,24 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
             // We don't want to drop anything, we are just using this to turn pointers 
             // of the underlining types (i.e. *mut petsc_raw::_p_SNES) into references.
             // If `Mat` ever has optional parameters, they MUST be dropped manually.
-            let snes = ManuallyDrop::new(SNES::new(trampoline_data.world, snes_p));
+            // SAFETY: even though snes is mut and thus we can set optional parameters, we don't
+            // as we dont expose the mut to the user closure, we only use it with `set_jacobian_domain_error`
+            let mut snes = ManuallyDrop::new(SNES::new(trampoline_data.world, snes_p));
             let x = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: vec_p });
             let mut a_mat = ManuallyDrop::new(Mat { world: trampoline_data.world, mat_p: mat1_p });
             let mut p_mat = ManuallyDrop::new(Mat { world: trampoline_data.world, mat_p: mat2_p });
             
             (trampoline_data.get_unchecked_mut().user_f)(&snes, &x, &mut a_mat, &mut p_mat)
-                .map_or_else(|err| err.kind as i32, |_| 0)
+                .map_or_else(|err| match err {
+                    DomainOrPetscError::DomainErr => {
+                        let perr = snes.set_jacobian_domain_error();
+                        match perr {
+                            Ok(_) => 0,
+                            Err(perr) => perr.kind as i32
+                        }
+                    },
+                    DomainOrPetscError::PetscErr(perr) => perr.kind as i32
+                }, |_| 0)
         }
 
         let ierr = unsafe { petsc_raw::SNESSetJacobian(
@@ -475,6 +535,18 @@ impl<'a, 'b, 'tl> SNES<'a, 'tl> {
         let ierr = unsafe { petsc_raw::SNESSolve(self.snes_p, b.map_or(std::ptr::null_mut(), |v| v.vec_p), x.vec_p) };
         Petsc::check_error(self.world, ierr)
     }
+
+    /// Gets the SNES method type and name (as a [`String`]). 
+    pub fn get_type(&self) -> Result<String> {
+        // TODO: return enum
+        let mut s_p = MaybeUninit::uninit();
+        let ierr = unsafe { petsc_raw::SNESGetType(self.snes_p, s_p.as_mut_ptr()) };
+        Petsc::check_error(self.world, ierr)?;
+        
+        let c_str: &CStr = unsafe { CStr::from_ptr(s_p.assume_init()) };
+        let str_slice: &str = c_str.to_str().unwrap();
+        Ok(str_slice.to_owned())
+    }
 }
 
 // macro impls
@@ -491,6 +563,12 @@ impl<'a> SNES<'a, '_> {
             * `maxit` - maximum number of iterations\n\
             * `maxf` - maximum number of function evaluations\n"];
         SNESGetConvergedReason, get_converged_reason, snes_p, output SNESConvergedReason, conv_reas, #[doc = "Gets the reason the SNES iteration was stopped."];
+        SNESSetErrorIfNotConverged, set_error_if_not_converged, snes_p, input bool, flg, takes mut, #[doc = "Causes [`SNES::solve()`] to generate an error if the solver has not converged.\n\n\
+            Or the database key `-snes_error_if_not_converged` can be used.\n\nNormally PETSc continues if a linear solver fails to converge, you can call [`SNES::get_converged_reason()`] after a [`SNES::solve()`] to determine if it has converged."];
+        SNESSetJacobianDomainError, set_jacobian_domain_error, snes_p, takes mut, #[doc = "Tells [`SNES`] that compute jacobian does not make sense any more.\n\n\
+            For example there is a negative element transformation. You probably want to use [`DomainErr`] instead of this function."];
+        SNESSetFunctionDomainError, set_function_domain_error, snes_p, takes mut, #[doc = "Tells [`SNES`] that the input vector to your SNES Function is not in the functions domain.\n\n\
+            For example, negative pressure. You probably want to use [`DomainErr`] instead of this function."];
     }
 }
 

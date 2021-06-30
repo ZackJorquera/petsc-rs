@@ -1,4 +1,4 @@
-//! PETSc vectors (Vec objects) are used to store the field variables in PDE-based (or other) simulations.
+//! PETSc vectors ([`Vector`] objects) are used to store the field variables in PDE-based (or other) simulations.
 //!
 //! PETSc C API docs: <https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Vec/index.html>
 
