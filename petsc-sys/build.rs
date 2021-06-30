@@ -1,24 +1,70 @@
 extern crate bindgen;
 extern crate syn;
 
+use std::borrow::Cow;
 use std::env;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
+use std::process::Stdio;
 
 use quote::{ToTokens, quote};
+use proc_macro2::{Ident, Span};
 use syn::ItemConst;
 
-fn create_enum_from(items: Vec<ItemConst>, repr_type: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
-    // TODO: maybe add a test to make sure everything worked
+fn rustfmt_string(code_str: &str) -> Cow<'_, str> {
+    if let Ok(mut child) = Command::new("rustfmt")
+        .arg("--emit=stdout")
+        .arg("--edition=2018")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        child.stdin.as_mut().unwrap().write_all(code_str.as_bytes()).unwrap();
+        
+        if let Ok(output) = child.wait_with_output() {
+            if output.status.success() {
+                return Cow::Owned(String::from_utf8(output.stdout).unwrap());
+            }
+        }
+    }
+    Cow::Borrowed(code_str)
+}
+
+fn create_enum_from_consts(name: Ident, items: Vec<ItemConst>, repr_type: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
+    let fn_ident = Ident::new(&format!("create_enum_from_consts_test_layout_{}", name), Span::call_site());
     let item_idents = items.into_iter().map(|i| i.ident);
+    let item_idents2 = item_idents.clone();
     quote! {
         #[repr(#repr_type)]
         #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
-        pub enum PetscErrorCodeEnum {
+        pub enum #name {
             #(
                 #item_idents = #item_idents as #repr_type,
+            )*
+        }
+
+        #[test]
+        fn #fn_ident() {
+            assert_eq!(
+                ::std::mem::size_of::<#name>(),
+                ::std::mem::size_of::<#repr_type>(),
+                concat!("Size of: ", stringify!(#name))
+            );
+            assert_eq!(
+                ::std::mem::align_of::<#name>(),
+                ::std::mem::align_of::<#repr_type>(),
+                concat!("Alignment of ", stringify!(#name))
+            );
+            #(
+                assert_eq!(
+                    unsafe { ::std::mem::transmute::<#name, #repr_type>(#name::#item_idents2) },
+                    #item_idents2 as #repr_type,
+                    concat!("Value of: ", stringify!(#name::#item_idents2))
+                );
             )*
         }
     }
@@ -222,9 +268,9 @@ fn main() {
     let enum_file = out_path.join("enums.rs");
     let mut f = File::create(enum_file).unwrap();
     // we want i32 because `PetscErrorCode` is i32 (or really it is c_int)
-    let code_string = format!("{}", create_enum_from(petsc_err_consts, quote!{i32}).into_token_stream());
+    let code_string = format!("{}", create_enum_from_consts(Ident::new("PetscErrorCodeEnum", Span::call_site()), petsc_err_consts, quote!{i32}).into_token_stream());
     // TODO: we should format the code
-    f.write(code_string.as_bytes()) .unwrap();
+    f.write(rustfmt_string(&code_string).as_bytes()) .unwrap();
 
     // do asserts
     match real_features[0]
