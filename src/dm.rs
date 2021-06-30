@@ -268,7 +268,7 @@ impl<'a> DM<'a> {
     ///         rhs_array.slice(s![gxs..(gxs+gxm), gys..(gys+gym)]).dim());
     ///     assert_eq!(g_view.slice(s![.., ..]), rhs_array.slice(s![gxs..(gxs+gxm), gys..(gys+gym)]));
     /// } else {
-    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, 
+    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, 
     ///         "This example only work with 1 or 2 processors!")?;
     /// }
     /// # Ok(())
@@ -286,13 +286,13 @@ impl<'a> DM<'a> {
         };
 
         if local_size != gxm*gym*gzm*dof {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERROR_ARG_INCOMP, 
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_INCOMP, 
                 format!("Vector local size {} is not compatible with DMDA local sizes {} or {}\n",
                     local_size,xm*ym*zm*dof,gxm*gym*gzm*dof))?;
         }
 
         if dim > 3 || dim < 1 {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERROR_ARG_CORRUPT, 
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT, 
                 format!("DMDA dimension not 1, 2, or 3, it is {}\n",dim))?;
         }
 
@@ -387,13 +387,13 @@ impl<'a> DM<'a> {
         };
 
         if local_size != gxm*gym*gzm*dof {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERROR_ARG_INCOMP, 
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_INCOMP, 
                 format!("Vector local size {} is not compatible with DMDA local sizes {} or {}\n",
                     local_size,xm*ym*zm*dof,gxm*gym*gzm*dof))?;
         }
 
         if dim > 3 || dim < 1 {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERROR_ARG_CORRUPT, 
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT, 
                 format!("DMDA dimension not 1, 2, or 3, it is {}\n",dim))?;
         }
 

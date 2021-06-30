@@ -29,7 +29,7 @@ fn main() -> petsc_rs::Result<()> {
     let n = petsc.options_try_get_int("-n")?.unwrap_or(5);
 
     if petsc.world().size() != 1 {
-        Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
+        Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
     }
 
     // Note, `PetscScalar` could be a complex number, so best practice is to instead of giving

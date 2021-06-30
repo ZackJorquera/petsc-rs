@@ -3,11 +3,26 @@ extern crate syn;
 
 use std::env;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::path::PathBuf;
 
-use quote::ToTokens;
+use quote::{ToTokens, quote};
+use syn::ItemConst;
+
+fn create_enum_from(items: Vec<ItemConst>, repr_type: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
+    // TODO: maybe add a test to make sure everything worked
+    let item_idents = items.into_iter().map(|i| i.ident);
+    quote! {
+        #[repr(#repr_type)]
+        #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+        pub enum PetscErrorCodeEnum {
+            #(
+                #item_idents = #item_idents as #repr_type,
+            )*
+        }
+    }
+}
 
 fn main() {
     // TODO: get source and build petsc (idk, follow what rsmpi does maybe)
@@ -188,38 +203,54 @@ fn main() {
     let raw = syn::parse_file(&content).expect("Could not read generated bindings");
 
     // Find all variables named: PETSC_USE_*
-    let petsc_use_idents = raw.items.iter()
+    let petsc_use_consts = raw.items.iter()
         .filter_map(|item| match item {
             syn::Item::Const(c_item) => Some(format!("{}", c_item.ident.to_token_stream())),
             _ => None,
         }).filter(|ident| ident.contains("PETSC_USE_"))
         .collect::<Vec<_>>();
 
+    // Find all variables named: PETSC_ERR_*
+    let petsc_err_consts = raw.items.iter()
+        .filter_map(|item| match item {
+            syn::Item::Const(c_item) if format!("{}", c_item.ident.to_token_stream())
+                .contains("PETSC_ERR_") => Some(c_item.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    
+    let enum_file = out_path.join("enums.rs");
+    let mut f = File::create(enum_file).unwrap();
+    // we want i32 because `PetscErrorCode` is i32 (or really it is c_int)
+    let code_string = format!("{}", create_enum_from(petsc_err_consts, quote!{i32}).into_token_stream());
+    // TODO: we should format the code
+    f.write(code_string.as_bytes()) .unwrap();
+
     // do asserts
     match real_features[0]
     {
-        "CARGO_FEATURE_PETSC_REAL_F64" => assert!(petsc_use_idents.contains(&"PETSC_USE_REAL_DOUBLE".into()),
+        "CARGO_FEATURE_PETSC_REAL_F64" => assert!(petsc_use_consts.contains(&"PETSC_USE_REAL_DOUBLE".into()),
             "PETSc is not compiled to use `f64` for real, but the feature \"petsc-real-f64\" is set."),
-        "CARGO_FEATURE_PETSC_REAL_F32" => assert!(petsc_use_idents.contains(&"PETSC_USE_REAL_SINGLE".into()),
+        "CARGO_FEATURE_PETSC_REAL_F32" => assert!(petsc_use_consts.contains(&"PETSC_USE_REAL_SINGLE".into()),
             "PETSc is not compiled to use `f32` for real, but the feature \"petsc-real-f32\" is set."),
         _ => panic!("Invalid feature type for petsc real")
     }
 
     if use_complex_feature {
-        assert!(petsc_use_idents.contains(&"PETSC_USE_COMPLEX".into()),
+        assert!(petsc_use_consts.contains(&"PETSC_USE_COMPLEX".into()),
                 "PETSc is not compiled to use complex for scalar, but the feature \"petsc-use-complex\" is set.");
 
         panic!("Using complex numbers as PetscScalar is currently not available. Please disable \"petsc-use-complex\".");
     } else {
-        assert!(!petsc_use_idents.contains(&"PETSC_USE_COMPLEX".into()),
+        assert!(!petsc_use_consts.contains(&"PETSC_USE_COMPLEX".into()),
                 "PETSc is compiled to use complex for scalar, but the feature \"petsc-use-complex\" is no set.");
     }
     
     match int_features[0]
     {
-        "CARGO_FEATURE_PETSC_INT_I64" => assert!(petsc_use_idents.contains(&"PETSC_USE_64BIT_INDICES".into()),
+        "CARGO_FEATURE_PETSC_INT_I64" => assert!(petsc_use_consts.contains(&"PETSC_USE_64BIT_INDICES".into()),
             "PETSc is not compiled to use `i64` for ints, but the feature \"petsc-int-i64\" is set."),
-        "CARGO_FEATURE_PETSC_INT_I32" => assert!(!petsc_use_idents.contains(&"PETSC_USE_64BIT_INDICES".into()),
+        "CARGO_FEATURE_PETSC_INT_I32" => assert!(!petsc_use_consts.contains(&"PETSC_USE_64BIT_INDICES".into()),
             "PETSc is not compiled to use `i32` for ints, but the feature \"petsc-int-i32\" is set."),
         _ => panic!("Invalid feature type for petsc int")
     }
