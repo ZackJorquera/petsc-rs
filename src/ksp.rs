@@ -32,12 +32,12 @@ pub struct KSP<'a, 'tl> {
 
 struct KSPComputeOperatorsTrampolineData<'a, 'tl> {
     world: &'a dyn Communicator,
-    user_f: Box<dyn FnMut(&KSP<'a, 'tl>, &DM<'a>, &mut Mat<'a>, &mut Mat<'a>) -> Result<()> + 'tl>,
+    user_f: Box<dyn FnMut(&KSP<'a, 'tl>, &mut Mat<'a>, &mut Mat<'a>) -> Result<()> + 'tl>,
 }
 
 struct KSPComputeRHSTrampolineData<'a, 'tl> {
     world: &'a dyn Communicator,
-    user_f: Box<dyn FnMut(&KSP<'a, 'tl>, &DM<'a>, &mut Vector<'a>) -> Result<()> + 'tl>,
+    user_f: Box<dyn FnMut(&KSP<'a, 'tl>, &mut Vector<'a>) -> Result<()> + 'tl>,
 }
 
 impl<'a> Drop for KSP<'a, '_> {
@@ -91,6 +91,17 @@ impl<'a, 'tl> KSP<'a, 'tl> {
         self.pc = Some(pc);
 
         Ok(())
+    }
+    
+    /// Returns a [`Option`] of a reference to the [`PC`] context set.
+    ///
+    /// If you want PETSc to set the [`PC`] you must call [`KSP::get_pc()`]
+    /// or [`KSP::get_pc_mut()`].
+    ///
+    /// Note, this does not return a [`Result`](crate::Result) because it can never
+    /// fail, instead it will return `None`.
+    pub fn try_get_pc<'b>(&'b self) -> Option<&'b PC<'a, 'tl>> {
+        self.pc.as_ref()
     }
 
     /// Returns a reference to the [`PC`] context set with [`KSP::set_pc()`].
@@ -149,6 +160,17 @@ impl<'a, 'tl> KSP<'a, 'tl> {
         self.dm = Some(dm);
 
         Ok(())
+    }
+
+    /// Returns a [`Option`] to a reference to the [DM](DM).
+    ///
+    /// If you want PETSc to set the [`DM`] you must call [`KSP::get_dm()`]
+    /// or [`KSP::get_dm_mut()`].
+    ///
+    /// Note, this does not return a [`Result`](crate::Result) because it can never
+    /// fail, instead it will return `None`.
+    pub fn try_get_dm<'b>(&'b self) -> Option<&'b DM<'a>> {
+        self.dm.as_ref()
     }
 
     /// Returns a reference to the [DM](DM) that may be used by some [preconditioners](crate::pc).
@@ -228,12 +250,16 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     ///
     /// * `user_f` - A closure used to convey the routine to compute the operators.
     ///     * `ksp` - the ksp context
-    ///     * `dm` - the dm context held by the ksp
     ///     * `a_mat` *(output)* - the linear operator
     ///     * `p_mat` *(output)* - preconditioning matrix
+    ///
+    /// # Note
+    ///
+    /// The you can always access the [`DM`] in the `user_f` `ksp` so it will always be safe to do
+    /// [`let dm = ksp.try_get_dm().unwrap();`](KSP::try_get_dm()).
     pub fn set_compute_operators<F>(&mut self, user_f: F) -> Result<()>
     where
-        F: FnMut(&KSP<'a, 'tl>, &DM<'a>, &mut Mat<'a>, &mut Mat<'a>) -> Result<()> + 'tl
+        F: FnMut(&KSP<'a, 'tl>, &mut Mat<'a>, &mut Mat<'a>) -> Result<()> + 'tl
     {
         // TODO: look at how rsmpi did the trampoline stuff:
         // https://github.com/rsmpi/rsmpi/blob/master/src/collective.rs#L1684
@@ -260,14 +286,16 @@ impl<'a, 'tl> KSP<'a, 'tl> {
             // We don't want to drop anything, we are just using this to turn pointers 
             // of the underlining types (i.e. *mut petsc_raw::_p_SNES) into references
             // of the rust wrapper types.
-            let ksp = ManuallyDrop::new(KSP::new(trampoline_data.world, ksp_p));
+            let mut ksp = ManuallyDrop::new(KSP::new(trampoline_data.world, ksp_p));
             let mut dm_p = MaybeUninit::uninit();
-            let _ierr = petsc_raw::KSPGetDM(ksp_p, dm_p.as_mut_ptr());
-            let dm = ManuallyDrop::new(DM::new(trampoline_data.world, dm_p.assume_init()));
+            let ierr = petsc_raw::KSPGetDM(ksp_p, dm_p.as_mut_ptr());
+            if ierr != 0 { let _ = Petsc::check_error(trampoline_data.world, ierr); return ierr; }
+            let dm = DM::new(trampoline_data.world, dm_p.assume_init());
+            ksp.dm = Some(dm); // Note, because ksp is not dropped, ksp.dm wont be either
             let mut a_mat = ManuallyDrop::new(Mat { world: trampoline_data.world, mat_p: mat1_p });
             let mut p_mat = ManuallyDrop::new(Mat { world: trampoline_data.world, mat_p: mat2_p });
             
-            (trampoline_data.get_unchecked_mut().user_f)(&ksp, &dm, &mut a_mat, &mut p_mat)
+            (trampoline_data.get_unchecked_mut().user_f)(&ksp, &mut a_mat, &mut p_mat)
                 .map_or_else(|err| err.kind as i32, |_| 0)
         }
 
@@ -292,9 +320,14 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     ///     * `ksp` - the ksp context
     ///     * `dm` - the dm context held by the ksp
     ///     * `b` *(output)* - right hand side of linear system
+    ///
+    /// # Note
+    ///
+    /// The you can always access the [`DM`] in the `user_f` `ksp` so it will always be safe to do
+    /// [`let dm = ksp.try_get_dm().unwrap();`](KSP::try_get_dm()).
     pub fn set_compute_rhs<F>(&mut self, user_f: F) -> Result<()>
     where
-        F: FnMut(&KSP<'a, '_>, &DM<'a>, &mut Vector<'a>) -> Result<()> + 'tl
+        F: FnMut(&KSP<'a, '_>, &mut Vector<'a>) -> Result<()> + 'tl
     {
         // TODO: look at how rsmpi did the trampoline stuff:
         // https://github.com/rsmpi/rsmpi/blob/master/src/collective.rs#L1684
@@ -318,13 +351,15 @@ impl<'a, 'tl> KSP<'a, 'tl> {
             // We don't want to drop anything, we are just using this to turn pointers 
             // of the underlining types (i.e. *mut petsc_raw::_p_SNES) into references
             // of the rust wrapper types.
-            let ksp = ManuallyDrop::new(KSP::new(trampoline_data.world, ksp_p));
+            let mut ksp = ManuallyDrop::new(KSP::new(trampoline_data.world, ksp_p));
             let mut dm_p = MaybeUninit::uninit();
-            let _ierr = petsc_raw::KSPGetDM(ksp_p, dm_p.as_mut_ptr());
-            let dm = ManuallyDrop::new(DM::new(trampoline_data.world, dm_p.assume_init()));
+            let ierr = petsc_raw::KSPGetDM(ksp_p, dm_p.as_mut_ptr());
+            if ierr != 0 { let _ = Petsc::check_error(trampoline_data.world, ierr); return ierr; }
+            let dm = DM::new(trampoline_data.world, dm_p.assume_init());
+            ksp.dm = Some(dm); // Note, because ksp is not dropped, ksp.dm wont be either
             let mut vec = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p });
             
-            (trampoline_data.get_unchecked_mut().user_f)(&ksp, &dm, &mut vec)
+            (trampoline_data.get_unchecked_mut().user_f)(&ksp, &mut vec)
                 .map_or_else(|err| err.kind as i32, |_| 0)
         }
 

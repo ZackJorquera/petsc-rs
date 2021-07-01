@@ -57,8 +57,9 @@ fn main() -> petsc_rs::Result<()> {
     let mut x = da.create_global_vector()?;
 
     ksp.set_dm(da)?;
-    ksp.set_compute_rhs(|_ksp, dm, b| {
+    ksp.set_compute_rhs(|ksp, b| {
         // We will define the forcing function $f = e^{-x^2/\nu} e^{-y^2/\nu}$
+        let dm = ksp.try_get_dm().unwrap();
         let (_, mx, _, _, _, _, _, _, _, _, _, _, _) = dm.da_get_info()?;
         let h = 1.0 / (PetscScalar::from(mx as PetscReal) - 1.0);
         let (xs, _, _, xm, _, _) = dm.da_get_corners()?;
@@ -76,7 +77,8 @@ fn main() -> petsc_rs::Result<()> {
         Ok(())
     })?;
 
-    ksp.set_compute_operators(|_ksp, dm, _, jac| {
+    ksp.set_compute_operators(|ksp, _, jac| {
+        let dm = ksp.try_get_dm().unwrap();
         let (_, mx, _, _, _, _, _, _, _, _, _, _, _) = dm.da_get_info()?;
         let h = 1.0 / (PetscScalar::from(mx as PetscReal) - 1.0);
         let (xs, _, _, xm, _, _) = dm.da_get_corners()?;

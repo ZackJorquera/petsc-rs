@@ -153,6 +153,14 @@ fn main() -> petsc_rs::Result<()> {
 
         Ok(())
     })?;
+    
+    // Set an optional user-defined monitoring routine
+    snes.monitor_set(|snes, its, fnorm| {
+        petsc_println!(petsc.world(), "iter: {}, SNES function norm: {:.5e}", its, fnorm)?;
+        let x = snes.get_solution()?;
+        x.view_with(None)?;
+        Ok(())
+    })?;
 
     /*
         Set SNES/KSP/KSP/PC runtime options, e.g.,
