@@ -175,6 +175,21 @@ macro_rules! impl_petsc_object_funcs {
                 let c_str = unsafe { ::std::ffi::CStr::from_ptr(c_buf.assume_init()) };
                 crate::Result::Ok(c_str.to_string_lossy().to_string())
             }
+
+            /// Determines whether a PETSc object is of a particular type (give as a string). 
+            pub fn type_compare<T: ToString>(&mut self, type_name: T) -> Result<bool> {
+                let type_name_cs = ::std::ffi::CString::new(type_name.to_string()).expect("`CString::new` failed");
+                let mut tmp = ::std::mem::MaybeUninit::<crate::petsc_raw::PetscBool>::uninit();
+
+                let ierr = unsafe { crate::petsc_raw::PetscObjectTypeCompare(
+                    self.$raw_ptr_var as *mut _, type_name_cs.as_ptr(),
+                    tmp.as_mut_ptr()
+                )};
+                Petsc::check_error(self.world, ierr)?;
+
+                #[allow(unused_unsafe)]
+                crate::Result::Ok(unsafe { tmp.assume_init() }.into())
+            }
         }
     };
 }

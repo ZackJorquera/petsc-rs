@@ -46,7 +46,7 @@ fn main() -> petsc_rs::Result<()> {
     let mut x = petsc.vec_create()?;
     x.set_sizes(None, Some(n))?;
     x.set_from_options()?;
-    let r = x.duplicate()?;
+    let mut r = x.duplicate()?;
     let mut g = x.duplicate()?;
     let mut u = x.duplicate()?;
     x.set_name("Approximate Solution")?;
@@ -84,7 +84,7 @@ fn main() -> petsc_rs::Result<()> {
     /*
         Set function evaluation routine and vector
     */
-    snes.set_function(Some(r), |_snes, x: &Vector, f: &mut Vector| {
+    snes.set_function(Some(&mut r), |_snes, x: &Vector, f: &mut Vector| {
         /*
             Evaluates nonlinear function, F(x).
 

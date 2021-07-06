@@ -7,7 +7,7 @@
 //! the KSP routines listed below (e.g., [`KSP::set_type()`](#) ). KSP components can be used directly to
 //! create and destroy solvers; this is not needed for users but is intended for library developers.
 //!
-//! PETSc C API docs: <https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/KSP/index.html>
+//! PETSc C API docs: <https://petsc.org/release/docs/manualpages/KSP/index.html>
 
 use std::{mem::ManuallyDrop, pin::Pin};
 
@@ -33,11 +33,13 @@ pub struct KSP<'a, 'tl> {
 struct KSPComputeOperatorsTrampolineData<'a, 'tl> {
     world: &'a dyn Communicator,
     user_f: Box<dyn FnMut(&KSP<'a, 'tl>, &mut Mat<'a>, &mut Mat<'a>) -> Result<()> + 'tl>,
+    set_dm: bool,
 }
 
 struct KSPComputeRHSTrampolineData<'a, 'tl> {
     world: &'a dyn Communicator,
     user_f: Box<dyn FnMut(&KSP<'a, 'tl>, &mut Vector<'a>) -> Result<()> + 'tl>,
+    set_dm: bool,
 }
 
 impl<'a> Drop for KSP<'a, '_> {
@@ -162,10 +164,11 @@ impl<'a, 'tl> KSP<'a, 'tl> {
         Ok(())
     }
 
-    /// Returns a [`Option`] to a reference to the [DM](DM).
+    /// Returns an [`Option`] to a reference to the [DM](DM).
     ///
     /// If you want PETSc to set the [`DM`] you must call [`KSP::get_dm()`]
-    /// or [`KSP::get_dm_mut()`].
+    /// or [`KSP::get_dm_mut()`], otherwise you must call [`KSP::set_dm()`]
+    /// for this to return a `Some`.
     ///
     /// Note, this does not return a [`Result`](crate::Result) because it can never
     /// fail, instead it will return `None`.
@@ -255,8 +258,10 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     ///
     /// # Note
     ///
-    /// The you can always access the [`DM`] in the `user_f` `ksp` so it will always be safe to do
-    /// [`let dm = ksp.try_get_dm().unwrap();`](KSP::try_get_dm()).
+    /// You can access the [`DM`] owned by the `ksp` in the `user_f` by using
+    /// [`let dm = ksp.try_get_dm().unwrap();`](KSP::try_get_dm()). Note, this will only work
+    /// if you set the dm with [`KSP::set_dm()()`] BEFORE you call the
+    /// [`set_compute_operators()`](KSP::set_compute_operators) method.
     pub fn set_compute_operators<F>(&mut self, user_f: F) -> Result<()>
     where
         F: FnMut(&KSP<'a, 'tl>, &mut Mat<'a>, &mut Mat<'a>) -> Result<()> + 'tl
@@ -267,8 +272,12 @@ impl<'a, 'tl> KSP<'a, 'tl> {
 
         let closure_anchor = Box::new(user_f);
 
+        // Note, if the caller has previously called `KSP::set_dm()` then we want to make
+        // sure to give them access in the closure.
+        // TODO: it would be nice to determine this in the trampoline function as the caller could
+        // set the dm after they set this closure (for now i think this is fine)
         let trampoline_data = Box::pin(KSPComputeOperatorsTrampolineData { 
-            world: self.world, user_f: closure_anchor });
+            world: self.world, user_f: closure_anchor, set_dm: self.dm.is_some() });
 
         // drop old trampoline_data
         let _ = self.compute_operators_trampoline_data.take();
@@ -287,11 +296,13 @@ impl<'a, 'tl> KSP<'a, 'tl> {
             // of the underlining types (i.e. *mut petsc_raw::_p_SNES) into references
             // of the rust wrapper types.
             let mut ksp = ManuallyDrop::new(KSP::new(trampoline_data.world, ksp_p));
-            let mut dm_p = MaybeUninit::uninit();
-            let ierr = petsc_raw::KSPGetDM(ksp_p, dm_p.as_mut_ptr());
-            if ierr != 0 { let _ = Petsc::check_error(trampoline_data.world, ierr); return ierr; }
-            let dm = DM::new(trampoline_data.world, dm_p.assume_init());
-            ksp.dm = Some(dm); // Note, because ksp is not dropped, ksp.dm wont be either
+            if trampoline_data.set_dm {
+                let mut dm_p = MaybeUninit::uninit();
+                let ierr = petsc_raw::KSPGetDM(ksp_p, dm_p.as_mut_ptr());
+                if ierr != 0 { let _ = Petsc::check_error(trampoline_data.world, ierr); return ierr; }
+                let dm = DM::new(trampoline_data.world, dm_p.assume_init());
+                ksp.dm = Some(dm); // Note, because ksp is not dropped, ksp.dm wont be either
+            }
             let mut a_mat = ManuallyDrop::new(Mat { world: trampoline_data.world, mat_p: mat1_p });
             let mut p_mat = ManuallyDrop::new(Mat { world: trampoline_data.world, mat_p: mat2_p });
             
@@ -323,8 +334,10 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     ///
     /// # Note
     ///
-    /// The you can always access the [`DM`] in the `user_f` `ksp` so it will always be safe to do
-    /// [`let dm = ksp.try_get_dm().unwrap();`](KSP::try_get_dm()).
+    /// You can access the [`DM`] owned by the `ksp` in the `user_f` by using
+    /// [`let dm = ksp.try_get_dm().unwrap();`](KSP::try_get_dm()). Note, this will only work
+    /// if you set the dm with [`KSP::set_dm()()`] BEFORE you call the
+    /// [`set_compute_rhs()`](KSP::set_compute_rhs) method.
     pub fn set_compute_rhs<F>(&mut self, user_f: F) -> Result<()>
     where
         F: FnMut(&KSP<'a, '_>, &mut Vector<'a>) -> Result<()> + 'tl
@@ -335,8 +348,12 @@ impl<'a, 'tl> KSP<'a, 'tl> {
 
         let closure_anchor = Box::new(user_f);
 
+        // Note, if the caller has previously called `KSP::set_dm()` then we want to make
+        // sure to give them access in the closure.
+        // TODO: it would be nice to determine this in the trampoline function as the caller could
+        // set the dm after they set this closure (for now i think this is fine)
         let trampoline_data = Box::pin(KSPComputeRHSTrampolineData { 
-            world: self.world, user_f: closure_anchor });
+            world: self.world, user_f: closure_anchor, set_dm: self.dm.is_some() });
 
         // drop old trampoline_data
         let _ = self.compute_rhs_trampoline_data.take();
@@ -352,11 +369,13 @@ impl<'a, 'tl> KSP<'a, 'tl> {
             // of the underlining types (i.e. *mut petsc_raw::_p_SNES) into references
             // of the rust wrapper types.
             let mut ksp = ManuallyDrop::new(KSP::new(trampoline_data.world, ksp_p));
-            let mut dm_p = MaybeUninit::uninit();
-            let ierr = petsc_raw::KSPGetDM(ksp_p, dm_p.as_mut_ptr());
-            if ierr != 0 { let _ = Petsc::check_error(trampoline_data.world, ierr); return ierr; }
-            let dm = DM::new(trampoline_data.world, dm_p.assume_init());
-            ksp.dm = Some(dm); // Note, because ksp is not dropped, ksp.dm wont be either
+            if trampoline_data.set_dm {
+                let mut dm_p = MaybeUninit::uninit();
+                let ierr = petsc_raw::KSPGetDM(ksp_p, dm_p.as_mut_ptr());
+                if ierr != 0 { let _ = Petsc::check_error(trampoline_data.world, ierr); return ierr; }
+                let dm = DM::new(trampoline_data.world, dm_p.assume_init());
+                ksp.dm = Some(dm); // Note, because ksp is not dropped, ksp.dm wont be either
+            }
             let mut vec = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p });
             
             (trampoline_data.get_unchecked_mut().user_f)(&ksp, &mut vec)

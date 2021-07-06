@@ -6,7 +6,7 @@
 //! calling the PC routines listed below (e.g., [`PC::set_type()`]). PC components can be used directly
 //! to create and destroy solvers; this is not needed for users but is for library developers.
 //!
-//! PETSc C API docs: <https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/PC/index.html>
+//! PETSc C API docs: <https://petsc.org/release/docs/manualpages/PC/index.html>
 
 use std::{mem::ManuallyDrop, pin::Pin};
 
@@ -113,7 +113,7 @@ impl<'a, 'tl> PC<'a, 'tl> {
     /// operators will be returned.
     pub fn get_operators(&self) -> Result<(Rc<Mat<'a>>, Rc<Mat<'a>>)> {
         // TODO: maybe this should return Rc<RefCell<T>> so that the caller can edit the matrices
-        // https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/PC/PCGetOperators.html#PCGetOperators
+        // https://petsc.org/release/docs/manualpages/PC/PCGetOperators.html#PCGetOperators
         // Although that would mean set_operators should also take Rc<RefCell<T>>
 
         let a_mat = if let Some(ref a_mat) = self.ref_amat {
@@ -238,6 +238,21 @@ impl<'a, 'tl> PC<'a, 'tl> {
         self.shell_set_apply_trampoline_data = Some(trampoline_data);
 
         Ok(())
+    }
+
+    /// Sets the exact elements for field 
+    ///
+    /// # Parameters
+    ///
+    /// * `splitname` - name of this split, if `None` the number of the split is used.
+    /// * `is` - the index set that defines the vector elements in this field 
+    pub fn field_split_set_is<T: ToString>(&mut self, splitname: Option<T>, is: IS) -> Result<()> {
+        let splitname_cs = splitname.map(|to_str|
+            CString::new(to_str.to_string()).expect("`CString::new` failed"));
+
+        let ierr = unsafe { petsc_raw::PCFieldSplitSetIS(
+            self.pc_p, splitname_cs.map(|cs| cs.as_ptr()).unwrap_or(std::ptr::null()), is.is_p) };
+        Petsc::check_error(self.world, ierr)
     }
 }
 

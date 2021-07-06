@@ -53,7 +53,7 @@ fn main() -> petsc_rs::Result<()> {
     da.set_up()?;
 
     let mut x = da.create_global_vector()?;
-    let r = x.duplicate()?;
+    let mut r = x.duplicate()?;
     let mut f = x.duplicate()?;
     let mut u = x.duplicate()?;
     let mut last_step = x.duplicate()?;
@@ -80,7 +80,7 @@ fn main() -> petsc_rs::Result<()> {
 
     let mut snes = petsc.snes_create()?;
 
-    snes.set_function(Some(r), |_snes, x, y| {
+    snes.set_function(Some(&mut r), |_snes, x, y| {
         // Note, is the ex3.c file, this is a `DMGetLocalVector` not a `DMCreateLocalVector`.
         // TODO: make it use `DMGetLocalVector` to be consistent with c examples
         let mut x_local = da.create_local_vector()?;

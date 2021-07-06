@@ -41,7 +41,7 @@ fn main() -> petsc_rs::Result<()> {
     let mut x = petsc.vec_create()?;
     x.set_sizes(None, Some(n))?;
     x.set_from_options()?;
-    let r = x.duplicate()?;
+    let mut r = x.duplicate()?;
     x.set_name("soln")?;
 
     /*
@@ -62,7 +62,7 @@ fn main() -> petsc_rs::Result<()> {
         /*
             Set function evaluation routine and vector with closure.
         */
-        snes.set_function(Some(r), |_snes: &SNES, x: &Vector, f: &mut Vector| {
+        snes.set_function(Some(&mut r), |_snes: &SNES, x: &Vector, f: &mut Vector| {
             let x_view = x.view()?;
             let mut f_view = f.view_mut()?;
 
@@ -84,7 +84,7 @@ fn main() -> petsc_rs::Result<()> {
         })?;
     } else {
         // We can also use functions, not closures for input
-        snes.set_function(Some(r), from_function2)?;
+        snes.set_function(Some(&mut r), from_function2)?;
         snes.set_jacobian_single_mat(J, from_jacobian2)?;
     }
 

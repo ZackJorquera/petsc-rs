@@ -1,6 +1,6 @@
 //! PETSc viewers export information and data from PETSc objects.
 //!
-//! PETSc C API docs: <https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Viewer/index.html>
+//! PETSc C API docs: <https://petsc.org/release/docs/manualpages/Viewer/index.html>
 
 use crate::prelude::*;
 
