@@ -16,7 +16,7 @@ pub use crate::petsc_raw::PCTypeEnum as PCType;
 
 /// Abstract PETSc object that manages all preconditioners including direct solvers such as PCLU
 pub struct PC<'a, 'tl> {
-    pub(crate) world: &'a dyn Communicator,
+    pub(crate) world: &'a UserCommunicator,
     pub(crate) pc_p: *mut petsc_raw::_p_PC, // I could use petsc_raw::PC which is the same thing, but i think using a pointer is more clear
 
     // We take an `Rc` because we don't want ownership of the Mat. Under the hood, this is how the 
@@ -32,7 +32,7 @@ pub struct PC<'a, 'tl> {
 }
 
 struct PCShellSetApplyTrampolineData<'a, 'tl> {
-    world: &'a dyn Communicator,
+    world: &'a UserCommunicator,
     user_f: Box<dyn FnMut(&PC<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>,
 }
 
@@ -46,7 +46,7 @@ impl<'a> Drop for PC<'a, '_> {
 
 impl<'a, 'tl> PC<'a, 'tl> {
     /// Same as `PC { ... }` but sets all optional params to `None`
-    pub(crate) fn new(world: &'a dyn Communicator, pc_p: *mut petsc_raw::_p_PC) -> Self {
+    pub(crate) fn new(world: &'a UserCommunicator, pc_p: *mut petsc_raw::_p_PC) -> Self {
         PC { world, pc_p, ref_amat: None, ref_pmat: None,
             shell_set_apply_trampoline_data: None }
     }
@@ -57,7 +57,7 @@ impl<'a, 'tl> PC<'a, 'tl> {
     /// from a Krylov solver, [`KSP`], using the [`KSP::get_pc()`] method.
     ///
     /// [`KSP::get_pc`]: KSP::get_pc
-    pub fn create(world: &'a dyn Communicator) -> Result<Self> {
+    pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut pc_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::PCCreate(world.as_raw(), pc_p.as_mut_ptr()) };
         Petsc::check_error(world, ierr)?;

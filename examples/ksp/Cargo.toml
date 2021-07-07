@@ -27,6 +27,6 @@ name = "ksp-ex29"
 path = "src/ex29.rs"
 
 [dependencies]
-mpi = {git = "https://github.com/ZackJorquera/rsmpi.git", branch = "trait_object_safety", default-features = false }
+mpi = {git = "https://github.com/rsmpi/rsmpi.git", branch = "master", default-features = false }
 petsc-rs = { path = "../../" }
 ndarray = "0.15"

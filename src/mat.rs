@@ -13,7 +13,7 @@ use crate::prelude::*;
 /// Abstract PETSc matrix object used to manage all linear operators in PETSc, even those
 /// without an explicit sparse representation (such as matrix-free operators).
 pub struct Mat<'a> {
-    pub(crate) world: &'a dyn Communicator,
+    pub(crate) world: &'a UserCommunicator,
     pub(crate) mat_p: *mut petsc_raw::_p_Mat, // I could use Mat which is the same thing, but i think using a pointer is more clear
 }
 
@@ -62,7 +62,7 @@ impl Drop for BorrowMat<'_, '_> {
 
 /// Abstract PETSc object that removes a null space from a vector, i.e. orthogonalizes the vector to a subspace.
 pub struct NullSpace<'a> {
-    pub(crate) world: &'a dyn Communicator,
+    pub(crate) world: &'a UserCommunicator,
     pub(crate) ns_p: *mut petsc_raw::_p_MatNullSpace,
 }
 
@@ -81,7 +81,7 @@ use petsc_raw::MatReuse;
 
 impl<'a> Mat<'a> {
     /// Same at [`Petsc::mat_create()`].
-    pub fn create(world: &'a dyn Communicator,) -> Result<Self> {
+    pub fn create(world: &'a UserCommunicator,) -> Result<Self> {
         let mut mat_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::MatCreate(world.as_raw(), mat_p.as_mut_ptr()) };
         Petsc::check_error(world, ierr)?;
@@ -698,7 +698,7 @@ impl<'a> NullSpace<'a> {
     /// the constant vector); these vectors must be orthonormal.
     ///
     /// Note, the "constant vector" is the vector with all entries being the same.
-    pub fn create<T: Into<Vec<Vector<'a>>>>(world: &'a dyn Communicator, has_const: bool, vecs: T) -> Result<Self> {
+    pub fn create<T: Into<Vec<Vector<'a>>>>(world: &'a UserCommunicator, has_const: bool, vecs: T) -> Result<Self> {
         let vecs: Vec<Vector<'a>> = vecs.into();
         let vecs_p: Vec<_> = vecs.iter().map(|v| v.vec_p).collect();
         let n = vecs.len() as PetscInt;

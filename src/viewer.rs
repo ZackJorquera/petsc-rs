@@ -13,7 +13,7 @@ pub use petsc_sys::PetscViewerFormat;
 // This would work more nicely with things like display and debug, also the file system.
 // for now we will just use the C api.
 pub struct Viewer<'a> {
-    world: &'a dyn Communicator,
+    world: &'a UserCommunicator,
 
     pub(crate) viewer_p: *mut petsc_raw::_p_PetscViewer,
 }
@@ -29,7 +29,7 @@ impl_petsc_object_funcs!{ Viewer, viewer_p }
 
 impl<'a> Viewer<'a> {
     /// Creates a ASCII PetscViewer shared by all processors in a communicator.
-    pub fn create_ascii_stdout(world: &'a dyn Communicator) -> Result<Self>
+    pub fn create_ascii_stdout(world: &'a UserCommunicator) -> Result<Self>
     {
         // Note, `PetscViewerASCIIGetStdout` calls `PetscObjectRegisterDestroy` which will cause
         // the object to be destroyed when `PetscFinalize()` is called. That is why we increase the 

@@ -33,11 +33,11 @@
 /// `arg5` (through pointers). For refrence the rust `petsc-rs::Vector` type is defined as the following:
 /// ```ignore
 /// pub struct Vector<'a> {
-///     pub(crate) world: &'a dyn Communicator,
+///     pub(crate) world: &'a UserCommunicator,
 ///     pub(crate) test_p: petsc_raw::Vec,
 /// }
 /// ```
-/// Note, you need to have a member `world: &'a dyn Communicator` and some pointer type to the C petsc type
+/// Note, you need to have a member `world: &'a UserCommunicator` and some pointer type to the C petsc type
 /// for this macro to work.
 ///
 /// We can then using the macro in the following way to create the function 

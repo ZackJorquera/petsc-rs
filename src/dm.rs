@@ -20,7 +20,7 @@ use ndarray::{ArrayView, ArrayViewMut};
 
 /// Abstract PETSc object that manages an abstract grid object and its interactions with the algebraic solvers
 pub struct DM<'a> {
-    world: &'a dyn Communicator,
+    world: &'a UserCommunicator,
     pub(crate) dm_p: *mut petsc_raw::_p_DM,
 
     composite_dms: Option<Vec<DM<'a>>>,
@@ -42,12 +42,12 @@ impl<'a> Drop for DM<'a> {
 
 impl<'a> DM<'a> {
     /// Same as `DM { ... }` but sets all optional params to `None`
-    pub(crate) fn new(world: &'a dyn Communicator, dm_p: *mut petsc_raw::_p_DM) -> Self {
+    pub(crate) fn new(world: &'a UserCommunicator, dm_p: *mut petsc_raw::_p_DM) -> Self {
         DM { world, dm_p, composite_dms: None }
     }
 
     /// Creates an empty DM object. The type can then be set with [`DM::set_type()`].
-    pub fn create(world: &'a dyn Communicator) -> Result<Self> {
+    pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut dm_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMCreate(world.as_raw(), dm_p.as_mut_ptr()) };
         Petsc::check_error(world, ierr)?;
@@ -76,7 +76,7 @@ impl<'a> DM<'a> {
     /// * `lx` _(optional)_ - array containing number of nodes in the x direction on each processor, or `None`.
     /// If `Some(...)`, must be of length as the number of processes in the MPI world (i.e. `world.size()`).
     /// The sum of these entries must equal `nx`.
-    pub fn da_create_1d(world: &'a dyn Communicator, bx: DMBoundaryType, nx: PetscInt, dof: PetscInt, s: PetscInt, lx: Option<&[PetscInt]>) -> Result<Self> {
+    pub fn da_create_1d(world: &'a UserCommunicator, bx: DMBoundaryType, nx: PetscInt, dof: PetscInt, s: PetscInt, lx: Option<&[PetscInt]>) -> Result<Self> {
         assert!(lx.map_or(true, |lx| lx.len() == world.size() as usize));
         let mut dm_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMDACreate1d(world.as_raw(), bx, nx,
@@ -101,7 +101,7 @@ impl<'a> DM<'a> {
     /// coordinates, or `None`. If `Some(...)`, these must the same length as `px` and `py`, and the
     /// corresponding `px` and `py` cannot be `None`. The sum of the `lx` entries must be `nx`, and
     /// the sum of the `ly` entries must be `ny`.
-    pub fn da_create_2d(world: &'a dyn Communicator, bx: DMBoundaryType, by: DMBoundaryType, stencil_type: DMDAStencilType, 
+    pub fn da_create_2d(world: &'a UserCommunicator, bx: DMBoundaryType, by: DMBoundaryType, stencil_type: DMDAStencilType, 
         nx: PetscInt, ny: PetscInt, px: Option<PetscInt>, py: Option<PetscInt>, dof: PetscInt, s: PetscInt, lx: Option<&[PetscInt]>, ly: Option<&[PetscInt]>) -> Result<Self>
     {
         let px = px.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
@@ -132,7 +132,7 @@ impl<'a> DM<'a> {
     /// coordinates, or `None`. If `Some(...)`, these must the same length as `px`, `py`, and `pz`, and the
     /// corresponding `px`, `py`, and `pz` cannot be `None`. The sum of the `lx` entries must be `nx`,
     /// the sum of the `ly` entries must be `ny`, and the sum of the `lz` entries must be `nz`.
-    pub fn da_create_3d(world: &'a dyn Communicator, bx: DMBoundaryType, by: DMBoundaryType, bz: DMBoundaryType, stencil_type: DMDAStencilType, 
+    pub fn da_create_3d(world: &'a UserCommunicator, bx: DMBoundaryType, by: DMBoundaryType, bz: DMBoundaryType, stencil_type: DMDAStencilType, 
         nx: PetscInt, ny: PetscInt, nz: PetscInt, px: Option<PetscInt>, py: Option<PetscInt>, pz: Option<PetscInt>, dof: PetscInt, s: PetscInt,
         lx: Option<&[PetscInt]>, ly: Option<&[PetscInt]>, lz: Option<&[PetscInt]>) -> Result<Self>
     {
@@ -153,7 +153,7 @@ impl<'a> DM<'a> {
     }
 
     /// Creates a vector packer, used to generate "composite" vectors made up of several subvectors.
-    pub fn composite_create<I>(world: &'a dyn Communicator, dms: I) -> Result<Self>
+    pub fn composite_create<I>(world: &'a UserCommunicator, dms: I) -> Result<Self>
     where
         I: IntoIterator<Item = DM<'a>>
     {

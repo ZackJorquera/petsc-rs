@@ -10,7 +10,7 @@ use ndarray::{ArrayView, ArrayViewMut};
 
 /// Abstract PETSc vector object
 pub struct Vector<'a> {
-    pub(crate) world: &'a dyn Communicator,
+    pub(crate) world: &'a UserCommunicator,
 
     pub(crate) vec_p: *mut petsc_raw::_p_Vec, // I could use Vec which is the same thing, but i think using a pointer is more clear
 }
@@ -84,7 +84,7 @@ impl<'a> Vector<'a> {
     ///
     /// Vector::create(petsc.world()).unwrap();
     /// ```
-    pub fn create(world: &'a dyn Communicator) -> Result<Self> {
+    pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut vec_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::VecCreate(world.as_raw(), vec_p.as_mut_ptr()) };
         Petsc::check_error(world, ierr)?;
@@ -569,7 +569,7 @@ impl<'a> Vector<'a> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn from_slice(world: &'a dyn Communicator, slice: &[PetscScalar]) -> Result<Self> {
+    pub fn from_slice(world: &'a UserCommunicator, slice: &[PetscScalar]) -> Result<Self> {
         let mut v = Vector::create(world)?;
         v.set_sizes(Some(slice.len() as PetscInt), None)?; // create vector of size 10
         v.set_from_options()?;

@@ -17,7 +17,7 @@ use crate::prelude::*;
 
 /// Abstract PETSc object that manages all nonlinear solves
 pub struct SNES<'a, 'tl> {
-    world: &'a dyn Communicator,
+    world: &'a UserCommunicator,
     pub(crate) snes_p: *mut petsc_raw::_p_SNES,
 
     ksp: Option<KSP<'a, 'tl>>,
@@ -43,7 +43,7 @@ pub struct SNES<'a, 'tl> {
 // 2. we make linesearch be above the SNES. This has a lot of problem and i dont think it make sense for PETSc
 /// Abstract PETSc object that manages line-search operations 
 pub struct LineSearch <'a> {
-    world: &'a dyn Communicator,
+    world: &'a UserCommunicator,
     ls_p: *mut petsc_sys::_p_LineSearch,
 }
 
@@ -75,7 +75,7 @@ impl From<crate::PetscError> for DomainOrPetscError {
 }
 
 struct SNESFunctionTrampolineData<'a, 'tl> {
-    world: &'a dyn Communicator,
+    world: &'a UserCommunicator,
     // This field is only used for its ownership/lifetime.
     // The usage of the pointer/reference is all handled on the c side.
     // However, we might want to use it for something like `get_residuals()`
@@ -89,14 +89,14 @@ enum SNESJacobianTrampolineData<'a,'tl> {
 }
 
 struct SNESJacobianSingleTrampolineData<'a, 'tl> {
-    world: &'a dyn Communicator,
+    world: &'a UserCommunicator,
     _ap_mat: Mat<'a>,
     user_f: Box<dyn FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl>,
     set_dm: bool,
 }
 
 struct SNESJacobianDoubleTrampolineData<'a, 'tl> {
-    world: &'a dyn Communicator,
+    world: &'a UserCommunicator,
     _a_mat: Mat<'a>,
     _p_mat: Mat<'a>,
     user_f: Box<dyn FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a>, &mut Mat<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl>,
@@ -104,19 +104,19 @@ struct SNESJacobianDoubleTrampolineData<'a, 'tl> {
 }
 
 struct SNESMonitorTrampolineData<'a, 'tl> {
-    world: &'a dyn Communicator,
+    world: &'a UserCommunicator,
     user_f: Box<dyn FnMut(&SNES<'a, 'tl>, PetscInt, PetscReal) -> Result<()> + 'tl>,
     // set_dm: bool, // TODO: should we add this
 }
 
 struct SNESLineSearchPostCheckTrampolineData<'a, 'tl> {
-    world: &'a dyn Communicator,
+    world: &'a UserCommunicator,
     user_f: Box<dyn FnMut(&LineSearch<'a>, &SNES<'a, 'tl>, &Vector<'a>, &mut Vector<'a>, &mut Vector<'a>, &mut bool, &mut bool) -> Result<()> + 'tl>,
     set_dm: bool,
 }
 
 struct SNESLineSearchPreCheckTrampolineData<'a, 'tl> {
-    world: &'a dyn Communicator,
+    world: &'a UserCommunicator,
     user_f: Box<dyn FnMut(&LineSearch<'a>, &SNES<'a, 'tl>, &Vector<'a>, &mut Vector<'a>, &mut bool) -> Result<()> + 'tl>,
     set_dm: bool,
 }
@@ -139,7 +139,7 @@ impl Drop for LineSearch<'_> {
 
 impl<'a, 'tl> SNES<'a, 'tl> {
     /// Same as `SNES { ... }` but sets all optional params to `None`
-    pub(crate) fn new(world: &'a dyn Communicator, snes_p: *mut petsc_raw::_p_SNES) -> Self {
+    pub(crate) fn new(world: &'a UserCommunicator, snes_p: *mut petsc_raw::_p_SNES) -> Self {
         SNES { world, snes_p, ksp: None, function_trampoline_data: None,
                jacobian_trampoline_data: None, monitor_tramoline_data: None,
                linesearch: None, dm: None,
@@ -148,7 +148,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     }
 
     /// Creates a nonlinear solver context.
-    pub fn create(world: &'a dyn Communicator) -> Result<Self> {
+    pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut snes_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::SNESCreate(world.as_raw(), snes_p.as_mut_ptr()) };
         Petsc::check_error(world, ierr)?;

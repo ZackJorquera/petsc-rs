@@ -16,7 +16,7 @@ use crate::prelude::*;
 /// Abstract PETSc object that manages all Krylov methods. This is the object that manages the linear
 /// solves in PETSc (even those such as direct solvers that do no use Krylov accelerators).
 pub struct KSP<'a, 'tl> {
-    world: &'a dyn Communicator,
+    world: &'a UserCommunicator,
     pub(crate) ksp_p: *mut petsc_raw::_p_KSP, // I could use KSP which is the same thing, but i think using a pointer is more clear
 
     // As far as Petsc is concerned we own a reference to the PC as it is reference counted under the hood.
@@ -31,13 +31,13 @@ pub struct KSP<'a, 'tl> {
 }
 
 struct KSPComputeOperatorsTrampolineData<'a, 'tl> {
-    world: &'a dyn Communicator,
+    world: &'a UserCommunicator,
     user_f: Box<dyn FnMut(&KSP<'a, 'tl>, &mut Mat<'a>, &mut Mat<'a>) -> Result<()> + 'tl>,
     set_dm: bool,
 }
 
 struct KSPComputeRHSTrampolineData<'a, 'tl> {
-    world: &'a dyn Communicator,
+    world: &'a UserCommunicator,
     user_f: Box<dyn FnMut(&KSP<'a, 'tl>, &mut Vector<'a>) -> Result<()> + 'tl>,
     set_dm: bool,
 }
@@ -51,14 +51,14 @@ impl<'a> Drop for KSP<'a, '_> {
 
 impl<'a, 'tl> KSP<'a, 'tl> {
     /// Same as `KSP { ... }` but sets all optional params to `None`
-    pub(crate) fn new(world: &'a dyn Communicator, ksp_p: *mut petsc_raw::_p_KSP) -> Self {
+    pub(crate) fn new(world: &'a UserCommunicator, ksp_p: *mut petsc_raw::_p_KSP) -> Self {
         KSP { world, ksp_p, pc: None, dm: None,
             compute_operators_trampoline_data: None,
             compute_rhs_trampoline_data: None }
     }
 
     /// Same as [`Petsc::ksp_create()`].
-    pub fn create(world: &'a dyn Communicator) -> Result<Self> {
+    pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut ksp_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::KSPCreate(world.as_raw(), ksp_p.as_mut_ptr()) };
         Petsc::check_error(world, ierr)?;

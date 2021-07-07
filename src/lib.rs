@@ -83,6 +83,7 @@ pub mod prelude {
     pub(crate) use std::mem::MaybeUninit;
     pub(crate) use std::ffi::{CString, CStr, };
     pub(crate) use std::rc::Rc;
+    pub(crate) use mpi::topology::UserCommunicator;
 }
 
 use prelude::*;
@@ -184,11 +185,13 @@ pub use petsc_raw::InsertMode;
 ///     .args(std::env::args())
 ///     // Note, if we don't split the comm world and just use the default world
 ///     // then there is no need to use the world method as we do here.
-///     .world(Box::new(univ.world()))
+///     .world(univ.world().duplicate())
 ///     .help_msg("Hello, this is a help message\n")
 ///     .file("path/to/database/file")
 ///     .init().unwrap();
 /// ```
+///
+/// Look at [`PetscBuilder::world()`] for more info on setting the comm world.
 ///
 /// Note `Petsc::builder().init()` is the same as [`Petsc::init_no_args()`].
 ///
@@ -196,7 +199,7 @@ pub use petsc_raw::InsertMode;
 #[derive(Default)]
 pub struct PetscBuilder
 {
-    world: Option<Box<dyn Communicator>>,
+    world: Option<UserCommunicator>,
     args: Option<Vec<String>>,
     file: Option<String>,
     help_msg: Option<String>,
@@ -262,12 +265,12 @@ impl PetscBuilder
 
                 ierr = unsafe { petsc_raw::PetscInitialize(c_argc_p, c_args_p, file_c_str, help_c_str) };
 
-                world
+                Some(world)
             }, 
             _ => {
                 // Note, in this case MPI has not been initialized, it will be initialized by PETSc
                 ierr = unsafe { petsc_raw::PetscInitialize(c_argc_p, c_args_p, file_c_str, help_c_str) };
-                Box::new(mpi::topology::SystemCommunicator::world())
+                Some(mpi::topology::SystemCommunicator::world().duplicate())
             }
         }, _arg_data: self.args.as_ref().map(|_| (argc_boxed, cstr_args_owned, c_args_owned, c_args_boxed)) };
         Petsc::check_error(petsc.world(), ierr)?;
@@ -294,8 +297,13 @@ impl PetscBuilder
     /// are identical unless you wish to run PETSc on ONLY a subset of `MPI_COMM_WORLD`. That is where this
     /// method can be use. Note, you must initialize mpi (with [`mpi::initialize()`]).
     ///
+    /// This method takes in a [`UserCommunicator`]. If you have a different type of communicator,
+    /// use `.into()` To convert to a [`UserCommunicator`] or duplicate the communicator with [`Communicator::duplicate()`].
+    ///
+    /// Note, if no communicator is supplied then the system communicator will be used (duplicated as a [`UserCommunicator`]).
+    ///
     /// After you call [`PetscBuilder::init()`], the value returned by [`Petsc::world()`] is the value set here.
-    pub fn world(mut self, world: Box<dyn Communicator>) -> Self
+    pub fn world(mut self, world: UserCommunicator) -> Self
     {
         self.world = Some(world);
         self
@@ -326,7 +334,9 @@ impl PetscBuilder
 /// Also stores a reference to the the `MPI_COMM_WORLD`/`PETSC_COMM_WORLD` variable.
 pub struct Petsc {
     // This is functionally the same as `PETSC_COMM_WORLD` in the C api
-    pub(crate) world: Box<dyn Communicator>,
+    // Note, just because it is an option doesn't mean it will ever be None
+    // It is only set to none in the drop function (everywhere else it is some).
+    pub(crate) world: Option<UserCommunicator>,
 
     // This is used to drop the argc/args data when Petsc is dropped, we never actually use it
     // on the rust side.
@@ -336,6 +346,9 @@ pub struct Petsc {
 // Destructor
 impl Drop for Petsc {
     fn drop(&mut self) {
+        // Note, PetscFinalize can call MPI_FINALIZE, which means we need to make sure our 
+        // comm world is dropped before that
+        drop(self.world.take());
         unsafe {
             petsc_raw::PetscFinalize();
         }
@@ -360,7 +373,8 @@ impl Petsc {
     /// [`PetscInitialize`]: petsc_raw::PetscInitialize
     pub fn init_no_args() -> Result<Self> {
         let ierr = unsafe { petsc_raw::PetscInitializeNoArguments() };
-        let petsc = Self { world: Box::new(mpi::topology::SystemCommunicator::world()), _arg_data: None };
+        let petsc = Self { world: Some(mpi::topology::SystemCommunicator::world().duplicate()),
+            _arg_data: None };
         Petsc::check_error(petsc.world(), ierr)?;
 
         Ok(petsc)
@@ -375,14 +389,14 @@ impl Petsc {
     /// The value is functionally the same as the `PETSC_COMM_WORLD` global in the C
     /// API. If you want to use a different comm world, then you have to define that outside
     /// of the [`Petsc`] object. Read docs for [`PetscBuilder::world()`] for more information.
-    pub fn world<'a>(&'a self) -> &'a dyn Communicator {
-        self.world.as_ref()
+    pub fn world(&self) -> &UserCommunicator {
+        self.world.as_ref().unwrap()
     }
 
     /// Internal error checker
     /// replacement for the CHKERRQ macro in the C api
     #[doc(hidden)]
-    pub(crate) fn check_error(world: &dyn Communicator, ierr: petsc_raw::PetscErrorCode) -> Result<()> {
+    pub(crate) fn check_error<C: Communicator>(world: &C, ierr: petsc_raw::PetscErrorCode) -> Result<()> {
         // Return early if code is clean
         if ierr == 0 {
             return Ok(());
@@ -425,7 +439,7 @@ impl Petsc {
     /// }
     /// ```
     ///
-    pub fn set_error<E>(world: &dyn Communicator, error_kind: PetscErrorKind, err_msg: E) -> Result<()>
+    pub fn set_error<C: Communicator, E>(world: &C, error_kind: PetscErrorKind, err_msg: E) -> Result<()>
     where
         E: Into<Box<dyn std::error::Error + Send + Sync>>
     {
@@ -465,7 +479,7 @@ impl Petsc {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn print<T: ToString>(world: &dyn Communicator, msg: T) -> Result<()> {
+    pub fn print<C: Communicator, T: ToString>(world: &C, msg: T) -> Result<()> {
         let msg_cs = ::std::ffi::CString::new(msg.to_string()).expect("`CString::new` failed");
 
         // The first entry needs to be `%s` so that this function is not susceptible to printf injections.
@@ -499,7 +513,7 @@ impl Petsc {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn print_all<T: ToString>(world: &dyn Communicator, msg: T) -> Result<()> {
+    pub fn print_all<C: Communicator, T: ToString>(world: &C, msg: T) -> Result<()> {
         let msg_cs = ::std::ffi::CString::new(msg.to_string()).expect("`CString::new` failed");
 
         // The first entry needs to be `%s` so that this function is not susceptible to printf injections.

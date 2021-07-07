@@ -15,7 +15,7 @@ petsc-int-i64 = ["petsc-sys/petsc-int-i64"]
 petsc-use-complex = ["num-complex", "petsc-sys/petsc-use-complex"]
 
 [dependencies]
-mpi = {git = "https://github.com/ZackJorquera/rsmpi.git", branch = "trait_object_safety", default-features = false }
+mpi = {git = "https://github.com/rsmpi/rsmpi.git", branch = "master", default-features = false }
 petsc-sys = { path = "./petsc-sys/", default-features = false }
 num-complex = { version = "0.4", optional = true }
 ndarray = "0.15"
