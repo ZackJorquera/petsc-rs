@@ -162,7 +162,7 @@ pub static DMTYPE_TABLE: &'static [&str] = &[
     "stag",
 ];
 
-/// This enum is from: <https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/DM/DMType.html#DMType>
+/// This enum is from: <https://petsc.org/release/docs/manualpages/DM/DMType.html#DMType>
 pub enum DMTypeEnum {
     DMDA = 0,
     DMCOMPOSITE,

@@ -1,7 +1,12 @@
 //! PETSc matrices (Mat objects) are used to store Jacobians and other
 //! sparse matrices in PDE-based (or other) simulations.
 //!
-//! PETSc C API docs: <https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Mat/index.html>
+//! PETSc C API docs: <https://petsc.org/release/docs/manualpages/Mat/index.html>
+
+use std::marker::PhantomData;
+use std::mem::ManuallyDrop;
+use std::ops::Deref;
+use std::ops::DerefMut;
 
 use crate::prelude::*;
 
@@ -12,10 +17,46 @@ pub struct Mat<'a> {
     pub(crate) mat_p: *mut petsc_raw::_p_Mat, // I could use Mat which is the same thing, but i think using a pointer is more clear
 }
 
+/// A wrapper around [`Mat`] that is used when the [`Mat`] shouldn't be destroyed.
+///
+/// Gives mutable access to the underlining [`Mat`].
+///
+/// For example, it is used with [`Mat::get_local_sub_matrix_mut()`].
+pub struct BorrowMatMut<'a, 'bv> {
+    pub(crate) owned_mat: ManuallyDrop<Mat<'a>>,
+    pub(crate) drop_func: Option<Box<dyn FnOnce(&mut Self) + 'bv>>,
+    // do we need this phantom data?
+    // also should 'bv be used for the closure
+    pub(crate) _phantom: PhantomData<&'bv mut Mat<'a>>,
+}
+
+/// A wrapper around [`Mat`] that is used when the [`Mat`] shouldn't be destroyed.
+///
+/// For example, it is used with [`Mat::get_local_sub_matrix_mut()`].
+pub struct BorrowMat<'a, 'bv> {
+    pub(crate) owned_mat: ManuallyDrop<Mat<'a>>,
+    pub(crate) drop_func: Option<Box<dyn FnOnce(&mut Self) + 'bv>>,
+    // do we need this phantom data?
+    // also should 'bv be used for the closure
+    pub(crate) _phantom: PhantomData<&'bv Mat<'a>>,
+}
+
 impl<'a> Drop for Mat<'a> {
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::MatDestroy(&mut self.mat_p as *mut _) };
         let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
+    }
+}
+
+impl Drop for BorrowMatMut<'_, '_> {
+    fn drop(&mut self) {
+        (self.drop_func.take().unwrap())(self);
+    }
+}
+
+impl Drop for BorrowMat<'_, '_> {
+    fn drop(&mut self) {
+        (self.drop_func.take().unwrap())(self);
     }
 }
 
@@ -52,7 +93,7 @@ impl<'a> Mat<'a> {
     ///
     /// Note, [`Mat::clone()`] is the same as `x.duplicate(MatDuplicateOption::MAT_COPY_VALUES)`.
     ///
-    /// See the manual page for [`MatDuplicateOption`](https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Mat/MatDuplicateOption.html#MatDuplicateOption) for an explanation of these options.
+    /// See the manual page for [`MatDuplicateOption`](https://petsc.org/release/docs/manualpages/Mat/MatDuplicateOption.html#MatDuplicateOption) for an explanation of these options.
     pub fn duplicate(&self, op: MatDuplicateOption) -> Result<Self> {
         let mut mat2_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::MatDuplicate(self.mat_p, op, mat2_p.as_mut_ptr()) };
@@ -176,7 +217,7 @@ impl<'a> Mat<'a> {
     /// first local nonghost x logical coordinate is 6 (so its first ghost x logical coordinate is 5)
     /// the first i index you can use in your column and row indices in `MatSetStencil()` is 5.
     ///
-    /// C API docs: <https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Mat/MatSetValuesStencil.html#MatSetValuesStencil>
+    /// C API docs: <https://petsc.org/release/docs/manualpages/Mat/MatSetValuesStencil.html#MatSetValuesStencil>
     ///
     /// # Notes for [`MatStencil`] type
     ///
@@ -189,6 +230,18 @@ impl<'a> Mat<'a> {
         let n = idxn.len();
         assert_eq!(v.len(), m*n);
         let ierr = unsafe { petsc_raw::MatSetValuesStencil(self.mat_p, m as PetscInt, idxm.as_ptr(), n as PetscInt,
+            idxn.as_ptr(), v.as_ptr() as *mut _, addv) };
+        Petsc::check_error(self.world, ierr)
+    }
+
+    /// Inserts or adds values into certain locations of a matrix, using a local numbering of the nodes.
+    ///
+    /// Similar to [`Mat::set_values()`].
+    pub fn set_local_values(&mut self, idxm: &[PetscInt], idxn: &[PetscInt], v: &[PetscScalar], addv: InsertMode) -> Result<()> {
+        let m = idxm.len();
+        let n = idxn.len();
+        assert_eq!(v.len(), m*n);
+        let ierr = unsafe { petsc_raw::MatSetValuesLocal(self.mat_p, m as PetscInt, idxm.as_ptr(), n as PetscInt,
             idxn.as_ptr(), v.as_ptr() as *mut _, addv) };
         Petsc::check_error(self.world, ierr)
     }
@@ -407,6 +460,48 @@ impl<'a> Mat<'a> {
         self.assembly_end(assembly_type)
     }
 
+    /// Allows you to give an iter that will be use to make a series of calls to [`Mat::set_local_values`].
+    /// 
+    /// Note, this is NOT followed by both [`Mat::assembly_begin()`] or [`Mat::assembly_end()`].
+    /// You are required to make those calls.
+    /// 
+    /// Similar to [`Mat::assemble_with()`].
+    pub fn set_local_values_with<I>(&mut self, iter_builder: I, addv: InsertMode) -> Result<()>
+    where
+        I: IntoIterator<Item = (PetscInt, PetscInt, PetscScalar)>
+    {
+        // We don't actually care about the num_inserts value, we just need something that
+        // implements `Sum` so we can use the sum method and `()` does not.
+        let _num_inserts = iter_builder.into_iter().map(|(idxm, idxn, v)| {
+            self.set_local_values(std::slice::from_ref(&idxm), std::slice::from_ref(&idxn),
+                std::slice::from_ref(&v), addv).map(|_| 1)
+        }).sum::<Result<PetscInt>>()?;
+        // Note, `sum()` will short-circuit the iterator if an error is encountered.
+        Ok(())
+    }
+
+    /// Allows you to give an iter that will be use to make a series of calls to [`Mat::set_local_values`].
+    /// 
+    /// Note, this is NOT followed by both [`Mat::assembly_begin()`] or [`Mat::assembly_end()`].
+    /// You are required to make those calls.
+    /// 
+    /// Similar to [`Mat::assemble_with_batched()`].
+    pub fn set_local_values_with_batched<I, A1, A2, A3>(&mut self, iter_builder: I, addv: InsertMode) -> Result<()>
+    where
+        I: IntoIterator<Item = (A1, A2, A3)>,
+        A1: AsRef<[PetscInt]>,
+        A2: AsRef<[PetscInt]>,
+        A3: AsRef<[PetscScalar]>,
+    {
+        // We don't actually care about the num_inserts value, we just need something that
+        // implements `Sum` so we can use the sum method and `()` does not.
+        let _num_inserts = iter_builder.into_iter().map(|(idxm, idxn, v)| {
+            self.set_local_values(idxm.as_ref(), idxn.as_ref(), v.as_ref(), addv).map(|_| 1)
+        }).sum::<Result<i32>>()?;
+        // Note, `sum()` will short-circuit the iterator if an error is encountered.
+        Ok(())
+    }
+
     /// Gets values from certain locations of a Matrix. Currently can only get values on the same processor.
     ///
     /// # Example
@@ -534,12 +629,61 @@ impl<'a> Mat<'a> {
             nullspace.as_ref().map_or(std::ptr::null_mut(), |ns| ns.ns_p)) };
         Petsc::check_error(self.world, ierr)
     }
+
+    /// Gets a reference to a submatrix specified in local numbering.
+    ///
+    /// # Notes
+    ///
+    /// Depending on the format of mat, the returned submat may not implement [`Mat::mult()`]
+    /// or other functions. Its communicator may be the same as self, it may be `PETSC_COMM_SELF`,
+    /// or some other subcomm of mat's. 
+    ///
+    /// The submat always implements [`Mat::set_local_values()`] (and thus you can also use
+    /// [`Mat::set_local_values_with()`]).
+    pub fn get_local_sub_matrix_mut<'bv>(&'bv mut self, is_row: Rc<IS<'a>>, is_col: Rc<IS<'a>>) -> Result<BorrowMatMut<'a, 'bv>> {
+        // TODO: make a non-mut version of this function
+        let mut mat_p = MaybeUninit::uninit();
+        let ierr = unsafe { petsc_raw::MatGetLocalSubMatrix(self.mat_p,
+            is_row.is_p, is_col.is_p, mat_p.as_mut_ptr()) };
+        Petsc::check_error(self.world, ierr)?;
+        Ok(BorrowMatMut {
+            owned_mat: ManuallyDrop::new( Mat { world: self.world, mat_p: unsafe { mat_p.assume_init() } }),
+            drop_func: Some(Box::new(move |borrow_mat| {
+                    let ierr = unsafe { petsc_raw::MatRestoreLocalSubMatrix(self.mat_p,
+                        is_row.is_p, is_col.is_p, &mut borrow_mat.owned_mat.mat_p as *mut _) };
+                    let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap ?
+                })),
+            _phantom: PhantomData,
+        })
+    }
 }
 
 impl Clone for Mat<'_> {
     /// Same as [`x.duplicate(MatDuplicateOption::MAT_COPY_VALUES)`](Mat::duplicate()).
     fn clone(&self) -> Self {
         self.duplicate(MatDuplicateOption::MAT_COPY_VALUES).unwrap()
+    }
+}
+
+impl<'a> Deref for BorrowMat<'a, '_> {
+    type Target = Mat<'a>;
+
+    fn deref(&self) -> &Mat<'a> {
+        self.owned_mat.deref()
+    }
+}
+
+impl<'a> Deref for BorrowMatMut<'a, '_> {
+    type Target = Mat<'a>;
+
+    fn deref(&self) -> &Mat<'a> {
+        self.owned_mat.deref()
+    }
+}
+
+impl<'a> DerefMut for BorrowMatMut<'a, '_> {
+    fn deref_mut(&mut self) -> &mut Mat<'a> {
+        self.owned_mat.deref_mut()
     }
 }
 
@@ -580,7 +724,7 @@ impl<'a> Mat<'a> {
         MatGetSize, get_global_size, mat_p, output PetscInt, res1, output PetscInt, res2, #[doc = "Returns the number of global rows and columns of a matrix."];
         MatMult, mult, mat_p, input &Vector, x.vec_p, input &mut Vector, y.vec_p, #[doc = "Computes the matrix-vector product, y = Ax"];
         MatNorm, norm, mat_p, input NormType, norm_type, output PetscReal, tmp1, #[doc = "Calculates various norms of a matrix."];
-        MatSetOption, set_option, mat_p, input MatOption, option, input bool, flg, #[doc = "Sets a parameter option for a matrix.\n\n\
+        MatSetOption, set_option, mat_p, input MatOption, option, input bool, flg, takes mut, #[doc = "Sets a parameter option for a matrix.\n\n\
             Some options may be specific to certain storage formats. Some options determine how values will be inserted (or added). Sorted, row-oriented input will generally assemble the fastest. The default is row-oriented."];
     }
 

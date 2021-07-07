@@ -1,8 +1,8 @@
 //! PETSc vectors ([`Vector`] objects) are used to store the field variables in PDE-based (or other) simulations.
 //!
-//! PETSc C API docs: <https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Vec/index.html>
+//! PETSc C API docs: <https://petsc.org/release/docs/manualpages/Vec/index.html>
 
-use std::ops::{Deref, DerefMut};
+use std::{marker::PhantomData, mem::ManuallyDrop, ops::{Deref, DerefMut}};
 
 use crate::prelude::*;
 
@@ -29,10 +29,46 @@ pub struct VectorViewMut<'a, 'b> {
     pub(crate) ndarray: ArrayViewMut<'b, PetscScalar, ndarray::IxDyn>,
 }
 
+/// A wrapper around [`Vector`] that is used when the [`Vector`] shouldn't be destroyed.
+///
+/// Gives mutable access to the underlining [`Vector`].
+///
+/// For example, it is used with [`DM::get_local_vector()`].
+pub struct BorrowVectorMut<'a, 'bv> {
+    pub(crate) owned_vec: ManuallyDrop<Vector<'a>>,
+    pub(crate) drop_func: Option<Box<dyn FnOnce(&mut Self) + 'bv>>,
+    // do we need this phantom data?
+    // also should 'bv be used for the closure
+    pub(crate) _phantom: PhantomData<&'bv mut Vector<'a>>,
+}
+
+/// A wrapper around [`Vector`] that is used when the [`Vector`] shouldn't be destroyed.
+///
+/// For example, it is used with [`DM::get_local_vector()`].
+pub struct BorrowVector<'a, 'bv> {
+    pub(crate) owned_vec: ManuallyDrop<Vector<'a>>,
+    pub(crate) drop_func: Option<Box<dyn FnOnce(&mut Self) + 'bv>>,
+    // do we need this phantom data?
+    // also should 'bv be used for the closure
+    pub(crate) _phantom: PhantomData<&'bv Vector<'a>>,
+}
+
 impl<'a> Drop for Vector<'a> {
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::VecDestroy(&mut self.vec_p as *mut _) };
         let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
+    }
+}
+
+impl Drop for BorrowVectorMut<'_, '_> {
+    fn drop(&mut self) {
+        (self.drop_func.take().unwrap())(self);
+    }
+}
+
+impl Drop for BorrowVector<'_, '_> {
+    fn drop(&mut self) {
+        (self.drop_func.take().unwrap())(self);
     }
 }
 
@@ -631,6 +667,28 @@ impl<'b> Deref for VectorView<'_, 'b> {
 impl std::fmt::Debug for VectorView<'_, '_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.ndarray.fmt(f)
+    }
+}
+
+impl<'a> Deref for BorrowVector<'a, '_> {
+    type Target = Vector<'a>;
+
+    fn deref(&self) -> &Vector<'a> {
+        self.owned_vec.deref()
+    }
+}
+
+impl<'a> Deref for BorrowVectorMut<'a, '_> {
+    type Target = Vector<'a>;
+
+    fn deref(&self) -> &Vector<'a> {
+        self.owned_vec.deref()
+    }
+}
+
+impl<'a> DerefMut for BorrowVectorMut<'a, '_> {
+    fn deref_mut(&mut self) -> &mut Vector<'a> {
+        self.owned_vec.deref_mut()
     }
 }
 

@@ -18,6 +18,9 @@ struct Opt {
     test_jacobian_domain_error: bool,
     view_initial: bool,
     user_precond: bool,
+    post_check_iterates: bool,
+    pre_check_iterates: bool,
+    check_tol: PetscReal,
 }
 
 impl PetscOpt for Opt {
@@ -26,7 +29,11 @@ impl PetscOpt for Opt {
         let test_jacobian_domain_error = petsc.options_try_get_bool("-test_jacobian_domain_error")?.unwrap_or(false);
         let view_initial = petsc.options_try_get_bool("-view_initial")?.unwrap_or(false);
         let user_precond = petsc.options_try_get_bool("-user_precond")?.unwrap_or(false);
-        Ok(Opt { n, test_jacobian_domain_error, view_initial, user_precond })
+        let post_check_iterates = petsc.options_try_get_bool("-post_check_iterates")?.unwrap_or(false);
+        let pre_check_iterates = petsc.options_try_get_bool("-pre_check_iterates")?.unwrap_or(false);
+        let check_tol = petsc.options_try_get_real("-check_tol")?.unwrap_or(1.0);
+        Ok(Opt { n, test_jacobian_domain_error, view_initial, user_precond, post_check_iterates,
+            pre_check_iterates, check_tol })
     }
 }
 
@@ -36,7 +43,8 @@ fn main() -> petsc_rs::Result<()> {
         .help_msg(HELP_MSG)
         .init()?;
     
-    let Opt { n, test_jacobian_domain_error, view_initial, user_precond } = Opt::from_petsc(&petsc)?;
+    let Opt { n, test_jacobian_domain_error, view_initial, user_precond, post_check_iterates,
+            pre_check_iterates, check_tol } = Opt::from_petsc(&petsc)?;
 
     let h = 1.0/(PetscScalar::from(n as PetscReal) - 1.0);
 
@@ -45,9 +53,10 @@ fn main() -> petsc_rs::Result<()> {
     da.set_up()?;
 
     let mut x = da.create_global_vector()?;
-    let r = x.duplicate()?;
+    let mut r = x.duplicate()?;
     let mut f = x.duplicate()?;
     let mut u = x.duplicate()?;
+    let mut last_step = x.duplicate()?;
     x.set_name("Solution")?;
     u.set_name("Exact Solution")?;
     f.set_name("Forcing Function")?;
@@ -71,7 +80,7 @@ fn main() -> petsc_rs::Result<()> {
 
     let mut snes = petsc.snes_create()?;
 
-    snes.set_function(Some(r), |_snes, x, y| {
+    snes.set_function(Some(&mut r), |_snes, x, y| {
         // Note, is the ex3.c file, this is a `DMGetLocalVector` not a `DMCreateLocalVector`.
         // TODO: make it use `DMGetLocalVector` to be consistent with c examples
         let mut x_local = da.create_local_vector()?;
@@ -147,37 +156,45 @@ fn main() -> petsc_rs::Result<()> {
         pc.shell_set_apply(|_pc, xin, xout| xout.copy_data_from(xin) )?;
     }
 
-    // TODO: set monitor:
-    // SNESMonitorSet(snes,Monitor,&monP,0);
+    snes.monitor_set(|snes, its, fnorm| {
+        petsc_println!(petsc.world(), "iter: {}, SNES function norm: {:.5e}", its, fnorm)?;
+        let x = snes.get_solution()?;
+        x.view_with(None)?;
+        Ok(())
+    })?;
     
     snes.set_from_options()?;
 
-    // TODO: linesearch stuff
-    // SNESGetLineSearch(snes, &linesearch);
-    //
-    // PetscOptionsHasName(NULL,NULL,"-post_check_iterates",&post_check);
-    // if (post_check) {
-    //   PetscPrintf(PETSC_COMM_WORLD,"Activating post step checking routine\n");
-    //   SNESLineSearchSetPostCheck(linesearch,PostCheck,&checkP);
-    //   VecDuplicate(x,&(checkP.last_step));
-    //   
-    //   checkP.tolerance = 1.0;
-    //   checkP.user      = &ctx;
-    //   
-    //   PetscOptionsGetReal(NULL,NULL,"-check_tol",&checkP.tolerance,NULL);
-    // }
-    // 
-    // PetscOptionsHasName(NULL,NULL,"-post_setsubksp",&post_setsubksp);
-    // if (post_setsubksp) {
-    //   PetscPrintf(PETSC_COMM_WORLD,"Activating post setsubksp\n");
-    //   SNESLineSearchSetPostCheck(linesearch,PostSetSubKSP,&checkP1);
-    // }
-    //  
-    // PetscOptionsHasName(NULL,NULL,"-pre_check_iterates",&pre_check);
-    // if (pre_check) {
-    //   PetscPrintf(PETSC_COMM_WORLD,"Activating pre step checking routine\n");
-    //   SNESLineSearchSetPreCheck(linesearch,PreCheck,&checkP);
-    // }
+    
+    if post_check_iterates {
+        petsc_println!(petsc.world(), "Activating post step checking routine")?;
+        snes.linesearch_set_post_check(|_ls, snes, _x_cur, _y, x, _y_mod, x_mod| { 
+            let it = snes.get_iteration_number()?;
+            if it > 0 {
+                petsc_println!(petsc.world(), "Checking candidate step at iteration {} with tolerance {}", it, check_tol)?;
+                let xa_last = da.da_vec_view(&last_step)?;
+                let mut xa = da.da_vec_view_mut(x)?;
+                let (_xs, _, _, _xm, _, _) = da.da_get_corners()?;
+
+                xa_last.indexed_iter().map(|(pat, _)|  pat[0])
+                    .for_each(|i| { 
+                        let rdiff = if xa[i].abs() == 0.0 { 2.0*check_tol }
+                            else { ((xa[i] - xa_last[i])/xa[i]).abs() };
+                        if rdiff > check_tol {
+                            xa[i] = 0.5*(xa[i] + xa_last[i]);
+                            *x_mod = true;
+                        }
+                    });
+            }
+            last_step.copy_data_from(&x)
+        })?;
+    }
+    if pre_check_iterates {
+        petsc_println!(petsc.world(), "Activating pre step checking routine")?;
+        snes.linesearch_set_pre_check(|_ls, _snes, _x, _y, _y_mod| {
+            Ok(())
+        })?;
+    }
 
     let tols = snes.get_tolerances()?;
     petsc_println!(petsc.world(), "atol={:.5e}, rtol={:.5e}, stol={:.5e}, maxit={}, maxf={}",

@@ -6,9 +6,15 @@
 //! available through the PCTELESCOPE object. A piecewise linear discretization is assumed for operations
 //! which require this information.
 //!
-//! PETSc C API docs: <https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/DM/index.html>
+//! PETSc C API docs: <https://petsc.org/release/docs/manualpages/DM/index.html>
 //!
-//! Also: <https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/DMDA/DMDA.html#DMDA>
+//! Also: <https://petsc.org/release/docs/manualpages/DMDA/DMDA.html#DMDA>
+
+// TODO: use `PetscObjectTypeCompare` to make sure we are using the correct type of DM
+
+use core::slice;
+use std::marker::PhantomData;
+use std::mem::ManuallyDrop;
 
 use ndarray::{ArrayView, ArrayViewMut};
 
@@ -16,6 +22,8 @@ use ndarray::{ArrayView, ArrayViewMut};
 pub struct DM<'a> {
     world: &'a dyn Communicator,
     pub(crate) dm_p: *mut petsc_raw::_p_DM,
+
+    composite_dms: Option<Vec<DM<'a>>>,
 }
 
 pub use crate::petsc_raw::DMBoundaryType;
@@ -23,6 +31,7 @@ pub use crate::petsc_raw::DMDAStencilType;
 pub use crate::petsc_raw::DMTypeEnum as DMType;
 
 use crate::prelude::*;
+use crate::vector;
 
 impl<'a> Drop for DM<'a> {
     fn drop(&mut self) {
@@ -34,7 +43,7 @@ impl<'a> Drop for DM<'a> {
 impl<'a> DM<'a> {
     /// Same as `DM { ... }` but sets all optional params to `None`
     pub(crate) fn new(world: &'a dyn Communicator, dm_p: *mut petsc_raw::_p_DM) -> Self {
-        DM { world, dm_p }
+        DM { world, dm_p, composite_dms: None }
     }
 
     /// Creates an empty DM object. The type can then be set with [`DM::set_type()`].
@@ -143,6 +152,28 @@ impl<'a> DM<'a> {
         Ok(DM::new(world, unsafe { dm_p.assume_init() }))
     }
 
+    /// Creates a vector packer, used to generate "composite" vectors made up of several subvectors.
+    pub fn composite_create<I>(world: &'a dyn Communicator, dms: I) -> Result<Self>
+    where
+        I: IntoIterator<Item = DM<'a>>
+    {
+        let mut dm_p = MaybeUninit::uninit();
+        let ierr = unsafe { petsc_raw::DMCompositeCreate(world.as_raw(), dm_p.as_mut_ptr()) };
+        Petsc::check_error(world, ierr)?;
+
+        let mut dm = DM::new(world, unsafe { dm_p.assume_init() });
+
+        let dms = dms.into_iter().collect::<Vec<_>>();
+        let _num_dm = dms.iter().map(|this_dm| {
+            let ierr = unsafe { petsc_raw::DMCompositeAddDM(dm.dm_p, this_dm.dm_p) };
+            Petsc::check_error(dm.world, ierr).map(|_| 1)
+        }).sum::<Result<PetscInt>>()?;
+
+        dm.composite_dms = Some(dms);
+
+        Ok(dm)
+    }
+
     /// Creates a global vector from a DM object
     pub fn create_global_vector(&self) -> Result<Vector<'a>> {
         let mut vec_p = MaybeUninit::uninit();
@@ -161,6 +192,66 @@ impl<'a> DM<'a> {
         Petsc::check_error(self.world, ierr)?;
         
         Ok(Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } })
+    }
+
+    /// Gets a PETSc vector that may be used with the DM local routines.
+    ///
+    /// This vector has spaces for the ghost values. 
+    ///
+    /// The vector values are NOT initialized and may have garbage in them, so you may need to zero them.
+    /// This is intended to be used for vectors you need for a short time, like within a single function
+    /// call. For vectors that you intend to keep around (for example in a C struct) or pass around large
+    /// parts of your code you should use [`DM::create_local_vector()`]. 
+    pub fn get_local_vector(&self) -> Result<vector::BorrowVectorMut<'a, '_>> {
+        // Note, under the hood `DMGetLocalVector` uses multiple different work vector 
+        // that it will give access to us. Once it runs out it starts using `DMCreateLocalVector`.
+        // Therefor we don't need to worry about this being called multiple times and causing
+        // problems. At least I think we don't (it feels like interior mutability so i wonder if
+        // we should be using UnsafeCell for something).
+        let mut vec_p = MaybeUninit::uninit();
+        let ierr = unsafe { petsc_raw::DMGetLocalVector(self.dm_p, vec_p.as_mut_ptr()) };
+        Petsc::check_error(self.world, ierr)?;
+
+        // We dont want to drop the vec through Vector::drop
+        let vec = ManuallyDrop::new(Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } });
+        
+        Ok(vector::BorrowVectorMut { owned_vec: vec, drop_func: Some(Box::new(move |borrow_vec| {
+            let ierr = unsafe { petsc_raw::DMRestoreLocalVector(self.dm_p, &mut borrow_vec.vec_p as *mut _) };
+            let _ = Petsc::check_error(borrow_vec.world, ierr); // TODO: should I unwrap ?
+        })), _phantom: PhantomData })
+    }
+
+    /// Gets local vectors for each part of a DMComposite.
+    pub fn composite_create_local_vectors(&self) -> Result<Vec<Vector<'a>>> {
+        if let Some(c) = self.composite_dms.as_ref() {
+            c.iter().fold(Ok(Vec::with_capacity(c.len())), |acc, dm| {
+                match acc {
+                    Ok(mut inner_vec) => dm.create_local_vector().map(|v| {
+                            inner_vec.push(v);
+                            inner_vec
+                        }),
+                    acc @ Err(_) => acc
+                }
+            })
+        } else {
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERROR_ARG_WRONGSTATE,
+                format!("There are no composite dms set, line: {}", line!())).map(|_| unreachable!())
+        }
+    }
+
+    /// Gets empty Jacobian for a DM
+    ///
+    /// This properly preallocates the number of nonzeros in the sparse
+    /// matrix so you do not need to do it yourself. 
+    ///
+    /// For structured grid problems, when you call [`Mat::view_with()`] on this matrix it is
+    /// displayed using the global natural ordering, NOT in the ordering used internally by PETSc.
+    pub fn create_matrix(&self) -> Result<Mat<'a>> {
+        let mut mat_p = MaybeUninit::uninit();
+        let ierr = unsafe { petsc_raw::DMCreateMatrix(self.dm_p, mat_p.as_mut_ptr()) };
+        Petsc::check_error(self.world, ierr)?;
+        
+        Ok(Mat { world: self.world, mat_p: unsafe { mat_p.assume_init() } })
     }
 
     /// Updates global vectors from local vectors.
@@ -190,10 +281,15 @@ impl<'a> DM<'a> {
     ///
     /// The C api version of this, (`DMDAVecGetArrayRead`), returns an array using the global dimensions by
     /// applying an offset to the arrays. This method does NOT do that, the view must be indexed starting at zero.
+    /// You can get the offsets with [`DM::da_get_corners()`] or [`DM::da_get_ghost_corners()`].
     ///
     /// Also, the underling array has a fortran contiguous layout (column major) whereas the C api swaps the order
     /// of the indexing (so essentially has row major but transposed). This means that in rust you will index the array
     /// normally, but for best performance (i.e., with caching) you should treat it as column major.
+    ///
+    /// If you view a local vector, than the view will include the ghost corners. Thus the slice returned by
+    /// this method could be larger and the offset might be different. In this case [`DM::da_get_ghost_corners()`]
+    /// will give you the correct sizes and offsets.
     ///
     /// # Example
     ///
@@ -232,7 +328,14 @@ impl<'a> DM<'a> {
     /// // creates immutable 2d view
     /// let g_view = dm.da_vec_view(&global)?;
     /// 
-    /// let (gxs, gys, _gzs, gxm, gym, _gzm) = dm.da_get_corners()?;
+    /// let (xs, ys, _zs, xm, ym, _zm) = dm.da_get_corners()?;
+    /// let (gxs, gys, _zs, gxm, gym, _gzm) = dm.da_get_ghost_corners()?;
+    ///
+    /// // Note because we are viewing a global vector we wont have any ghost corners
+    /// assert_eq!(global.get_local_size()?, xm*ym);
+    /// if petsc.world().size() > 1 {
+    ///     assert_ne!(global.get_local_size()?, gxm*gym);
+    /// }
     ///
     /// // Note, standard layout is contiguous C order (row major).
     /// // Also note, a 1d array is always in standard layout.
@@ -265,8 +368,75 @@ impl<'a> DM<'a> {
     ///                            [6.0, 8.0],
     ///                            [7.0, 9.0]];
     ///     assert_eq!(g_view.slice(s![.., ..]).dim(),
-    ///         rhs_array.slice(s![gxs..(gxs+gxm), gys..(gys+gym)]).dim());
-    ///     assert_eq!(g_view.slice(s![.., ..]), rhs_array.slice(s![gxs..(gxs+gxm), gys..(gys+gym)]));
+    ///         rhs_array.slice(s![xs..(xs+xm), ys..(ys+ym)]).dim());
+    ///     assert_eq!(g_view.slice(s![.., ..]), rhs_array.slice(s![xs..(xs+xm), ys..(ys+ym)]));
+    /// } else {
+    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, 
+    ///         "This example only work with 1 or 2 processors!")?;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// If we wanted to view a local vector we would do something like the following.
+    ///
+    /// ```
+    /// # use petsc_rs::prelude::*;
+    /// # use ndarray::{Dimension, array, s};
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// # let petsc = Petsc::init_no_args()?;
+    /// // note, cargo wont run tests with mpi so this will always be run with
+    /// // a single processor, but this example will also work in two processor
+    /// // comm world.
+    ///
+    /// // Note, right now this example only works when `PetscScalar` is `PetscReal`.
+    /// // It will fail to compile if `PetscScalar` is `PetscComplex`.
+    /// let (m, n) = (5,2);
+    /// 
+    /// let mut dm = DM::da_create_2d(petsc.world(), DMBoundaryType::DM_BOUNDARY_NONE,
+    ///     DMBoundaryType::DM_BOUNDARY_NONE, DMDAStencilType::DMDA_STENCIL_BOX, m, n,
+    ///     None, None, 1, 1, None, None)?;
+    /// dm.set_from_options()?;
+    /// dm.set_up()?;
+    ///
+    /// let mut global = dm.create_global_vector()?;
+    ///
+    /// let gs = global.get_global_size()?;
+    /// let osr = global.get_ownership_range()?;
+    /// // Note, this follows the global PETSc ordering (not the global natural ordering).
+    /// global.assemble_with((0..gs)
+    ///         .filter(|i| osr.contains(i))
+    ///         .map(|i| (i, i as PetscReal)),
+    ///     InsertMode::INSERT_VALUES)?;
+    /// # let viewer = Viewer::create_ascii_stdout(petsc.world())?;
+    /// # global.view_with(Some(&viewer))?;
+    ///
+    /// // We create local vector from global vector
+    /// let mut local = dm.get_local_vector()?;
+    /// dm.global_to_local(&global, InsertMode::INSERT_VALUES, &mut local)?;
+    ///
+    /// // creates immutable 2d view
+    /// let l_view = dm.da_vec_view(&local)?;
+    /// let g_view = dm.da_vec_view(&global)?;
+    /// 
+    /// let (xs, ys, _zs, xm, ym, _zm) = dm.da_get_corners()?;
+    /// let (gxs, gys, _zs, gxm, gym, _gzm) = dm.da_get_ghost_corners()?;
+    ///
+    /// // Note because we are viewing a local vector we will have the ghost corners
+    /// if petsc.world().size() > 1 {
+    ///     assert_ne!(local.get_local_size()?, xm*ym);
+    ///     assert_eq!(global.get_local_size()?, gxm*gym);
+    /// }
+    /// assert_eq!(local.get_local_size()?, gxm*gym);
+    /// assert_eq!(global.get_local_size()?, xm*ym);
+    ///
+    /// // Ignoring the layout, the array functionally looks like the following.
+    /// if petsc.world().size() == 1 {
+    ///     assert_eq!(g_view.slice(s![.., ..]).dim(), l_view.slice(s![.., ..]).dim());
+    ///     assert_eq!(g_view.slice(s![.., ..]), l_view.slice(s![.., ..]));
+    /// } else if petsc.world().size() == 2 {
+    ///     assert_ne!(g_view.slice(s![.., ..]).dim(), l_view.slice(s![.., ..]).dim());
+    ///     assert_eq!(g_view.slice(s![.., ..]), l_view.slice(s![xs-gxs..xm, ys-gys..ym]));
     /// } else {
     ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, 
     ///         "This example only work with 1 or 2 processors!")?;
@@ -306,7 +476,7 @@ impl<'a> DM<'a> {
         let ndarray = unsafe {
             ArrayView::from_shape_ptr(ndarray::IxDyn(&dims_r[(3-dim as usize)..]), array.assume_init())
                 .reversed_axes() }; // TODO: add comments (e.x. why `reversed_axes()` and stuff)
-                                    // https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/DMDA/DMDAVecGetArray.html#DMDAVecGetArray
+                                    // https://petsc.org/release/docs/manualpages/DMDA/DMDAVecGetArray.html#DMDAVecGetArray
 
         Ok(crate::vector::VectorView { vec, array: unsafe { array.assume_init() }, ndarray })
     }
@@ -316,12 +486,17 @@ impl<'a> DM<'a> {
     ///
     /// # Note
     ///
-    /// The C api version of this, (`DMDAVecGetArray`), returns an array using the global dimensions by
+    /// The C api version of this, (`DMDAVecGetArrayRead`), returns an array using the global dimensions by
     /// applying an offset to the arrays. This method does NOT do that, the view must be indexed starting at zero.
+    /// You can get the offsets with [`DM::da_get_corners()`] or [`DM::da_get_ghost_corners()`].
     ///
     /// Also, the underling array has a fortran contiguous layout (column major) whereas the C api swaps the order
     /// of the indexing (so essentially has row major but transposed). This means that in rust you will index the array
     /// normally, but for best performance (i.e., with caching) you should treat it as column major.
+    ///
+    /// If you view a local vector, than the view will include the ghost corners. Thus the slice returned by
+    /// this method could be larger and the offset might be different. In this case [`DM::da_get_ghost_corners()`]
+    /// will give you the correct sizes and offsets.
     ///
     /// # Example
     ///
@@ -347,7 +522,12 @@ impl<'a> DM<'a> {
     ///
     /// global.set_all(0.0)?;
     /// 
-    /// let (gxs, gys, _gzs, gxm, gym, _gzm) = dm.da_get_corners()?;
+    /// let (xs, ys, _zs, xm, ym, _zm) = dm.da_get_corners()?;
+    /// let (gxs, gys, _zs, gxm, gym, _gzm) = dm.da_get_ghost_corners()?;
+    ///
+    /// // Note because we are viewing a global vector we wont have any ghost corners
+    /// assert_eq!(global.get_local_size()?, xm*ym);
+    /// assert_ne!(global.get_local_size()?, gxm*gxm);
     ///
     /// let mut g_view = dm.da_vec_view_mut(&mut global)?;
     ///
@@ -424,6 +604,179 @@ impl<'a> DM<'a> {
         
         let ierr = unsafe { petsc_raw::DMDASetFieldName(self.dm_p, nf, name_cs.as_ptr()) };
         Petsc::check_error(self.world, ierr)
+    }
+    
+    /// Gets the ranges of indices in the x, y and z direction that are owned by each process 
+    ///
+    /// Note: these correspond to the optional final arguments passed to [`DM::da_create_1d()`],
+    /// [`DM::da_create_2d()`], and [`DM::da_create_3d()`].
+    ///
+    /// These numbers are NOT multiplied by the number of dof per node. 
+    pub fn da_get_ownership_ranges(&self) -> Result<(Vec<PetscInt>,
+        Vec<PetscInt>, Vec<PetscInt>)>
+    {
+        let mut lx = MaybeUninit::<*const PetscInt>::uninit();
+        let mut ly = MaybeUninit::<*const PetscInt>::uninit();
+        let mut lz = MaybeUninit::<*const PetscInt>::uninit();
+
+        let dim = self.get_dimension()?;
+
+        if dim > 3 || dim < 1 {
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERROR_ARG_CORRUPT, 
+                format!("DMDA dimension not 1, 2, or 3, it is {}\n",dim))?;
+        }
+
+        let ierr = unsafe { petsc_raw::DMDAGetOwnershipRanges(self.dm_p, lx.as_mut_ptr(),
+            if dim >= 2 { ly.as_mut_ptr() } else { std::ptr::null_mut() }, 
+            if dim >= 3 { lz.as_mut_ptr() } else { std::ptr::null_mut() } ) };
+        Petsc::check_error(self.world, ierr)?;
+
+        // SAFETY: Petsc says these are arrays of length size
+        let lx_vec = {
+            let lx_slice = unsafe { std::slice::from_raw_parts(lx.assume_init(), self.world.size() as usize) };
+            lx_slice.to_vec()
+        };
+        let ly_vec = if dim >= 2 {
+            let ly_slice = unsafe { std::slice::from_raw_parts(ly.assume_init(), self.world.size() as usize) };
+            ly_slice.to_vec()
+        } else {
+            vec![]
+        };
+        let lz_vec = if dim >= 2 {
+            let lz_slice = unsafe { std::slice::from_raw_parts(lz.assume_init(), self.world.size() as usize) };
+            lz_slice.to_vec()
+        } else {
+            vec![]
+        };
+
+        Ok((lx_vec, ly_vec, lz_vec))
+    }
+
+    /// Gets the dms in the composite dm created with [`DM::composite_create()`].
+    pub fn composite_dms(&self) -> Result<&[DM<'a>]> {
+        self.composite_dms.as_ref().map(|c| c.as_ref()).ok_or_else(|| 
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERROR_ARG_WRONGSTATE,
+                format!("There are no composite dms set, line: {}", line!())).unwrap_err())
+    }
+
+    /// Scatters from a global packed vector into its individual local vectors 
+    pub fn composite_scatter<'v, I>(&self, gvec: &'v Vector<'a>, lvecs: I) -> Result<()>
+    where
+        I: IntoIterator<Item = &'v mut Vector<'a>>
+    {
+        if let Some(c) = self.composite_dms.as_ref() {
+            let mut lvecs_p =  lvecs.into_iter().map(|v| v.vec_p).collect::<Vec<_>>();
+
+            assert_eq!(lvecs_p.len(), c.len());
+            let ierr = unsafe { petsc_raw::DMCompositeScatterArray(self.dm_p, gvec.vec_p, lvecs_p.as_mut_ptr()) };
+            Petsc::check_error(self.world, ierr)
+        } else {
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERROR_ARG_WRONGSTATE,
+                format!("There are no composite dms set, line: {}", line!()))
+        }
+    }
+
+    /// Allows one to access the individual packed vectors in their global representation.
+    ///
+    /// The returned [`Vec`] will have the length of the number of dms in the composite dm.
+    pub fn composite_get_access_mut<'bv>(&'bv self, gvec: &'bv mut Vector<'a>) -> Result<Vec<vector::BorrowVectorMut<'a, 'bv>>> {
+        // TODO: make a non mut version: look at (https://petsc.org/release/docs/manualpages/Vec/VecLockGet.html#VecLockGet)
+        // also look at: https://petsc.org/release/src/dm/impls/composite/pack.c.html#DMCompositeGetAccessArray
+        // There is a readonly var that we need to set (if we even can)
+        if let Some(c) = self.composite_dms.as_ref() {
+            let wanted = (0..c.len() as PetscInt).collect::<Vec<_>>();
+            let mut vec_ps = vec![std::ptr::null_mut(); c.len()]; // TODO: can we use MaybeUninit
+
+            let ierr = unsafe { petsc_raw::DMCompositeGetAccessArray(self.dm_p, gvec.vec_p,
+                c.len() as PetscInt, wanted.as_ptr(), vec_ps.as_mut_ptr()) };
+            Petsc::check_error(self.world, ierr)?;
+
+            let gvec_rc = Rc::new(&*gvec);
+            Ok(vec_ps.into_iter().zip(wanted).map(move |(v_p, i)| {
+                let vec = ManuallyDrop::new(Vector { world: self.world, vec_p: v_p });
+                let gvec_rc = gvec_rc.clone();
+                vector::BorrowVectorMut { owned_vec: vec, drop_func: Some(Box::new(move |borrow_vec| {
+                    let i = i;
+                    let ierr = unsafe { petsc_raw::DMCompositeRestoreAccessArray(
+                        self.dm_p, gvec_rc.vec_p, 1, std::slice::from_ref(&i).as_ptr(),
+                        std::slice::from_mut(&mut borrow_vec.vec_p).as_mut_ptr()) };
+                    let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap ?
+                })), _phantom: PhantomData }
+            }).collect())
+
+        } else {
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERROR_ARG_WRONGSTATE,
+                format!("There are no composite dms set, line: {}", line!())).map(|_| unreachable!())
+        }
+    }
+
+
+    /// Gets the index sets for each composed object.
+    ///
+    /// These could be used to extract a subset of vector entries for a "multi-physics" preconditioner.
+    pub fn composite_get_global_indexsets(&self) -> Result<Vec<IS>> {
+        if let Some(c) = self.composite_dms.as_ref() {
+            // This Petsc function is a little weird; it allocated the output array
+            // and we are expected to free it with `PetscFree`.
+            let mut is_array_p = MaybeUninit::uninit();
+            let len = c.len();
+            let ierr = unsafe { petsc_raw::DMCompositeGetGlobalISs(self.dm_p, is_array_p.as_mut_ptr()) };
+            Petsc::check_error(self.world, ierr)?;
+
+            let is_slice = unsafe { slice::from_raw_parts(is_array_p.assume_init(), len) };
+
+            let ret_vec = is_slice.iter().map(|is_p| IS { world: self.world, is_p: *is_p }).collect();
+
+            let cs_fn_name = CString::new("composite_get_global_indexsets").expect("CString::new failed");
+            let cs_file_name = CString::new("dm.rs").expect("CString::new failed");
+            
+            // Note, `PetscFree` is a macro around `PetscTrFree`
+            let ierr = unsafe { (petsc_raw::PetscTrFree.unwrap())(is_array_p.assume_init() as *mut _,
+                line!() as i32, cs_fn_name.as_ptr(), cs_file_name.as_ptr()) };
+            Petsc::check_error(self.world, ierr)?;
+
+            Ok(ret_vec)
+        } else {
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERROR_ARG_WRONGSTATE,
+                format!("There are no composite dms set, line: {}", line!())).map(|_| unreachable!())
+        }
+    }
+    
+    /// Gets index sets for each component of a composite local vector.
+    ///
+    /// # Notes
+    ///
+    /// At present, a composite local vector does not normally exist. This function is used to provide
+    /// index sets for [`Mat::get_local_sub_matrix_mut()`]. In the future, the scatters for each entry
+    /// in the DMComposite may be be merged into a single scatter to a composite local vector. The user
+    /// should not typically need to know which is being done. 
+    ///
+    /// To get index sets for pieces of the composite global vector, use [`DM::composite_get_global_indexsets()`]. 
+    pub fn composite_get_local_indexsets(&self) -> Result<Vec<IS>> {
+        if let Some(c) = self.composite_dms.as_ref() {
+            // This Petsc function is a little weird; it allocated the output array
+            // and we are expected to free it with `PetscFree`.
+            let mut is_array_p = MaybeUninit::uninit();
+            let len = c.len();
+            let ierr = unsafe { petsc_raw::DMCompositeGetLocalISs(self.dm_p, is_array_p.as_mut_ptr()) };
+            Petsc::check_error(self.world, ierr)?;
+
+            let is_slice = unsafe { slice::from_raw_parts(is_array_p.assume_init(), len) };
+
+            let ret_vec = is_slice.iter().map(|is_p| IS { world: self.world, is_p: *is_p }).collect();
+
+            let cs_fn_name = CString::new("composite_get_global_indexsets").expect("CString::new failed");
+            let cs_file_name = CString::new("dm.rs").expect("CString::new failed");
+            
+            let ierr = unsafe { (petsc_raw::PetscTrFree.unwrap())(is_array_p.assume_init() as *mut _,
+                line!() as i32, cs_fn_name.as_ptr(), cs_file_name.as_ptr()) };
+            Petsc::check_error(self.world, ierr)?;
+
+            Ok(ret_vec)
+        } else {
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERROR_ARG_WRONGSTATE,
+                format!("There are no composite dms set, line: {}", line!())).map(|_| unreachable!())
+        }
     }
 }
 

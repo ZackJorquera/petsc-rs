@@ -51,6 +51,7 @@ pub mod ksp;
 pub mod viewer;
 pub mod snes;
 pub mod dm;
+pub mod indexset;
 
 pub mod prelude {
     //! Commonly used items.
@@ -70,6 +71,7 @@ pub mod prelude {
         snes::{SNES, DomainOrPetscError::DomainErr, },
         pc::{PC, PCType, },
         dm::{DM, DMBoundaryType, DMDAStencilType, DMType, },
+        indexset::{IS, },
         viewer::{Viewer, PetscViewerFormat, },
         NormType,
         PetscOpt,
@@ -88,7 +90,7 @@ use prelude::*;
 #[cfg(feature = "petsc-use-complex")]
 use num_complex::Complex;
 
-// https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Sys/index.html
+// https://petsc.org/release/docs/manualpages/Sys/index.html
 
 /// Prints to standard out, only from the first processor in the communicator.
 ///
@@ -255,7 +257,7 @@ impl PetscBuilder
                 // everything should access it through the `Petsc.world()` method which is only
                 // accessible after this (at least on the rust side of things). 
                 // Additional info on using this variable can be found here:
-                // https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Sys/PETSC_COMM_WORLD.html
+                // https://petsc.org/release/docs/manualpages/Sys/PETSC_COMM_WORLD.html
                 unsafe { petsc_raw::PETSC_COMM_WORLD = world.as_raw(); }
 
                 ierr = unsafe { petsc_raw::PetscInitialize(c_argc_p, c_args_p, file_c_str, help_c_str) };
