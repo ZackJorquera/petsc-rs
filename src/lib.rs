@@ -32,6 +32,7 @@
 //! petsc-rs = { version = "*", default-features = false, features = ["petsc-real-f32", "petsc-int-i64"] }
 //! ```
 
+use std::ops::Deref;
 use std::os::raw::{c_char, c_int};
 use std::vec;
 
@@ -80,10 +81,12 @@ pub mod prelude {
     pub(crate) use crate::Result;
     pub(crate) use mpi::{self, traits::*};
     pub(crate) use crate::petsc_raw;
-    pub(crate) use std::mem::MaybeUninit;
+    pub(crate) use std::mem::{MaybeUninit, ManuallyDrop};
     pub(crate) use std::ffi::{CString, CStr, };
     pub(crate) use std::rc::Rc;
     pub(crate) use mpi::topology::UserCommunicator;
+    pub(crate) use std::marker::PhantomData;
+    pub(crate) use std::pin::Pin;
 }
 
 use prelude::*;
@@ -265,12 +268,12 @@ impl PetscBuilder
 
                 ierr = unsafe { petsc_raw::PetscInitialize(c_argc_p, c_args_p, file_c_str, help_c_str) };
 
-                Some(world)
+                ManuallyDrop::new(world)
             }, 
             _ => {
                 // Note, in this case MPI has not been initialized, it will be initialized by PETSc
                 ierr = unsafe { petsc_raw::PetscInitialize(c_argc_p, c_args_p, file_c_str, help_c_str) };
-                Some(mpi::topology::SystemCommunicator::world().duplicate())
+                ManuallyDrop::new(mpi::topology::SystemCommunicator::world().duplicate())
             }
         }, _arg_data: self.args.as_ref().map(|_| (argc_boxed, cstr_args_owned, c_args_owned, c_args_boxed)) };
         Petsc::check_error(petsc.world(), ierr)?;
@@ -336,7 +339,7 @@ pub struct Petsc {
     // This is functionally the same as `PETSC_COMM_WORLD` in the C api
     // Note, just because it is an option doesn't mean it will ever be None
     // It is only set to none in the drop function (everywhere else it is some).
-    pub(crate) world: Option<UserCommunicator>,
+    pub(crate) world: ManuallyDrop<UserCommunicator>,
 
     // This is used to drop the argc/args data when Petsc is dropped, we never actually use it
     // on the rust side.
@@ -346,10 +349,11 @@ pub struct Petsc {
 // Destructor
 impl Drop for Petsc {
     fn drop(&mut self) {
-        // Note, PetscFinalize can call MPI_FINALIZE, which means we need to make sure our 
-        // comm world is dropped before that
-        drop(self.world.take());
+        // SAFETY: PetscFinalize can call MPI_FINALIZE, which means we need to make sure our 
+        // comm world is dropped before that. Also after `ManuallyDrop::drop` is called `Petsc`
+        // is dropped so the zombie value is never used again
         unsafe {
+            ManuallyDrop::drop(&mut self.world);
             petsc_raw::PetscFinalize();
         }
     }
@@ -373,7 +377,7 @@ impl Petsc {
     /// [`PetscInitialize`]: petsc_raw::PetscInitialize
     pub fn init_no_args() -> Result<Self> {
         let ierr = unsafe { petsc_raw::PetscInitializeNoArguments() };
-        let petsc = Self { world: Some(mpi::topology::SystemCommunicator::world().duplicate()),
+        let petsc = Self { world: ManuallyDrop::new(mpi::topology::SystemCommunicator::world().duplicate()),
             _arg_data: None };
         Petsc::check_error(petsc.world(), ierr)?;
 
@@ -390,7 +394,7 @@ impl Petsc {
     /// API. If you want to use a different comm world, then you have to define that outside
     /// of the [`Petsc`] object. Read docs for [`PetscBuilder::world()`] for more information.
     pub fn world(&self) -> &UserCommunicator {
-        self.world.as_ref().unwrap()
+        self.world.deref()
     }
 
     /// Internal error checker

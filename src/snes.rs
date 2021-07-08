@@ -11,8 +11,6 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/SNES/index.html>
 
-use std::{mem::ManuallyDrop, pin::Pin};
-
 use crate::prelude::*;
 
 /// Abstract PETSc object that manages all nonlinear solves

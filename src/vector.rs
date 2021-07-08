@@ -2,7 +2,7 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/Vec/index.html>
 
-use std::{marker::PhantomData, mem::ManuallyDrop, ops::{Deref, DerefMut}};
+use std::ops::{Deref, DerefMut};
 
 use crate::prelude::*;
 

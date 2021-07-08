@@ -3,8 +3,6 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/Mat/index.html>
 
-use std::marker::PhantomData;
-use std::mem::ManuallyDrop;
 use std::ops::Deref;
 use std::ops::DerefMut;
 

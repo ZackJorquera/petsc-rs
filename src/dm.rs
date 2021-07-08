@@ -13,8 +13,6 @@
 // TODO: use `PetscObjectTypeCompare` to make sure we are using the correct type of DM
 
 use core::slice;
-use std::marker::PhantomData;
-use std::mem::ManuallyDrop;
 
 use ndarray::{ArrayView, ArrayViewMut};
 

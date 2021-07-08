@@ -8,8 +8,6 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/PC/index.html>
 
-use std::{mem::ManuallyDrop, pin::Pin};
-
 use crate::prelude::*;
 
 pub use crate::petsc_raw::PCTypeEnum as PCType;

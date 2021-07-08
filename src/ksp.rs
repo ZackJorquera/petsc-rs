@@ -9,8 +9,6 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/KSP/index.html>
 
-use std::{mem::ManuallyDrop, pin::Pin};
-
 use crate::prelude::*;
 
 /// Abstract PETSc object that manages all Krylov methods. This is the object that manages the linear
