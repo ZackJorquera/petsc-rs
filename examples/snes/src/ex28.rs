@@ -30,7 +30,7 @@
 
 static HELP_MSG: &str = "1D multiphysics prototype with analytic Jacobians to solve individual problems and a coupled problem.\n\n";
 
-use std::rc::Rc;
+use std::{ops::DerefMut, rc::Rc};
 
 use petsc_rs::prelude::*;
 
@@ -111,42 +111,52 @@ fn main() -> petsc_rs::Result<()> {
             let mut f_parts = pack.composite_get_access_mut(&mut f)?;
     
             let mut snes = SNES::create(petsc.world())?;
-            
-            snes.set_function(Some(&mut f_parts[0]), |_snes, x, y| {
+            snes.set_dm(dms[0].clone())?; // TODO: does this work
+            snes.set_function(Some(&mut f_parts[0]), |snes, x, y| {
+                // TODO: idk if we need to do this, we might be able to just use the dms
+                // from outside of the closure
+                let dms = [snes.try_get_dm().unwrap(), &dms[1]];
                 let (_, mx, _, _, _, _, _, _, _, _, _, _, _) = dms[0].da_get_info()?;
                 let (xs, _, _, _xm, _, _) = dms[0].da_get_corners()?;
                 let (xs_k, _, _, _xm_k, _, _) = dms[1].da_get_corners()?;
                 let (gxs, _, _, _gxm, _, _) = dms[0].da_get_ghost_corners()?;
-                // TODO: make this use composite_get_local_vectors
-                let mut local_vecs = pack.composite_create_local_vectors()?;
+                
+                // TODO: this `pack` is not using the dm from `snes.try_get_dm().unwrap()`
+                // It is using the one that we called clone on (line 114). Is that a problem.
+                // Do we even need to use `snes.try_get_dm().unwrap()` at all if this works?
+                let mut local_vecs = pack.composite_get_local_vectors()?;
+                // we have to do the map because local_vecs are not vectors
+                pack.composite_scatter(x, local_vecs.iter_mut().map(|bv| bv.deref_mut()))?;
                 let mut u_loc = local_vecs.remove(0);
 
                 dms[0].global_to_local(x, InsertMode::INSERT_VALUES, &mut u_loc)?;
 
-                form_func_u(&petsc, (m, mx, xs, xs_k, gxs), dms, &u_loc, &k_loc, y)?;
+                form_func_u(&petsc, (m, mx, xs, xs_k, gxs), (dms[0], dms[1]), &u_loc, &k_loc, y)?;
 
                 Ok(())
             })?;
             let b_mat = dms[0].create_matrix()?;
-            snes.set_jacobian_single_mat(b_mat, |_snes, x, jac| {
+            snes.set_jacobian_single_mat(b_mat, |snes, x, jac| {
+                // TODO: idk if we need to do this, we might be able to just use the dms
+                // from outside of the closure
+                let dms = [snes.try_get_dm().unwrap(), &dms[1]];
                 let (_, mx, _, _, _, _, _, _, _, _, _, _, _) = dms[0].da_get_info()?;
                 let (xs, _, _, xm, _, _) = dms[0].da_get_corners()?;
                 let (xs_k, _, _, _xm_k, _, _) = dms[1].da_get_corners()?;
                 let (gxs, _, _, _gxm, _, _) = dms[0].da_get_ghost_corners()?;
-                // TODO: make this use composite_get_local_vectors
-                let mut local_vecs = pack.composite_create_local_vectors()?;
+
+                let mut local_vecs = pack.composite_get_local_vectors()?;
+                pack.composite_scatter(x, local_vecs.iter_mut().map(|bv| bv.deref_mut()))?;
                 let mut u_loc = local_vecs.remove(0);
 
                 dms[0].global_to_local(x, InsertMode::INSERT_VALUES, &mut u_loc)?;
 
-                form_jac_u(&petsc, (mx, xm, xs, xs_k, gxs), dms, &u_loc, &k_loc, jac)?;
+                form_jac_u(&petsc, (mx, xm, xs, xs_k, gxs), (dms[0], dms[1]), &u_loc, &k_loc, jac)?;
                 jac.assemble(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
 
                 Ok(())
             })?;
             snes.set_from_options()?;
-            // snes.set_dm(dms[0]);  // TODO: do we even need this?
-            // (also it should probably be set right after we create the snes, not here)
 
             snes.solve(None, &mut x_parts[0])?;
         },
@@ -155,53 +165,76 @@ fn main() -> petsc_rs::Result<()> {
             let mut f_parts = pack.composite_get_access_mut(&mut f)?;
     
             let mut snes = SNES::create(petsc.world())?;
+
+            let b_mat = dms[1].create_matrix()?;
             
-            snes.set_function(Some(&mut f_parts[1]), |_snes, x, y| {
+            snes.set_dm(dms[1].clone())?; // TODO: does this work
+            
+            snes.set_function(Some(&mut f_parts[1]), |snes, x, y| {
+                // TODO: idk if we need to do this, we might be able to just use the dms
+                // from outside of the closure
+                let dms = [&dms[0], snes.try_get_dm().unwrap()];
                 let (_, mx, _, _, _, _, _, _, _, _, _, _, _) = dms[1].da_get_info()?;
                 let (xs, _, _, _xm, _, _) = dms[1].da_get_corners()?;
                 let (xs_u, _, _, _xm_u, _, _) = dms[0].da_get_corners()?;
                 let (gxs, _, _, _gxm, _, _) = dms[1].da_get_ghost_corners()?;
-                // TODO: make this use composite_get_local_vectors
-                let mut local_vecs = pack.composite_create_local_vectors()?;
+                
+                let mut local_vecs = pack.composite_get_local_vectors()?;
+                pack.composite_scatter(x, local_vecs.iter_mut().map(|bv| bv.deref_mut()))?;
                 let mut k_loc = local_vecs.remove(1);
 
                 dms[1].global_to_local(x, InsertMode::INSERT_VALUES, &mut k_loc)?;
 
-                form_func_k(&petsc, (m, mx, xs, xs_u, gxs), dms, &u_loc, &k_loc, y)?;
+                form_func_k(&petsc, (m, mx, xs, xs_u, gxs), (dms[0], dms[1]), &u_loc, &k_loc, y)?;
 
                 Ok(())
             })?;
-            let b_mat = dms[1].create_matrix()?;
-            snes.set_jacobian_single_mat(b_mat, |_snes, x, jac| {
+            snes.set_jacobian_single_mat(b_mat, |snes, x, jac| {
+                // TODO: idk if we need to do this, we might be able to just use the dms
+                // from outside of the closure
+                let dms = [&dms[0], snes.try_get_dm().unwrap()];
                 let (_, mx, _, _, _, _, _, _, _, _, _, _, _) = dms[1].da_get_info()?;
                 let (xs, _, _, xm, _, _) = dms[1].da_get_corners()?;
                 let (xs_u, _, _, _xm_u, _, _) = dms[0].da_get_corners()?;
                 let (gxs, _, _, _gxm, _, _) = dms[1].da_get_ghost_corners()?;
-                // TODO: make this use composite_get_local_vectors
-                let mut local_vecs = pack.composite_create_local_vectors()?;
+                
+                let mut local_vecs = pack.composite_get_local_vectors()?;
+                pack.composite_scatter(x, local_vecs.iter_mut().map(|bv| bv.deref_mut()))?;
                 let mut k_loc = local_vecs.remove(1);
 
                 dms[1].global_to_local(x, InsertMode::INSERT_VALUES, &mut k_loc)?;
 
-                form_jac_k(&petsc, (mx, xm, xs, xs_u, gxs), dms, &u_loc, &k_loc, jac)?;
+                form_jac_k(&petsc, (mx, xm, xs, xs_u, gxs), (dms[0], dms[1]), &u_loc, &k_loc, jac)?;
                 jac.assemble(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
 
                 Ok(())
             })?;
             snes.set_from_options()?;
-            // snes.set_dm(dms[1]); // TODO: add ?
 
             snes.solve(None, &mut x_parts[1])?;
         },
         2 => {
             let mut snes = SNES::create(petsc.world())?;
-            
+
             let mut b_mat = pack.create_matrix()?;
+
+            if !pass_dm {
+                let pc = snes.get_ksp_mut()?.get_pc_mut()?;
+                pc.field_split_set_is(Some("u"), isg.remove(0))?;
+                pc.field_split_set_is(Some("k"), isg.remove(0))?;
+            } else {
+                snes.set_dm(pack.clone())?; // TODO: will this work? what does cloning do in this case
+            }
+
             // This example does not correctly allocate off-diagonal blocks.
             // These options allows new nonzeros (slow).
             b_mat.set_option(MatOption::MAT_NEW_NONZERO_LOCATION_ERR, false)?;
             b_mat.set_option(MatOption::MAT_NEW_NONZERO_ALLOCATION_ERR, false)?;
-            snes.set_function(Some(&mut f), |_snes, x, y| {
+            snes.set_function(Some(&mut f), |snes, x, y| {
+                // TODO: idk if we need to do this, we might be able to just use the dms
+                // from outside of the closure
+                let pack = snes.try_get_dm().unwrap_or(&pack);
+                let dms = snes.try_get_dm().map(|pack| pack.composite_dms().ok()).flatten().unwrap_or(dms);
                 let (_, mx_u, _, _, _, _, _, _, _, _, _, _, _) = dms[0].da_get_info()?;
                 let (_, mx_k, _, _, _, _, _, _, _, _, _, _, _) = dms[1].da_get_info()?;
                 let (xs_u, _, _, _xm_u, _, _) = dms[0].da_get_corners()?;
@@ -209,19 +242,22 @@ fn main() -> petsc_rs::Result<()> {
                 let (gxs_u, _, _, _gxm_u, _, _) = dms[0].da_get_ghost_corners()?;
                 let (gxs_k, _, _, _gxm_k, _, _) = dms[1].da_get_ghost_corners()?;
 
-                // TODO: make this use composite_get_local_vectors
-                let mut local_vecs = pack.composite_create_local_vectors()?;
-                pack.composite_scatter(x, &mut local_vecs)?;
+                let mut local_vecs = pack.composite_get_local_vectors()?;
+                pack.composite_scatter(x, local_vecs.iter_mut().map(|bv| bv.deref_mut()))?;
                 let (k_loc, u_loc) = (local_vecs.pop().unwrap(), local_vecs.pop().unwrap());
                 let mut y_parts = pack.composite_get_access_mut(y)?;
                 let (mut y_k, mut y_u) = (y_parts.pop().unwrap(), y_parts.pop().unwrap());
 
-                form_func_u(&petsc, (m, mx_u, xs_u, xs_k, gxs_u), dms, &u_loc, &k_loc, &mut y_u)?;
-                form_func_k(&petsc, (m, mx_k, xs_k, xs_u, gxs_k), dms, &u_loc, &k_loc, &mut y_k)?;
+                form_func_u(&petsc, (m, mx_u, xs_u, xs_k, gxs_u), (&dms[0], &dms[1]), &u_loc, &k_loc, &mut y_u)?;
+                form_func_k(&petsc, (m, mx_k, xs_k, xs_u, gxs_k), (&dms[0], &dms[1]), &u_loc, &k_loc, &mut y_k)?;
 
                 Ok(())
             })?;
-            snes.set_jacobian_single_mat(b_mat, |_snes, x, jac| {
+            snes.set_jacobian_single_mat(b_mat, |snes, x, jac| {
+                // TODO: idk if we need to do this, we might be able to just use the dms/pack
+                // from outside of the closure
+                let pack = snes.try_get_dm().unwrap_or(&pack);
+                let dms = snes.try_get_dm().map(|pack| pack.composite_dms().ok()).flatten().unwrap_or(dms);
                 let (_, mx_u, _, _, _, _, _, _, _, _, _, _, _) = dms[0].da_get_info()?;
                 let (_, mx_k, _, _, _, _, _, _, _, _, _, _, _) = dms[1].da_get_info()?;
                 let (xs_u, _, _, xm_u, _, _) = dms[0].da_get_corners()?;
@@ -236,18 +272,18 @@ fn main() -> petsc_rs::Result<()> {
                 let is = pack.composite_get_local_indexsets()?.into_iter()
                     .map(|is| Rc::new(is)).collect::<Vec<_>>();
 
-                form_jac_u(&petsc, (mx_u, xm_u, xs_u, xs_k, gxs_u), dms, &u_loc, &k_loc,
+                form_jac_u(&petsc, (mx_u, xm_u, xs_u, xs_k, gxs_u), (&dms[0], &dms[1]), &u_loc, &k_loc,
                     &mut *jac.get_local_sub_matrix_mut(is[0].clone(), is[0].clone())?)?;
 
                 if !jac.type_compare("nest")? {
-                    form_jac_uk(&petsc, (mx_u, xm_u, xs_u, xs_k, gxs_u, gxs_k), dms, &u_loc, &k_loc,
+                    form_jac_uk(&petsc, (mx_u, xm_u, xs_u, xs_k, gxs_u, gxs_k), (&dms[0], &dms[1]), &u_loc, &k_loc,
                         &mut *jac.get_local_sub_matrix_mut(is[0].clone(), is[1].clone())?)?;
 
-                    form_jac_ku(&petsc, (mx_u, xm_k, xs_k, xs_u, gxs_k, gxs_u), dms, &u_loc, &k_loc,
+                    form_jac_ku(&petsc, (mx_u, xm_k, xs_k, xs_u, gxs_k, gxs_u), (&dms[0], &dms[1]), &u_loc, &k_loc,
                         &mut *jac.get_local_sub_matrix_mut(is[1].clone(), is[0].clone())?)?;
                 }
 
-                form_jac_k(&petsc, (mx_k, xm_k, xs_k, xs_u, gxs_k), dms, &u_loc, &k_loc,
+                form_jac_k(&petsc, (mx_k, xm_k, xs_k, xs_u, gxs_k), (&dms[0], &dms[1]), &u_loc, &k_loc,
                     &mut *jac.get_local_sub_matrix_mut(is[1].clone(), is[1].clone())?)?;
 
                 jac.assemble(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
@@ -255,14 +291,6 @@ fn main() -> petsc_rs::Result<()> {
                 Ok(())
             })?;
             snes.set_from_options()?;
-            if !pass_dm {
-                let pc = snes.get_ksp_mut()?.get_pc_mut()?;
-                pc.field_split_set_is(Some("u"), isg.remove(0))?;
-                pc.field_split_set_is(Some("k"), isg.remove(0))?;
-            } else {
-                todo!();
-                // snes.set_dm(pack);
-            }
 
             snes.solve(None, &mut x)?;
         },
@@ -279,13 +307,13 @@ fn main() -> petsc_rs::Result<()> {
 }
 
 fn form_func_u<'a>(_petsc: &Petsc, info: (PetscInt, PetscInt, PetscInt, PetscInt, PetscInt),
-    dms: &[DM<'a>], u_loc: &Vector<'a>, k_loc: &Vector<'a>, y: &mut Vector<'a>) -> petsc_rs::Result<()>
+    dms: (&DM<'a>, &DM<'a>), u_loc: &Vector<'a>, k_loc: &Vector<'a>, y: &mut Vector<'a>) -> petsc_rs::Result<()>
 {
     let (m, mx, xs, xs_k, gxs) = info;
 
-    let u_view = dms[0].da_vec_view(&u_loc)?;
-    let mut y_view = dms[0].da_vec_view_mut(y)?;
-    let k_view = dms[1].da_vec_view(&k_loc)?;
+    let u_view = dms.0.da_vec_view(&u_loc)?;
+    let mut y_view = dms.0.da_vec_view_mut(y)?;
+    let k_view = dms.1.da_vec_view(&k_loc)?;
     
     let hx = PetscScalar::from(1.0)/mx as PetscReal;
 
@@ -306,13 +334,13 @@ fn form_func_u<'a>(_petsc: &Petsc, info: (PetscInt, PetscInt, PetscInt, PetscInt
 }
 
 fn form_func_k<'a>(_petsc: &Petsc, info: (PetscInt, PetscInt, PetscInt, PetscInt, PetscInt),
-    dms: &[DM<'a>], u_loc: &Vector<'a>, k_loc: &Vector<'a>, y: &mut Vector<'a>) -> petsc_rs::Result<()>
+    dms: (&DM<'a>, &DM<'a>), u_loc: &Vector<'a>, k_loc: &Vector<'a>, y: &mut Vector<'a>) -> petsc_rs::Result<()>
 {
     let (_m, mx, xs, xs_u, gxs) = info;
 
-    let u_view = dms[0].da_vec_view(&u_loc)?;
-    let mut y_view = dms[1].da_vec_view_mut(y)?;
-    let k_view = dms[1].da_vec_view(&k_loc)?;
+    let u_view = dms.0.da_vec_view(&u_loc)?;
+    let mut y_view = dms.1.da_vec_view_mut(y)?;
+    let k_view = dms.1.da_vec_view(&k_loc)?;
 
     let hx = PetscScalar::from(1.0)/mx as PetscReal;
 
@@ -330,12 +358,12 @@ fn form_func_k<'a>(_petsc: &Petsc, info: (PetscInt, PetscInt, PetscInt, PetscInt
 }
 
 fn form_jac_u<'a>(_petsc: &Petsc, info: (PetscInt, PetscInt, PetscInt, PetscInt, PetscInt),
-    dms: &[DM<'a>], u_loc: &Vector<'a>, k_loc: &Vector<'a>, jac: &mut Mat<'a>) -> petsc_rs::Result<()>
+    dms: (&DM<'a>, &DM<'a>), u_loc: &Vector<'a>, k_loc: &Vector<'a>, jac: &mut Mat<'a>) -> petsc_rs::Result<()>
 {
     let (mx, xm, xs, xs_k, gxs) = info;
     
-    let _u_view = dms[0].da_vec_view(&u_loc)?;
-    let k_view = dms[1].da_vec_view(&k_loc)?;
+    let _u_view = dms.0.da_vec_view(&u_loc)?;
+    let k_view = dms.1.da_vec_view(&k_loc)?;
 
     let hx = PetscScalar::from(1.0)/mx as PetscReal;
 
@@ -353,12 +381,12 @@ fn form_jac_u<'a>(_petsc: &Petsc, info: (PetscInt, PetscInt, PetscInt, PetscInt,
 }
 
 fn form_jac_k<'a>(_petsc: &Petsc, info: (PetscInt, PetscInt, PetscInt, PetscInt, PetscInt),
-    dms: &[DM<'a>], u_loc: &Vector<'a>, k_loc: &Vector<'a>, jac: &mut Mat<'a>) -> petsc_rs::Result<()>
+    dms: (&DM<'a>, &DM<'a>), u_loc: &Vector<'a>, k_loc: &Vector<'a>, jac: &mut Mat<'a>) -> petsc_rs::Result<()>
 {
     let (mx, xm, xs, _xs_u, gxs) = info;
     
-    let _u_view = dms[0].da_vec_view(&u_loc)?;
-    let k_view = dms[1].da_vec_view(&k_loc)?;
+    let _u_view = dms.0.da_vec_view(&u_loc)?;
+    let k_view = dms.1.da_vec_view(&k_loc)?;
 
     let hx = PetscScalar::from(1.0)/mx as PetscReal;
 
@@ -370,12 +398,12 @@ fn form_jac_k<'a>(_petsc: &Petsc, info: (PetscInt, PetscInt, PetscInt, PetscInt,
 }
 
 fn form_jac_uk<'a>(_petsc: &Petsc, info: (PetscInt, PetscInt, PetscInt, PetscInt, PetscInt, PetscInt),
-    dms: &[DM<'a>], u_loc: &Vector<'a>, k_loc: &Vector<'a>, jac: &mut Mat<'a>) -> petsc_rs::Result<()>
+    dms: (&DM<'a>, &DM<'a>), u_loc: &Vector<'a>, k_loc: &Vector<'a>, jac: &mut Mat<'a>) -> petsc_rs::Result<()>
 {
     let (mx, xm, xs, _xs_k, gxs, gxs_k) = info;
     
-    let u_view = dms[0].da_vec_view(&u_loc)?;
-    let _k_view = dms[1].da_vec_view(&k_loc)?;
+    let u_view = dms.0.da_vec_view(&u_loc)?;
+    let _k_view = dms.1.da_vec_view(&k_loc)?;
 
     let hx = PetscScalar::from(1.0)/(mx as PetscReal);
 
@@ -393,12 +421,12 @@ fn form_jac_uk<'a>(_petsc: &Petsc, info: (PetscInt, PetscInt, PetscInt, PetscInt
 }
 
 fn form_jac_ku<'a>(_petsc: &Petsc, info: (PetscInt, PetscInt, PetscInt, PetscInt, PetscInt, PetscInt),
-    dms: &[DM<'a>], u_loc: &Vector<'a>, k_loc: &Vector<'a>, jac: &mut Mat<'a>) -> petsc_rs::Result<()>
+    dms: (&DM<'a>, &DM<'a>), u_loc: &Vector<'a>, k_loc: &Vector<'a>, jac: &mut Mat<'a>) -> petsc_rs::Result<()>
 {
     let (mx_u, xm, xs, xs_u, gxs, gxs_u) = info;
     
-    let u_view = dms[0].da_vec_view(&u_loc)?;
-    let _k_view = dms[1].da_vec_view(&k_loc)?;
+    let u_view = dms.0.da_vec_view(&u_loc)?;
+    let _k_view = dms.1.da_vec_view(&k_loc)?;
 
     let hx = PetscScalar::from(1.0)/(mx_u as PetscReal - 1.0);
 

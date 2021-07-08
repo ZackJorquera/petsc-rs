@@ -46,10 +46,10 @@
 /// ```ignore
 /// impl Vec<'_> {
 ///     wrap_simple_petsc_member_funcs! {
-///         VecSetABRetCD, set_ab_ret_cd, vec_p, input i32, a, input f64, b, 
-/// //         ^                  ^          ^        ^
-/// //      Petsc func name       |   pointer member  |- Then for each input
-/// //                       rust func name          put `input type, param_name,`
+///         VecSetABRetCD, pub set_ab_ret_cd, vec_p, input i32, a, input f64, b, 
+/// //         ^            ^         ^          ^        ^
+/// //    Petsc func name   └- vis    |   pointer member  |- Then for each input
+/// //                           rust func name          put `input type, param_name,`
 ///             output f64, c, output i32, d, takes mut, #[doc = "doc-string"];
 /// //           ^                              ^
 /// //           |- for each output             |- If you want the method to take
@@ -72,7 +72,7 @@
 /// ```ignore
 /// impl Vec<'_> {
 ///     wrap_simple_petsc_member_funcs! {
-///         VecAXPY, axpy, vec_p, input PetscScalar, alpha, input &Vector,
+///         VecAXPY, pub axpy, vec_p, input PetscScalar, alpha, input &Vector,
 ///             other .vec_p, #[doc = "doc-string"];
 /// //                ^ just add `.member_name` after the param_name
 ///     }
@@ -86,7 +86,7 @@
 /// ```ignore
 /// impl NullSpace<'_> {
 ///     wrap_simple_petsc_member_funcs! {
-///         MatNullSpaceTest, test, ns_p, input &Mat, vec .mat_p,
+///         MatNullSpaceTest, pub test, ns_p, input &Mat, vec .mat_p,
 ///         output bool, is_null .into from petsc_raw::PetscBool, #[doc = "doc-string"];
 /// //                           ^      ^      ^
 /// //                    add `.into`   |      |
@@ -100,7 +100,7 @@
 /// pointer cast is done automatically.
 macro_rules! wrap_simple_petsc_member_funcs {
     {$(
-        $raw_func:ident, $new_func:ident, $raw_ptr_var:ident,
+        $raw_func:ident, $vis_par:vis $new_func:ident, $raw_ptr_var:ident,
         $(input $param_type:ty, $param_name:ident $(.$member_name:ident)? ,)*
         $(output $ret_type:ty, $tmp_ident:ident $(.$into_fn:ident from $raw_ret_type:ty)? ,)*
         $(takes $mut_tag:tt,)? #[$doc:meta];
@@ -108,7 +108,7 @@ macro_rules! wrap_simple_petsc_member_funcs {
 $(
     #[$doc]
     #[allow(unused_parens)]
-    pub fn $new_func(& $($mut_tag)? self, $( $param_name: $param_type ),*)
+    $vis_par fn $new_func(& $($mut_tag)? self, $( $param_name: $param_type ),*)
         -> crate::Result<($( $ret_type ),*)>
     {
         $(
@@ -176,8 +176,8 @@ macro_rules! impl_petsc_object_funcs {
                 crate::Result::Ok(c_str.to_string_lossy().to_string())
             }
 
-            /// Determines whether a PETSc object is of a particular type (give as a string). 
-            pub fn type_compare<T: ToString>(&mut self, type_name: T) -> Result<bool> {
+            /// Determines whether a PETSc object is of a particular type (given as a string). 
+            pub fn type_compare<T: ToString>(&self, type_name: T) -> Result<bool> {
                 let type_name_cs = ::std::ffi::CString::new(type_name.to_string()).expect("`CString::new` failed");
                 let mut tmp = ::std::mem::MaybeUninit::<crate::petsc_raw::PetscBool>::uninit();
 

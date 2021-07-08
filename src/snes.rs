@@ -81,9 +81,10 @@ struct SNESFunctionTrampolineData<'a, 'tl> {
     // However, we might want to use it for something like `get_residuals()`
     _vec: Option<&'tl Vector<'a>>,
     user_f: Box<dyn FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl>,
+    set_dm: bool,
 }
 
-enum SNESJacobianTrampolineData<'a,'tl> {
+enum SNESJacobianTrampolineData<'a, 'tl> {
     SingleMat(Pin<Box<SNESJacobianSingleTrampolineData<'a, 'tl>>>),
     DoubleMat(Pin<Box<SNESJacobianDoubleTrampolineData<'a, 'tl>>>),
 }
@@ -178,12 +179,12 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     ///
     /// Note, this does not return a [`Result`](crate::Result) because it can never
     /// fail, instead it will return `None`.
-    pub fn try_get_ksp<'c>(&'c self) -> Option<&'c KSP<'a, 'tl>> {
+    pub fn try_get_ksp(&self) -> Option<&KSP<'a, 'tl>> {
         self.ksp.as_ref()
     }
 
     /// Returns a reference to the [`KSP`](KSP) context.
-    pub fn get_ksp<'c>(&'c mut self) -> Result<&'c KSP<'a, 'tl>>
+    pub fn get_ksp(&mut self) -> Result<&KSP<'a, 'tl>>
     {
         // TODO: should we even have a non mut one (or only `get_ksp_mut`)
 
@@ -207,7 +208,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     }
 
     /// Returns a mutable reference to the [`KSP`](KSP) context.
-    pub fn get_ksp_mut<'c>(&'c mut self) -> Result<&'c mut KSP<'a, 'tl>>
+    pub fn get_ksp_mut(&mut self) -> Result<&mut KSP<'a, 'tl>>
     {
         if let Some(ref mut ksp) = self.ksp
         {
@@ -246,6 +247,11 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     /// f'(x) x = -f(x),
     /// ```
     /// where `f'(x)` denotes the Jacobian matrix and `f(x)` is the function.
+    ///
+    /// You can access the [`DM`] owned by the `snes` in the `user_f` by using
+    /// [`let dm = snes.try_get_dm().unwrap();`](SNES::try_get_dm()). Note, this will only work
+    /// if you set the dm with [`SNES::set_dm()`] BEFORE you call the
+    /// [`set_function()`](SNES::set_function) method.
     ///
     /// # Example
     ///
@@ -303,7 +309,8 @@ impl<'a, 'tl> SNES<'a, 'tl> {
         // Note, we only store input_vec in the trampoline data so it isn't dropped,
         // we never actually use it.
         let trampoline_data = Box::pin(SNESFunctionTrampolineData { 
-            world: self.world, _vec: input_vec, user_f: closure_anchor });
+            world: self.world, _vec: input_vec, user_f: closure_anchor,
+            set_dm: self.dm.is_some() });
 
         // drop old trampoline_data
         let _ = self.function_trampoline_data.take();
@@ -328,13 +335,26 @@ impl<'a, 'tl> SNES<'a, 'tl> {
             // SAFETY: even though snes is mut and thus we can set optional parameters, we don't
             // as we dont expose the mut to the user closure, we only use it with `set_jacobian_domain_error`
             let mut snes = ManuallyDrop::new(SNES::new(trampoline_data.world, snes_p));
+            if trampoline_data.set_dm {
+                let mut dm_p = MaybeUninit::uninit();
+                let ierr = petsc_raw::SNESGetDM(snes_p, dm_p.as_mut_ptr());
+                if ierr != 0 { let _ = Petsc::check_error(trampoline_data.world, ierr); return ierr; }
+                let mut dm = DM::new(trampoline_data.world, dm_p.assume_init());
+                let ierr = DM::set_inner_values(&mut dm);
+                if ierr != 0 { return ierr; }
+                snes.dm = Some(dm); // Note, because snes is not dropped, snes.dm wont be either
+            }
             let x = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: x_p });
             let mut f = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: f_p });
             
             // TODO: is this safe, can we move the data in user_f by calling it
-            (trampoline_data.get_unchecked_mut().user_f)(&snes, &x, &mut f,)
+            (trampoline_data.get_unchecked_mut().user_f)(&snes, &x, &mut f)
                 .map_or_else(|err| match err {
                     DomainOrPetscError::DomainErr => {
+                        // TODO: `set_function_domain_error` doesn't take mut, but i think it should (because it does
+                        // change the snes behind the pointer). However, it isn't the end of the world because, in the 
+                        // rust api, there is no way for the closure to access this value that is set by this function.
+                        // Or do we need to do something to account for interior mutability
                         let perr = snes.set_function_domain_error();
                         match perr {
                             Ok(_) => 0,
@@ -449,7 +469,9 @@ impl<'a, 'tl> SNES<'a, 'tl> {
                 let mut dm_p = MaybeUninit::uninit();
                 let ierr = petsc_raw::SNESGetDM(snes_p, dm_p.as_mut_ptr());
                 if ierr != 0 { let _ = Petsc::check_error(trampoline_data.world, ierr); return ierr; }
-                let dm = DM::new(trampoline_data.world, dm_p.assume_init());
+                let mut dm = DM::new(trampoline_data.world, dm_p.assume_init());
+                let ierr = DM::set_inner_values(&mut dm);
+                if ierr != 0 { return ierr; }
                 snes.dm = Some(dm); // Note, because snes is not dropped, snes.dm wont be either
             }
             let x = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: vec_p });
@@ -458,6 +480,10 @@ impl<'a, 'tl> SNES<'a, 'tl> {
             (trampoline_data.get_unchecked_mut().user_f)(&snes, &x, &mut a_mat)
                 .map_or_else(|err| match err {
                     DomainOrPetscError::DomainErr => {
+                        // TODO: `set_jacobian_domain_error` doesn't take mut, but i think it should (because it does
+                        // change the snes behind the pointer). However, it isn't the end of the world because, in the 
+                        // rust api, there is no way for the closure to access this value that is set by this function.
+                        // Or do we need to do something to account for interior mutability
                         let perr = snes.set_jacobian_domain_error();
                         match perr {
                             Ok(_) => 0,
@@ -581,7 +607,9 @@ impl<'a, 'tl> SNES<'a, 'tl> {
                 let mut dm_p = MaybeUninit::uninit();
                 let ierr = petsc_raw::SNESGetDM(snes_p, dm_p.as_mut_ptr());
                 if ierr != 0 { let _ = Petsc::check_error(trampoline_data.world, ierr); return ierr; }
-                let dm = DM::new(trampoline_data.world, dm_p.assume_init());
+                let mut dm = DM::new(trampoline_data.world, dm_p.assume_init());
+                let ierr = DM::set_inner_values(&mut dm);
+                if ierr != 0 { return ierr; }
                 snes.dm = Some(dm); // Note, because snes is not dropped, snes.dm wont be either
             }
             let x = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: vec_p });
@@ -623,12 +651,6 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     ///     * `snes` - the snes context
     ///     * `it` - iteration number
     ///     * `norm - 2-norm function value (may be estimated)
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// 
-    /// ```
     pub fn monitor_set<F>(&mut self, user_f: F) -> Result<()>
     where
         F: FnMut(&SNES<'a, 'tl>, PetscInt, PetscReal) -> Result<()> + 'tl
@@ -757,7 +779,9 @@ impl<'a, 'tl> SNES<'a, 'tl> {
                 let mut dm_p = MaybeUninit::uninit();
                 let ierr = petsc_raw::SNESGetDM(snes_p.assume_init(), dm_p.as_mut_ptr());
                 if ierr != 0 { let _ = Petsc::check_error(trampoline_data.world, ierr); return ierr; }
-                let dm = DM::new(trampoline_data.world, dm_p.assume_init());
+                let mut dm = DM::new(trampoline_data.world, dm_p.assume_init());
+                let ierr = DM::set_inner_values(&mut dm);
+                if ierr != 0 { return ierr; }
                 snes.dm = Some(dm); // Note, because snes is not dropped, snes.dm wont be either
             }
             
@@ -837,7 +861,9 @@ impl<'a, 'tl> SNES<'a, 'tl> {
                 let mut dm_p = MaybeUninit::uninit();
                 let ierr = petsc_raw::SNESGetDM(snes_p.assume_init(), dm_p.as_mut_ptr());
                 if ierr != 0 { let _ = Petsc::check_error(trampoline_data.world, ierr); return ierr; }
-                let dm = DM::new(trampoline_data.world, dm_p.assume_init());
+                let mut dm = DM::new(trampoline_data.world, dm_p.assume_init());
+                let ierr = DM::set_inner_values(&mut dm);
+                if ierr != 0 { return ierr; }
                 snes.dm = Some(dm); // Note, because snes is not dropped, snes.dm wont be either
             }
             
@@ -916,6 +942,53 @@ impl<'a, 'tl> SNES<'a, 'tl> {
 
         Ok(())
     }
+    
+    // TODO: should we add any of the following
+    // // TODO: would it be safe to clone the dm and give the clone to the snes?
+    // pub fn set_dm_from_mut(&mut self, dm: &mut DM<'a>) -> Result<()> {
+    //
+    //     let ierr = unsafe { petsc_raw::SNESSetDM(self.snes_p, dm.dm_p) };
+    //     Petsc::check_error(self.world, ierr)?;
+    //
+    //     let dm_owned = dm.clone();
+    //     let ierr = unsafe { petsc_raw::SNESSetDM(self.snes_p, dm_owned.dm_p) };
+    //     Petsc::check_error(self.world, ierr)?;
+    //
+    //     let _ = self.dm.take();
+    //     self.dm = Some(dm_owned);
+    //
+    //     Ok(())
+    // }
+    //
+    // // TODO: omg this is not safe, even for unsafe
+    // pub unsafe fn set_dm_from_ref(&mut self, dm: &DM<'a>) -> Result<()> {
+    //     let ierr = petsc_raw::SNESSetDM(self.snes_p, dm.dm_p);
+    //     Petsc::check_error(self.world, ierr)?;
+    //
+    //     let dm_owned = DM::new(dm.world, dm.dm_p);
+    //     let ierr = petsc_raw::PetscObjectReference(dm_owned.dm_p as *mut petsc_raw::_p_PetscObject);
+    //     Petsc::check_error(self.world, ierr)?;
+    //
+    //     let _ = self.dm.take();
+    //     self.dm = Some(dm_owned);
+    //
+    //     Ok(())
+    // }
+    //
+    // // TODO: this is not safe
+    // pub fn set_dm_from_mut2(&mut self, dm: &mut DM<'a>) -> Result<()> {
+    //     let ierr = unsafe { petsc_raw::SNESSetDM(self.snes_p, dm.dm_p) };
+    //     Petsc::check_error(self.world, ierr)?;
+    //
+    //     let dm_owned = DM::new(dm.world, dm.dm_p);
+    //     let ierr = unsafe { petsc_raw::PetscObjectReference(dm_owned.dm_p as *mut petsc_raw::_p_PetscObject) };
+    //     Petsc::check_error(self.world, ierr)?;
+    //
+    //     let _ = self.dm.take();
+    //     self.dm = Some(dm_owned);
+    //
+    //     Ok(())
+    // }
 
     /// Returns an [`Option`] to a reference to the [DM](DM).
     ///
@@ -967,22 +1040,23 @@ impl<'a, 'tl> SNES<'a, 'tl> {
 // macro impls
 impl<'a> SNES<'a, '_> {
     wrap_simple_petsc_member_funcs! {
-        SNESSetFromOptions, set_from_options, snes_p, takes mut, #[doc = "Sets various SNES and KSP parameters from user options."];
-        SNESSetUp, set_up, snes_p, takes mut, #[doc = "Sets up the internal data structures for the later use of a nonlinear solver. This will be automatically called with [`SNES::solve()`]."];
-        SNESGetIterationNumber, get_iteration_number, snes_p, output PetscInt, it_num, #[doc = "Gets the number of nonlinear iterations completed at this time. (<https://petsc.org/release/docs/manualpages/SNES/SNESGetIterationNumber.html>)"];
-        SNESGetTolerances, get_tolerances, snes_p, output PetscReal, atol, output PetscReal, rtol, output PetscReal, stol, output PetscInt, maxit, output PetscInt, maxf, #[doc = "Gets various parameters used in convergence tests.\n\n\
+        SNESSetFromOptions, pub set_from_options, snes_p, takes mut, #[doc = "Sets various SNES and KSP parameters from user options."];
+        SNESSetUp, pub set_up, snes_p, takes mut, #[doc = "Sets up the internal data structures for the later use of a nonlinear solver. This will be automatically called with [`SNES::solve()`]."];
+        SNESGetIterationNumber, pub get_iteration_number, snes_p, output PetscInt, it_num, #[doc = "Gets the number of nonlinear iterations completed at this time. (<https://petsc.org/release/docs/manualpages/SNES/SNESGetIterationNumber.html>)"];
+        SNESGetTolerances, pub get_tolerances, snes_p, output PetscReal, atol, output PetscReal, rtol, output PetscReal, stol, output PetscInt, maxit, output PetscInt, maxf, #[doc = "Gets various parameters used in convergence tests.\n\n\
             # Outputs (in order)\n\n\
             * `atol` - absolute convergence tolerance\n\
             * `rtol` - relative convergence tolerance\n\
             * `stol` - convergence tolerance in terms of the norm of the change in the solution between steps\n\
             * `maxit` - maximum number of iterations\n\
             * `maxf` - maximum number of function evaluations\n"];
-        SNESGetConvergedReason, get_converged_reason, snes_p, output SNESConvergedReason, conv_reas, #[doc = "Gets the reason the SNES iteration was stopped."];
-        SNESSetErrorIfNotConverged, set_error_if_not_converged, snes_p, input bool, flg, takes mut, #[doc = "Causes [`SNES::solve()`] to generate an error if the solver has not converged.\n\n\
+        SNESGetConvergedReason, pub get_converged_reason, snes_p, output SNESConvergedReason, conv_reas, #[doc = "Gets the reason the SNES iteration was stopped."];
+        SNESSetErrorIfNotConverged, pub set_error_if_not_converged, snes_p, input bool, flg, takes mut, #[doc = "Causes [`SNES::solve()`] to generate an error if the solver has not converged.\n\n\
             Or the database key `-snes_error_if_not_converged` can be used.\n\nNormally PETSc continues if a linear solver fails to converge, you can call [`SNES::get_converged_reason()`] after a [`SNES::solve()`] to determine if it has converged."];
-        SNESSetJacobianDomainError, set_jacobian_domain_error, snes_p, takes mut, #[doc = "Tells [`SNES`] that compute jacobian does not make sense any more.\n\n\
+        // TODO: these use interior mutability without UnsafeCell, is that ok? do we need to use UnsafeCell?
+        SNESSetJacobianDomainError, pub(crate) set_jacobian_domain_error, snes_p, takes mut, #[doc = "Tells [`SNES`] that compute jacobian does not make sense any more.\n\n\
             For example there is a negative element transformation. You probably want to use [`DomainErr`] instead of this function."];
-        SNESSetFunctionDomainError, set_function_domain_error, snes_p, takes mut, #[doc = "Tells [`SNES`] that the input vector to your SNES Function is not in the functions domain.\n\n\
+        SNESSetFunctionDomainError, pub(crate) set_function_domain_error, snes_p, takes mut, #[doc = "Tells [`SNES`] that the input vector to your SNES Function is not in the functions domain.\n\n\
             For example, negative pressure. You probably want to use [`DomainErr`] instead of this function."];
     }
 }

@@ -716,15 +716,15 @@ impl<'a> NullSpace<'a> {
 // Macro impls
 impl<'a> Mat<'a> {    
     wrap_simple_petsc_member_funcs! {
-        MatSetFromOptions, set_from_options, mat_p, takes mut, #[doc = "Configures the Mat from the options database."];
-        MatSetUp, set_up, mat_p, takes mut, #[doc = "Sets up the internal matrix data structures for later use"];
-        MatAssemblyBegin, assembly_begin, mat_p, input MatAssemblyType, assembly_type, takes mut, #[doc = "Begins assembling the matrix. This routine should be called after completing all calls to MatSetValues()."];
-        MatAssemblyEnd, assembly_end, mat_p, input MatAssemblyType, assembly_type, takes mut, #[doc = "Completes assembling the matrix. This routine should be called after MatAssemblyBegin()."];
-        MatGetLocalSize, get_local_size, mat_p, output PetscInt, res1, output PetscInt, res2, #[doc = "Returns the number of local rows and local columns of a matrix.\n\nThat is the local size of the left and right vectors as returned by `MatCreateVecs()`"];
-        MatGetSize, get_global_size, mat_p, output PetscInt, res1, output PetscInt, res2, #[doc = "Returns the number of global rows and columns of a matrix."];
-        MatMult, mult, mat_p, input &Vector, x.vec_p, input &mut Vector, y.vec_p, #[doc = "Computes the matrix-vector product, y = Ax"];
-        MatNorm, norm, mat_p, input NormType, norm_type, output PetscReal, tmp1, #[doc = "Calculates various norms of a matrix."];
-        MatSetOption, set_option, mat_p, input MatOption, option, input bool, flg, takes mut, #[doc = "Sets a parameter option for a matrix.\n\n\
+        MatSetFromOptions, pub set_from_options, mat_p, takes mut, #[doc = "Configures the Mat from the options database."];
+        MatSetUp, pub set_up, mat_p, takes mut, #[doc = "Sets up the internal matrix data structures for later use"];
+        MatAssemblyBegin, pub assembly_begin, mat_p, input MatAssemblyType, assembly_type, takes mut, #[doc = "Begins assembling the matrix. This routine should be called after completing all calls to MatSetValues()."];
+        MatAssemblyEnd, pub assembly_end, mat_p, input MatAssemblyType, assembly_type, takes mut, #[doc = "Completes assembling the matrix. This routine should be called after MatAssemblyBegin()."];
+        MatGetLocalSize, pub get_local_size, mat_p, output PetscInt, res1, output PetscInt, res2, #[doc = "Returns the number of local rows and local columns of a matrix.\n\nThat is the local size of the left and right vectors as returned by `MatCreateVecs()`"];
+        MatGetSize, pub get_global_size, mat_p, output PetscInt, res1, output PetscInt, res2, #[doc = "Returns the number of global rows and columns of a matrix."];
+        MatMult, pub mult, mat_p, input &Vector, x.vec_p, input &mut Vector, y.vec_p, #[doc = "Computes the matrix-vector product, y = Ax"];
+        MatNorm, pub norm, mat_p, input NormType, norm_type, output PetscReal, tmp1, #[doc = "Calculates various norms of a matrix."];
+        MatSetOption, pub set_option, mat_p, input MatOption, option, input bool, flg, takes mut, #[doc = "Sets a parameter option for a matrix.\n\n\
             Some options may be specific to certain storage formats. Some options determine how values will be inserted (or added). Sorted, row-oriented input will generally assemble the fastest. The default is row-oriented."];
     }
 
@@ -787,8 +787,8 @@ impl_petsc_view_func!{ Mat, mat_p, MatView }
 
 impl<'a> NullSpace<'a> {
     wrap_simple_petsc_member_funcs! {
-        MatNullSpaceRemove, remove_from, ns_p, input &mut Vector, vec.vec_p, #[doc = "Removes all the components of a null space from a vector."];
-        MatNullSpaceTest, test, ns_p, input &Mat, vec .mat_p, output bool, is_null .into from petsc_raw::PetscBool, #[doc = "Tests if the claimed null space is really a null space of a matrix."];
+        MatNullSpaceRemove, pub remove_from, ns_p, input &mut Vector, vec.vec_p, #[doc = "Removes all the components of a null space from a vector."];
+        MatNullSpaceTest, pub test, ns_p, input &Mat, vec .mat_p, output bool, is_null .into from petsc_raw::PetscBool, #[doc = "Tests if the claimed null space is really a null space of a matrix."];
     }
 }
 

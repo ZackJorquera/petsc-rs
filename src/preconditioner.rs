@@ -259,8 +259,8 @@ impl<'a, 'tl> PC<'a, 'tl> {
 // Macro impls
 impl<'a> PC<'a, '_> {
     wrap_simple_petsc_member_funcs! {
-        PCSetFromOptions, set_from_options, pc_p, takes mut, #[doc = "Sets PC options from the options database. This routine must be called before PCSetUp() if the user is to be allowed to set the preconditioner method."];
-        PCSetUp, set_up, pc_p, takes mut, #[doc = "Prepares for the use of a preconditioner."];
+        PCSetFromOptions, pub set_from_options, pc_p, takes mut, #[doc = "Sets PC options from the options database. This routine must be called before PCSetUp() if the user is to be allowed to set the preconditioner method."];
+        PCSetUp, pub set_up, pc_p, takes mut, #[doc = "Prepares for the use of a preconditioner."];
     }
 }
 

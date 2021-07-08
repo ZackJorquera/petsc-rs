@@ -45,6 +45,6 @@ impl<'a> Viewer<'a> {
     }
 
     wrap_simple_petsc_member_funcs! {
-        PetscViewerPushFormat, push_format, viewer_p, input PetscViewerFormat, format, takes mut, #[doc = "Sets the format for file PetscViewers."];
+        PetscViewerPushFormat, pub push_format, viewer_p, input PetscViewerFormat, format, takes mut, #[doc = "Sets the format for file PetscViewers."];
     }
 }
