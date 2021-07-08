@@ -36,10 +36,10 @@ pub struct VectorViewMut<'a, 'b> {
 /// For example, it is used with [`DM::get_local_vector()`].
 pub struct BorrowVectorMut<'a, 'bv> {
     pub(crate) owned_vec: ManuallyDrop<Vector<'a>>,
-    pub(crate) drop_func: Option<Box<dyn FnOnce(&mut Self) + 'bv>>,
+    drop_func: Option<Box<dyn FnOnce(&mut Self) + 'bv>>,
     // do we need this phantom data?
     // also should 'bv be used for the closure
-    pub(crate) _phantom: PhantomData<&'bv mut Vector<'a>>,
+    _phantom: PhantomData<&'bv mut Vector<'a>>,
 }
 
 /// A wrapper around [`Vector`] that is used when the [`Vector`] shouldn't be destroyed.
@@ -47,10 +47,10 @@ pub struct BorrowVectorMut<'a, 'bv> {
 /// For example, it is used with [`DM::get_local_vector()`].
 pub struct BorrowVector<'a, 'bv> {
     pub(crate) owned_vec: ManuallyDrop<Vector<'a>>,
-    pub(crate) drop_func: Option<Box<dyn FnOnce(&mut Self) + 'bv>>,
+    drop_func: Option<Box<dyn FnOnce(&mut Self) + 'bv>>,
     // do we need this phantom data?
     // also should 'bv be used for the closure
-    pub(crate) _phantom: PhantomData<&'bv Vector<'a>>,
+    _phantom: PhantomData<&'bv Vector<'a>>,
 }
 
 impl<'a> Drop for Vector<'a> {
@@ -62,13 +62,13 @@ impl<'a> Drop for Vector<'a> {
 
 impl Drop for BorrowVectorMut<'_, '_> {
     fn drop(&mut self) {
-        (self.drop_func.take().unwrap())(self);
+        self.drop_func.take().map(|f| f(self));
     }
 }
 
 impl Drop for BorrowVector<'_, '_> {
     fn drop(&mut self) {
-        (self.drop_func.take().unwrap())(self);
+        self.drop_func.take().map(|f| f(self));
     }
 }
 
@@ -667,6 +667,20 @@ impl<'b> Deref for VectorView<'_, 'b> {
 impl std::fmt::Debug for VectorView<'_, '_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.ndarray.fmt(f)
+    }
+}
+
+impl<'a, 'bv> BorrowVector<'a, 'bv> {
+    #[allow(dead_code)]
+    pub(crate) fn new(owned_vec: ManuallyDrop<Vector<'a>>, drop_func: Option<Box<dyn FnOnce(&mut BorrowVector<'a, 'bv>) + 'bv>>) -> Self {
+        BorrowVector { owned_vec, drop_func, _phantom: PhantomData }
+    }
+}
+
+impl<'a, 'bv> BorrowVectorMut<'a, 'bv> {
+    #[allow(dead_code)]
+    pub(crate) fn new(owned_vec: ManuallyDrop<Vector<'a>>, drop_func: Option<Box<dyn FnOnce(&mut BorrowVectorMut<'a, 'bv>) + 'bv>>) -> Self {
+        BorrowVectorMut { owned_vec, drop_func, _phantom: PhantomData }
     }
 }
 

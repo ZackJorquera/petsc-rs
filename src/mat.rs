@@ -23,8 +23,8 @@ pub struct Mat<'a> {
 ///
 /// For example, it is used with [`Mat::get_local_sub_matrix_mut()`].
 pub struct BorrowMatMut<'a, 'bv> {
-    pub(crate) owned_mat: ManuallyDrop<Mat<'a>>,
-    pub(crate) drop_func: Option<Box<dyn FnOnce(&mut Self) + 'bv>>,
+    owned_mat: ManuallyDrop<Mat<'a>>,
+    drop_func: Option<Box<dyn FnOnce(&mut Self) + 'bv>>,
     // do we need this phantom data?
     // also should 'bv be used for the closure
     pub(crate) _phantom: PhantomData<&'bv mut Mat<'a>>,
@@ -34,8 +34,8 @@ pub struct BorrowMatMut<'a, 'bv> {
 ///
 /// For example, it is used with [`Mat::get_local_sub_matrix_mut()`].
 pub struct BorrowMat<'a, 'bv> {
-    pub(crate) owned_mat: ManuallyDrop<Mat<'a>>,
-    pub(crate) drop_func: Option<Box<dyn FnOnce(&mut Self) + 'bv>>,
+    owned_mat: ManuallyDrop<Mat<'a>>,
+    drop_func: Option<Box<dyn FnOnce(&mut Self) + 'bv>>,
     // do we need this phantom data?
     // also should 'bv be used for the closure
     pub(crate) _phantom: PhantomData<&'bv Mat<'a>>,
@@ -50,13 +50,13 @@ impl<'a> Drop for Mat<'a> {
 
 impl Drop for BorrowMatMut<'_, '_> {
     fn drop(&mut self) {
-        (self.drop_func.take().unwrap())(self);
+        self.drop_func.take().map(|f| f(self));
     }
 }
 
 impl Drop for BorrowMat<'_, '_> {
     fn drop(&mut self) {
-        (self.drop_func.take().unwrap())(self);
+        self.drop_func.take().map(|f| f(self));
     }
 }
 
@@ -646,15 +646,14 @@ impl<'a> Mat<'a> {
         let ierr = unsafe { petsc_raw::MatGetLocalSubMatrix(self.mat_p,
             is_row.is_p, is_col.is_p, mat_p.as_mut_ptr()) };
         Petsc::check_error(self.world, ierr)?;
-        Ok(BorrowMatMut {
-            owned_mat: ManuallyDrop::new( Mat { world: self.world, mat_p: unsafe { mat_p.assume_init() } }),
-            drop_func: Some(Box::new(move |borrow_mat| {
+        Ok(BorrowMatMut::new(
+            ManuallyDrop::new( Mat { world: self.world, mat_p: unsafe { mat_p.assume_init() } }),
+            Some(Box::new(move |borrow_mat| {
                     let ierr = unsafe { petsc_raw::MatRestoreLocalSubMatrix(self.mat_p,
                         is_row.is_p, is_col.is_p, &mut borrow_mat.owned_mat.mat_p as *mut _) };
                     let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap ?
                 })),
-            _phantom: PhantomData,
-        })
+        ))
     }
 }
 
@@ -662,6 +661,20 @@ impl Clone for Mat<'_> {
     /// Same as [`x.duplicate(MatDuplicateOption::MAT_COPY_VALUES)`](Mat::duplicate()).
     fn clone(&self) -> Self {
         self.duplicate(MatDuplicateOption::MAT_COPY_VALUES).unwrap()
+    }
+}
+
+impl<'a, 'bv> BorrowMat<'a, 'bv> {
+    #[allow(dead_code)]
+    pub(crate) fn new(owned_mat: ManuallyDrop<Mat<'a>>, drop_func: Option<Box<dyn FnOnce(&mut BorrowMat<'a, 'bv>) + 'bv>>) -> Self {
+        BorrowMat { owned_mat, drop_func, _phantom: PhantomData }
+    }
+}
+
+impl<'a, 'bv> BorrowMatMut<'a, 'bv> {
+    #[allow(dead_code)]
+    pub(crate) fn new(owned_mat: ManuallyDrop<Mat<'a>>, drop_func: Option<Box<dyn FnOnce(&mut BorrowMatMut<'a, 'bv>) + 'bv>>) -> Self {
+        BorrowMatMut { owned_mat, drop_func, _phantom: PhantomData }
     }
 }
 

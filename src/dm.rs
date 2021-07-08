@@ -13,7 +13,6 @@
 // TODO: use `PetscObjectTypeCompare` to make sure we are using the correct type of DM
 
 use core::slice;
-use std::marker::PhantomData;
 use std::mem::ManuallyDrop;
 
 use ndarray::{ArrayView, ArrayViewMut};
@@ -215,10 +214,10 @@ impl<'a> DM<'a> {
         // We dont want to drop the vec through Vector::drop
         let vec = ManuallyDrop::new(Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } });
         
-        Ok(vector::BorrowVectorMut { owned_vec: vec, drop_func: Some(Box::new(move |borrow_vec| {
+        Ok(vector::BorrowVectorMut::new(vec, Some(Box::new(move |borrow_vec| {
             let ierr = unsafe { petsc_raw::DMRestoreLocalVector(self.dm_p, &mut borrow_vec.vec_p as *mut _) };
             let _ = Petsc::check_error(borrow_vec.world, ierr); // TODO: should I unwrap ?
-        })), _phantom: PhantomData })
+        }))))
     }
 
     /// Creates local vectors for each part of a DMComposite.
@@ -725,13 +724,13 @@ impl<'a> DM<'a> {
             Ok(vec_ps.into_iter().zip(wanted).map(move |(v_p, i)| {
                 let vec = ManuallyDrop::new(Vector { world: self.world, vec_p: v_p });
                 let gvec_rc = gvec_rc.clone();
-                vector::BorrowVectorMut { owned_vec: vec, drop_func: Some(Box::new(move |borrow_vec| {
+                vector::BorrowVectorMut::new(vec, Some(Box::new(move |borrow_vec| {
                     let i = i;
                     let ierr = unsafe { petsc_raw::DMCompositeRestoreAccessArray(
                         self.dm_p, gvec_rc.vec_p, 1, std::slice::from_ref(&i).as_ptr(),
                         std::slice::from_mut(&mut borrow_vec.vec_p).as_mut_ptr()) };
                     let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap ?
-                })), _phantom: PhantomData }
+                })))
             }).collect())
 
         } else {
