@@ -3,6 +3,7 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/Mat/index.html>
 
+use std::marker::PhantomData;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
@@ -21,8 +22,8 @@ pub struct Mat<'a> {
 ///
 /// For example, it is used with [`Mat::get_local_sub_matrix_mut()`].
 pub struct BorrowMatMut<'a, 'bv> {
-    pub(crate) owned_mat: ManuallyDrop<Mat<'a>>,
-    pub(crate) drop_func: Option<Box<dyn FnOnce(&mut Self) + 'bv>>,
+    owned_mat: ManuallyDrop<Mat<'a>>,
+    drop_func: Option<Box<dyn FnOnce(&mut Self) + 'bv>>,
     // do we need this phantom data?
     // also should 'bv be used for the closure
     pub(crate) _phantom: PhantomData<&'bv mut Mat<'a>>,
@@ -32,8 +33,8 @@ pub struct BorrowMatMut<'a, 'bv> {
 ///
 /// For example, it is used with [`Mat::get_local_sub_matrix_mut()`].
 pub struct BorrowMat<'a, 'bv> {
-    pub(crate) owned_mat: ManuallyDrop<Mat<'a>>,
-    pub(crate) drop_func: Option<Box<dyn FnOnce(&mut Self) + 'bv>>,
+    owned_mat: ManuallyDrop<Mat<'a>>,
+    drop_func: Option<Box<dyn FnOnce(&mut Self) + 'bv>>,
     // do we need this phantom data?
     // also should 'bv be used for the closure
     pub(crate) _phantom: PhantomData<&'bv Mat<'a>>,
@@ -48,13 +49,13 @@ impl<'a> Drop for Mat<'a> {
 
 impl Drop for BorrowMatMut<'_, '_> {
     fn drop(&mut self) {
-        (self.drop_func.take().unwrap())(self);
+        self.drop_func.take().map(|f| f(self));
     }
 }
 
 impl Drop for BorrowMat<'_, '_> {
     fn drop(&mut self) {
-        (self.drop_func.take().unwrap())(self);
+        self.drop_func.take().map(|f| f(self));
     }
 }
 
@@ -644,15 +645,14 @@ impl<'a> Mat<'a> {
         let ierr = unsafe { petsc_raw::MatGetLocalSubMatrix(self.mat_p,
             is_row.is_p, is_col.is_p, mat_p.as_mut_ptr()) };
         Petsc::check_error(self.world, ierr)?;
-        Ok(BorrowMatMut {
-            owned_mat: ManuallyDrop::new( Mat { world: self.world, mat_p: unsafe { mat_p.assume_init() } }),
-            drop_func: Some(Box::new(move |borrow_mat| {
+        Ok(BorrowMatMut::new(
+            ManuallyDrop::new( Mat { world: self.world, mat_p: unsafe { mat_p.assume_init() } }),
+            Some(Box::new(move |borrow_mat| {
                     let ierr = unsafe { petsc_raw::MatRestoreLocalSubMatrix(self.mat_p,
                         is_row.is_p, is_col.is_p, &mut borrow_mat.owned_mat.mat_p as *mut _) };
                     let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap ?
                 })),
-            _phantom: PhantomData,
-        })
+        ))
     }
 }
 
@@ -660,6 +660,20 @@ impl Clone for Mat<'_> {
     /// Same as [`x.duplicate(MatDuplicateOption::MAT_COPY_VALUES)`](Mat::duplicate()).
     fn clone(&self) -> Self {
         self.duplicate(MatDuplicateOption::MAT_COPY_VALUES).unwrap()
+    }
+}
+
+impl<'a, 'bv> BorrowMat<'a, 'bv> {
+    #[allow(dead_code)]
+    pub(crate) fn new(owned_mat: ManuallyDrop<Mat<'a>>, drop_func: Option<Box<dyn FnOnce(&mut BorrowMat<'a, 'bv>) + 'bv>>) -> Self {
+        BorrowMat { owned_mat, drop_func, _phantom: PhantomData }
+    }
+}
+
+impl<'a, 'bv> BorrowMatMut<'a, 'bv> {
+    #[allow(dead_code)]
+    pub(crate) fn new(owned_mat: ManuallyDrop<Mat<'a>>, drop_func: Option<Box<dyn FnOnce(&mut BorrowMatMut<'a, 'bv>) + 'bv>>) -> Self {
+        BorrowMatMut { owned_mat, drop_func, _phantom: PhantomData }
     }
 }
 
@@ -714,21 +728,21 @@ impl<'a> NullSpace<'a> {
 // Macro impls
 impl<'a> Mat<'a> {    
     wrap_simple_petsc_member_funcs! {
-        MatSetFromOptions, set_from_options, mat_p, takes mut, #[doc = "Configures the Mat from the options database."];
-        MatSetUp, set_up, mat_p, takes mut, #[doc = "Sets up the internal matrix data structures for later use"];
-        MatAssemblyBegin, assembly_begin, mat_p, input MatAssemblyType, assembly_type, takes mut, #[doc = "Begins assembling the matrix. This routine should be called after completing all calls to MatSetValues()."];
-        MatAssemblyEnd, assembly_end, mat_p, input MatAssemblyType, assembly_type, takes mut, #[doc = "Completes assembling the matrix. This routine should be called after MatAssemblyBegin()."];
-        MatGetLocalSize, get_local_size, mat_p, output PetscInt, res1, output PetscInt, res2, #[doc = "Returns the number of local rows and local columns of a matrix.\n\nThat is the local size of the left and right vectors as returned by `MatCreateVecs()`"];
-        MatGetSize, get_global_size, mat_p, output PetscInt, res1, output PetscInt, res2, #[doc = "Returns the number of global rows and columns of a matrix."];
-        MatMult, mult, mat_p, input &Vector, x.vec_p, input &mut Vector, y.vec_p, #[doc = "Computes the matrix-vector product, y = Ax"];
-        MatNorm, norm, mat_p, input NormType, norm_type, output PetscReal, tmp1, #[doc = "Calculates various norms of a matrix."];
-        MatSetOption, set_option, mat_p, input MatOption, option, input bool, flg, takes mut, #[doc = "Sets a parameter option for a matrix.\n\n\
+        MatSetFromOptions, pub set_from_options, takes mut, #[doc = "Configures the Mat from the options database."];
+        MatSetUp, pub set_up, takes mut, #[doc = "Sets up the internal matrix data structures for later use"];
+        MatAssemblyBegin, pub assembly_begin, input MatAssemblyType, assembly_type, takes mut, #[doc = "Begins assembling the matrix. This routine should be called after completing all calls to MatSetValues()."];
+        MatAssemblyEnd, pub assembly_end, input MatAssemblyType, assembly_type, takes mut, #[doc = "Completes assembling the matrix. This routine should be called after MatAssemblyBegin()."];
+        MatGetLocalSize, pub get_local_size, output PetscInt, res1, output PetscInt, res2, #[doc = "Returns the number of local rows and local columns of a matrix.\n\nThat is the local size of the left and right vectors as returned by `MatCreateVecs()`"];
+        MatGetSize, pub get_global_size, output PetscInt, res1, output PetscInt, res2, #[doc = "Returns the number of global rows and columns of a matrix."];
+        MatMult, pub mult, input &Vector, x.vec_p, input &mut Vector, y.vec_p, #[doc = "Computes the matrix-vector product, y = Ax"];
+        MatNorm, pub norm, input NormType, norm_type, output PetscReal, tmp1, #[doc = "Calculates various norms of a matrix."];
+        MatSetOption, pub set_option, input MatOption, option, input bool, flg, takes mut, #[doc = "Sets a parameter option for a matrix.\n\n\
             Some options may be specific to certain storage formats. Some options determine how values will be inserted (or added). Sorted, row-oriented input will generally assemble the fastest. The default is row-oriented."];
     }
 
     // TODO: there is more to each of these allocations that i should add support for
     wrap_prealloc_petsc_member_funcs! {
-        MatSeqAIJSetPreallocation, seq_aij_set_preallocation, mat_p, nz nz, nzz, #[doc = "For good matrix assembly \
+        MatSeqAIJSetPreallocation, seq_aij_set_preallocation, nz nz, nzz, #[doc = "For good matrix assembly \
             performance the user should preallocate the matrix storage by setting the parameter nz (or the array nnz). \
             By setting these parameters accurately, performance during matrix assembly can be increased by more than a \
             factor of 50.\n\n\
@@ -736,14 +750,14 @@ impl<'a> Mat<'a> {
             # Parameters.\n\n\
             * `nz` - number of nonzeros per row (same for all rows)\n\
             * `nnz` - slice containing the number of nonzeros in the various rows (possibly different for each row) or `None`"];
-        MatSeqSELLSetPreallocation, seq_sell_set_preallocation, mat_p, nz nz, nnz, #[doc = "For good matrix assembly \
+        MatSeqSELLSetPreallocation, seq_sell_set_preallocation, nz nz, nnz, #[doc = "For good matrix assembly \
             performance the user should preallocate the matrix storage by setting the parameter nz (or the array nnz). \
             By setting these parameters accurately, performance during matrix assembly can be increased significantly.\n\n\
             Petsc C Docs: <https://petsc.org/release/docs/manualpages/Mat/MatSeqSELLSetPreallocation.html#MatSeqSELLSetPreallocation>\n\n\
             # Parameters.\n\n\
             * `nz` - number of nonzeros per row (same for all rows)\n\
             * `nnz` - slice containing the number of nonzeros in the various rows (possibly different for each row) or `None`"];
-        MatMPIAIJSetPreallocation, mpi_aij_set_preallocation, mat_p, nz d_nz, d_nnz, nz o_nz, o_nnz, #[doc = "Preallocates memory for a \
+        MatMPIAIJSetPreallocation, mpi_aij_set_preallocation, nz d_nz, d_nnz, nz o_nz, o_nnz, #[doc = "Preallocates memory for a \
         sparse parallel matrix in AIJ format (the default parallel PETSc format). For good matrix assembly performance the \
         user should preallocate the matrix storage by setting the parameters d_nz (or d_nnz) and o_nz (or o_nnz). By setting \
         these parameters accurately, performance can be increased by more than a factor of 50.\n\n\
@@ -758,19 +772,19 @@ impl<'a> Mat<'a> {
         * `o_nnz` - array containing the number of nonzeros in the various rows of the OFF-DIAGONAL portion of the local submatrix \
         (possibly different for each row) or `None`, if `o_nz` is used to specify the nonzero structure. The size of this array is \
         equal to the number of local rows, i.e 'm'."];
-        MatMPISELLSetPreallocation, mpi_sell_set_preallocation, mat_p, nz d_nz, d_nnz, nz o_nz, o_nnz, #[doc = "Preallocates memory for a \
+        MatMPISELLSetPreallocation, mpi_sell_set_preallocation, nz d_nz, d_nnz, nz o_nz, o_nnz, #[doc = "Preallocates memory for a \
         sparse parallel matrix in sell format. For good matrix assembly performance the user should preallocate the matrix storage \
         by setting the parameters `d_nz` (or `d_nnz`) and `o_nz` (or `o_nnz`).\n\n\
         Petsc C Docs: <https://petsc.org/release/docs/manualpages/Mat/MatMPISELLSetPreallocation.html#MatMPISELLSetPreallocation>\n\n\
         # Parameters.\n\n\
         Read docs for [`Mat::mpi_aij_set_preallocation()`](Mat::mpi_aij_set_preallocation())"];
-        MatSeqSBAIJSetPreallocation, seq_sb_aij_set_preallocation, mat_p, block bs, nz nz, nnz, #[doc = "Creates a sparse symmetric...\n\n\
+        MatSeqSBAIJSetPreallocation, seq_sb_aij_set_preallocation, block bs, nz nz, nnz, #[doc = "Creates a sparse symmetric...\n\n\
         Petsc C Docs: <https://petsc.org/release/docs/manualpages/Mat/MatSeqSBAIJSetPreallocation.html#MatSeqSBAIJSetPreallocation>\n\n\
         # Parameters.\n\n\
         * `bs` - size of block, the blocks are ALWAYS square. One can use `MatSetBlockSizes()` to set a different row and column blocksize \
         but the row blocksize always defines the size of the blocks. The column blocksize sets the blocksize of the vectors obtained with `MatCreateVecs()`\n\
         * Read docs for [`Mat::seq_aij_set_preallocation()`](Mat::seq_aij_set_preallocation())"];
-        MatMPISBAIJSetPreallocation, mpi_sb_aij_set_preallocation, mat_p, block bs, nz d_nz, d_nnz, nz o_nz, o_nnz, #[doc = "For good matrix...\n\n\
+        MatMPISBAIJSetPreallocation, mpi_sb_aij_set_preallocation, block bs, nz d_nz, d_nnz, nz o_nz, o_nnz, #[doc = "For good matrix...\n\n\
         Petsc C Docs: <https://petsc.org/release/docs/manualpages/Mat/MatMPISBAIJSetPreallocation.html#MatMPISBAIJSetPreallocation>\n\n\
         # Parameters.\n\n\
         * `bs` - size of block, the blocks are ALWAYS square. One can use `MatSetBlockSizes()` to set a different row and column blocksize \
@@ -779,17 +793,17 @@ impl<'a> Mat<'a> {
     }
 }
 
-impl_petsc_object_funcs!{ Mat, mat_p }
+impl_petsc_object_traits! { Mat, mat_p, petsc_raw::_p_Mat }
 
-impl_petsc_view_func!{ Mat, mat_p, MatView }
+impl_petsc_view_func!{ Mat, MatView }
 
 impl<'a> NullSpace<'a> {
     wrap_simple_petsc_member_funcs! {
-        MatNullSpaceRemove, remove_from, ns_p, input &mut Vector, vec.vec_p, #[doc = "Removes all the components of a null space from a vector."];
-        MatNullSpaceTest, test, ns_p, input &Mat, vec .mat_p, output bool, is_null .into from petsc_raw::PetscBool, #[doc = "Tests if the claimed null space is really a null space of a matrix."];
+        MatNullSpaceRemove, pub remove_from, input &mut Vector, vec.vec_p, #[doc = "Removes all the components of a null space from a vector."];
+        MatNullSpaceTest, pub test, input &Mat, vec .mat_p, output bool, is_null .into from petsc_raw::PetscBool, #[doc = "Tests if the claimed null space is really a null space of a matrix."];
     }
 }
 
-impl_petsc_object_funcs!{ NullSpace, ns_p }
+impl_petsc_object_traits! { NullSpace, ns_p, petsc_raw::_p_MatNullSpace }
 
-impl_petsc_view_func!{ NullSpace, ns_p, MatNullSpaceView }
+impl_petsc_view_func!{ NullSpace, MatNullSpaceView }

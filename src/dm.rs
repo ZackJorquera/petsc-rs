@@ -18,7 +18,7 @@ use ndarray::{ArrayView, ArrayViewMut};
 
 /// Abstract PETSc object that manages an abstract grid object and its interactions with the algebraic solvers
 pub struct DM<'a> {
-    world: &'a UserCommunicator,
+    pub(crate) world: &'a UserCommunicator,
     pub(crate) dm_p: *mut petsc_raw::_p_DM,
 
     composite_dms: Option<Vec<DM<'a>>>,
@@ -213,18 +213,40 @@ impl<'a> DM<'a> {
         // We dont want to drop the vec through Vector::drop
         let vec = ManuallyDrop::new(Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } });
         
-        Ok(vector::BorrowVectorMut { owned_vec: vec, drop_func: Some(Box::new(move |borrow_vec| {
+        Ok(vector::BorrowVectorMut::new(vec, Some(Box::new(move |borrow_vec| {
             let ierr = unsafe { petsc_raw::DMRestoreLocalVector(self.dm_p, &mut borrow_vec.vec_p as *mut _) };
             let _ = Petsc::check_error(borrow_vec.world, ierr); // TODO: should I unwrap ?
-        })), _phantom: PhantomData })
+        }))))
     }
 
-    /// Gets local vectors for each part of a DMComposite.
+    /// Creates local vectors for each part of a DMComposite.
+    ///
+    /// Calls [`DM::create_local_vector()`] on each dm in the composite dm.
     pub fn composite_create_local_vectors(&self) -> Result<Vec<Vector<'a>>> {
         if let Some(c) = self.composite_dms.as_ref() {
             c.iter().fold(Ok(Vec::with_capacity(c.len())), |acc, dm| {
                 match acc {
                     Ok(mut inner_vec) => dm.create_local_vector().map(|v| {
+                            inner_vec.push(v);
+                            inner_vec
+                        }),
+                    acc @ Err(_) => acc
+                }
+            })
+        } else {
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERROR_ARG_WRONGSTATE,
+                format!("There are no composite dms set, line: {}", line!())).map(|_| unreachable!())
+        }
+    }
+
+    /// Gets local vectors for each part of a DMComposite.
+    ///
+    /// Calls [`DM::get_local_vector()`] on each dm in the composite dm.
+    pub fn composite_get_local_vectors(&self) -> Result<Vec<vector::BorrowVectorMut<'a, '_>>> {
+        if let Some(c) = self.composite_dms.as_ref() {
+            c.iter().fold(Ok(Vec::with_capacity(c.len())), |acc, dm| {
+                match acc {
+                    Ok(mut inner_vec) => dm.get_local_vector().map(|v| {
                             inner_vec.push(v);
                             inner_vec
                         }),
@@ -473,8 +495,7 @@ impl<'a> DM<'a> {
 
         let ndarray = unsafe {
             ArrayView::from_shape_ptr(ndarray::IxDyn(&dims_r[(3-dim as usize)..]), array.assume_init())
-                .reversed_axes() }; // TODO: add comments (e.x. why `reversed_axes()` and stuff)
-                                    // https://petsc.org/release/docs/manualpages/DMDA/DMDAVecGetArray.html#DMDAVecGetArray
+                .reversed_axes() };
 
         Ok(crate::vector::VectorView { vec, array: unsafe { array.assume_init() }, ndarray })
     }
@@ -657,10 +678,19 @@ impl<'a> DM<'a> {
                 format!("There are no composite dms set, line: {}", line!())).unwrap_err())
     }
 
+    // pub fn composite_dms_mut(&mut self) -> Result<Vec<&mut DM<'a>>> {
+    //     if let Some(c) = self.composite_dms.as_mut() {
+    //         Ok(c.iter_mut().collect())
+    //     } else {
+    //         Petsc::set_error(self.world, PetscErrorKind::PETSC_ERROR_ARG_WRONGSTATE,
+    //             format!("There are no composite dms set, line: {}", line!())).map(|_| unreachable!())
+    //     }
+    // }
+
     /// Scatters from a global packed vector into its individual local vectors 
     pub fn composite_scatter<'v, I>(&self, gvec: &'v Vector<'a>, lvecs: I) -> Result<()>
     where
-        I: IntoIterator<Item = &'v mut Vector<'a>>
+        I: IntoIterator<Item = &'v mut Vector<'a>>,
     {
         if let Some(c) = self.composite_dms.as_ref() {
             let mut lvecs_p =  lvecs.into_iter().map(|v| v.vec_p).collect::<Vec<_>>();
@@ -693,13 +723,13 @@ impl<'a> DM<'a> {
             Ok(vec_ps.into_iter().zip(wanted).map(move |(v_p, i)| {
                 let vec = ManuallyDrop::new(Vector { world: self.world, vec_p: v_p });
                 let gvec_rc = gvec_rc.clone();
-                vector::BorrowVectorMut { owned_vec: vec, drop_func: Some(Box::new(move |borrow_vec| {
+                vector::BorrowVectorMut::new(vec, Some(Box::new(move |borrow_vec| {
                     let i = i;
                     let ierr = unsafe { petsc_raw::DMCompositeRestoreAccessArray(
                         self.dm_p, gvec_rc.vec_p, 1, std::slice::from_ref(&i).as_ptr(),
                         std::slice::from_mut(&mut borrow_vec.vec_p).as_mut_ptr()) };
                     let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap ?
-                })), _phantom: PhantomData }
+                })))
             }).collect())
 
         } else {
@@ -712,7 +742,7 @@ impl<'a> DM<'a> {
     /// Gets the index sets for each composed object.
     ///
     /// These could be used to extract a subset of vector entries for a "multi-physics" preconditioner.
-    pub fn composite_get_global_indexsets(&self) -> Result<Vec<IS>> {
+    pub fn composite_get_global_indexsets(&self) -> Result<Vec<IS<'a>>> {
         if let Some(c) = self.composite_dms.as_ref() {
             // This Petsc function is a little weird; it allocated the output array
             // and we are expected to free it with `PetscFree`.
@@ -750,7 +780,7 @@ impl<'a> DM<'a> {
     /// should not typically need to know which is being done. 
     ///
     /// To get index sets for pieces of the composite global vector, use [`DM::composite_get_global_indexsets()`]. 
-    pub fn composite_get_local_indexsets(&self) -> Result<Vec<IS>> {
+    pub fn composite_get_local_indexsets(&self) -> Result<Vec<IS<'a>>> {
         if let Some(c) = self.composite_dms.as_ref() {
             // This Petsc function is a little weird; it allocated the output array
             // and we are expected to free it with `PetscFree`.
@@ -776,16 +806,78 @@ impl<'a> DM<'a> {
                 format!("There are no composite dms set, line: {}", line!())).map(|_| unreachable!())
         }
     }
+
+    /// This is a WIP, i want to use this instead of doing `if let Some(c) = self.composite_dms.as_ref()`
+    /// everywhere.
+    fn try_get_composite_dms(&self) -> Result<Option<&Vec<DM<'a>>>> {
+        let is_dm_comp = self.type_compare(petsc_raw::DMTYPE_TABLE[DMType::DMCOMPOSITE as usize])?;
+        if is_dm_comp {
+            Ok(self.composite_dms.as_ref())
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Sets the inner values of the rust DM struct from C struct based off of the type
+    /// 
+    /// SAFETY, You should not drop any of the inner values
+    ///
+    /// If any of the inner values are already set, then they will NOT be dropped
+    ///
+    /// Right now this is only implemented for DM Composite, for any other type this wont
+    /// do anything.
+    pub(crate) unsafe fn set_inner_values(dm: &mut DM<'a>) -> petsc_raw::PetscErrorCode {
+        if dm.type_compare(petsc_raw::DMTYPE_TABLE[DMType::DMCOMPOSITE as usize]).unwrap() {
+            let len = dm.composite_get_num_dms_petsc().unwrap();
+            let mut dms_p = vec![std::ptr::null_mut(); len as usize]; // TODO: use MaybeUninit if we can
+            let ierr = petsc_raw::DMCompositeGetEntriesArray(dm.dm_p, dms_p.as_mut_ptr());
+            if ierr != 0 { let _ = Petsc::check_error(dm.world, ierr); return ierr; }
+
+            if let Some(mut old_dms) = dm.composite_dms.take() {
+                while !old_dms.is_empty() {
+                    let _ = ManuallyDrop::new(old_dms.pop().unwrap());
+                }
+            }
+
+            dm.composite_dms = Some(dms_p.into_iter().map(|dm_p| {
+                let mut this_dm = DM::new(dm.world, dm_p);
+                let _ierr = DM::set_inner_values(&mut this_dm);
+                //if ierr != 0 { return ierr; }
+                this_dm
+            }).collect::<Vec<_>>());
+            0
+        } else {
+            0
+        }
+    }
+}
+
+impl Clone for DM<'_> {
+    fn clone(&self) -> Self {
+        // TODO: the docs say this is a shallow clone. How should we deal with this for rust
+        // (rust (and the caller) thinks/expects it is a deep clone)
+        // TODO: Also what should we do for DM composite type, i get an error when DMClone calls
+        // `DMGetDimension` and then `DMSetDimension` (the dim is -1).
+        if self.type_compare(petsc_raw::DMTYPE_TABLE[DMType::DMCOMPOSITE as usize]).unwrap() {
+            let c = self.try_get_composite_dms().unwrap().unwrap();
+            DM::composite_create(self.world, c.iter().cloned()).unwrap()
+        } else {
+            let mut dm2_p = MaybeUninit::uninit();
+            let ierr = unsafe { petsc_raw::DMClone(self.dm_p, dm2_p.as_mut_ptr()) };
+            Petsc::check_error(self.world, ierr).unwrap();
+            DM { world: self.world, dm_p: unsafe { dm2_p.assume_init() }, composite_dms: None }
+        }
+    }
 }
 
 // macro impls
 impl<'a> DM<'a> {
     wrap_simple_petsc_member_funcs! {
-        DMSetFromOptions, set_from_options, dm_p, takes mut, #[doc = "Sets various SNES and KSP parameters from user options."];
-        DMSetUp, set_up, dm_p, takes mut, #[doc = "Sets up the internal data structures for the later use of a nonlinear solver. This will be automatically called with [`SNES::solve()`]."];
-        DMGetDimension, get_dimension, dm_p, output PetscInt, dim, #[doc = "Return the topological dimension of the DM"];
+        DMSetFromOptions, pub set_from_options, takes mut, #[doc = "Sets various SNES and KSP parameters from user options."];
+        DMSetUp, pub set_up, takes mut, #[doc = "Sets up the internal data structures for the later use of a nonlinear solver. This will be automatically called with [`SNES::solve()`]."];
+        DMGetDimension, pub get_dimension, output PetscInt, dim, #[doc = "Return the topological dimension of the DM"];
         
-        DMDAGetInfo, da_get_info, dm_p, output PetscInt, dim, output PetscInt, bm, output PetscInt, bn, output PetscInt, bp, output PetscInt, m,
+        DMDAGetInfo, pub da_get_info, output PetscInt, dim, output PetscInt, bm, output PetscInt, bn, output PetscInt, bp, output PetscInt, m,
             output PetscInt, n, output PetscInt, p, output PetscInt, dof, output PetscInt, s, output DMBoundaryType, bx, output DMBoundaryType, by,
             output DMBoundaryType, bz, output DMDAStencilType, st,
             #[doc = "Gets information about a given distributed array.\n\n\
@@ -796,23 +888,24 @@ impl<'a> DM<'a> {
             * `dof` - number of degrees of freedom per node\n\
             * `s` - stencil width\n * `bx,by,bz` - type of ghost nodes at boundary\n\
             * `st` - stencil type"];
-        DMDAGetCorners, da_get_corners, dm_p, output PetscInt, x, output PetscInt, y, output PetscInt, z, output PetscInt, m, output PetscInt, n, output PetscInt, p,
+        DMDAGetCorners, pub da_get_corners, output PetscInt, x, output PetscInt, y, output PetscInt, z, output PetscInt, m, output PetscInt, n, output PetscInt, p,
             #[doc = "Returns the global (x,y,z) indices of the lower left corner and size of the local region, excluding ghost points.\n\n\
             # Outputs (in order)\n\n\
             * `x,y,z` - the corner indices (where y and z are optional; these are used for 2D and 3D problems)\n\
             * `m,n,p` - widths in the corresponding directions (where n and p are optional; these are used for 2D and 3D problems)"];
-        DMDAGetGhostCorners, da_get_ghost_corners, dm_p, output PetscInt, x, output PetscInt, y, output PetscInt, z, output PetscInt, m, output PetscInt, n, output PetscInt, p,
+        DMDAGetGhostCorners, pub da_get_ghost_corners, output PetscInt, x, output PetscInt, y, output PetscInt, z, output PetscInt, m, output PetscInt, n, output PetscInt, p,
             #[doc = "Returns the global (x,y,z) indices of the lower left corner and size of the local region, including ghost points.\n\n\
             # Outputs (in order)\n\n\
             * `x,y,z` - the corner indices (where y and z are optional; these are used for 2D and 3D problems)\n\
             * `m,n,p` - widths in the corresponding directions (where n and p are optional; these are used for 2D and 3D problems)"];
         // TODO: would it be nicer to have this take in a Range<PetscReal>? (then we couldn't use the macro)
-        DMDASetUniformCoordinates, da_set_uniform_coordinates, dm_p, input PetscReal, x_min, input PetscReal, x_max, input PetscReal, y_min,
+        DMDASetUniformCoordinates, pub da_set_uniform_coordinates, input PetscReal, x_min, input PetscReal, x_max, input PetscReal, y_min,
             input PetscReal, y_max, input PetscReal, z_min, input PetscReal, z_max, #[doc = "Sets a DMDA coordinates to be a uniform grid.\n\n\
             `y` and `z` values will be ignored for 1 and 2 dimensional problems."];
+        DMCompositeGetNumberDM, pub composite_get_num_dms_petsc, output PetscInt, ndms, #[doc = "idk remove this maybe"];
     }
 }
 
-impl_petsc_object_funcs!{ DM, dm_p }
+impl_petsc_object_traits! { DM, dm_p, petsc_raw::_p_DM }
 
-impl_petsc_view_func!{ DM, dm_p, DMView }
+impl_petsc_view_func!{ DM, DMView }

@@ -32,6 +32,6 @@ impl<'a> IS<'a> {
     // }
 }
 
-impl_petsc_object_funcs!{ IS, is_p }
+impl_petsc_object_traits! { IS, is_p, petsc_raw::_p_IS }
 
-impl_petsc_view_func!{ IS, is_p, ISView }
+impl_petsc_view_func!{ IS, ISView }
