@@ -3,7 +3,7 @@
 //! Concepts: DM^creating vectors with a DMDA
 //! Processors: n
 //!
-//!   [`Vec::view_with()`] on DMDA vectors first puts the Vec elements into global natural ordering before printing (or plotting)
+//!   [`Vector::view_with()`] on DMDA vectors first puts the Vec elements into global natural ordering before printing (or plotting)
 //! them. In 2d 5 by 2 DMDA this means the numbering is
 //!
 //!      5   6   7   8   9        0   5
@@ -28,7 +28,7 @@
 //!                               6   8
 //!                               7   9
 //!
-//! If we filled the vector with global PETSc ordering, i.e. the above, when we use [`Vec::view_with()`]
+//! If we filled the vector with global PETSc ordering, i.e. the above, when we use [`Vector::view_with()`]
 //! we would see the following order
 //!
 //!     Process [0]

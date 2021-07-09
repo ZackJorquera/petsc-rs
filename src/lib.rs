@@ -59,6 +59,7 @@ pub mod prelude {
     pub use crate::{
         Petsc,
         PetscErrorKind,
+        PetscError,
         InsertMode,
         PetscInt,
         PetscScalar,
@@ -709,7 +710,7 @@ impl Petsc {
 
 /// A rust type than can identify as a raw value understood by the PETSc C API.
 pub unsafe trait PetscAsRaw {
-    /// The raw MPI C API type
+    /// The raw PETSc C API type
     type Raw;
     /// The raw value
     fn as_raw(&self) -> Self::Raw;
@@ -761,7 +762,7 @@ pub trait PetscObject<'a, PT>: PetscAsRaw<Raw = *mut PT> {
     }
 }
 
-// These are loose wrappers that are only intended to by accesses internally.
+/// These are loose wrappers that are only intended to be accessed internally.
 pub(crate) trait PetscObjectPrivate<'a, PT>: PetscObject<'a, PT> {
     wrap_simple_petsc_member_funcs! {
         // TODO: should these be unsafe? for is it fine not to because the are internal?
@@ -865,3 +866,17 @@ pub type PetscScalar = PetscReal;
 /// ```
 #[cfg(any(feature = "petsc-use-complex", feature = "petsc-sys/petsc-use-complex"))]
 pub type PetscScalar = Complex<PetscReal>;
+
+// This is a hack so that we can get around the arbitrary expressions in
+// key-value attributes issue. This wont be needed in rust v1.54
+#[cfg(doctest)]
+mod readme_doctest {
+    macro_rules! doctest_readme {
+        ($s:expr) => {
+            #[doc = $s]
+            extern {}
+        };
+    }
+    // This will run the doc tests in README.md
+    doctest_readme!(include_str!("../README.md"));
+}
