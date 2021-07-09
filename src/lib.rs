@@ -32,6 +32,7 @@
 //! petsc-rs = { version = "*", default-features = false, features = ["petsc-real-f32", "petsc-int-i64"] }
 //! ```
 
+use std::ops::Deref;
 use std::os::raw::{c_char, c_int};
 use std::vec;
 
@@ -63,6 +64,9 @@ pub mod prelude {
         PetscScalar,
         PetscReal,
         PetscComplex,
+        PetscAsRaw,
+        PetscAsRawMut,
+        PetscObject,
         petsc_println,
         petsc_println_all,
         vector::{Vector, VecOption, },
@@ -79,10 +83,14 @@ pub mod prelude {
     pub use mpi::traits::*;
     pub(crate) use crate::Result;
     pub(crate) use mpi::{self, traits::*};
+    pub(crate) use mpi::raw::AsRaw;
     pub(crate) use crate::petsc_raw;
-    pub(crate) use std::mem::MaybeUninit;
+    pub(crate) use std::mem::{MaybeUninit, ManuallyDrop};
     pub(crate) use std::ffi::{CString, CStr, };
     pub(crate) use std::rc::Rc;
+    pub(crate) use mpi::topology::UserCommunicator;
+    pub(crate) use std::pin::Pin;
+    pub(crate) use crate::PetscObjectPrivate;
 }
 
 use prelude::*;
@@ -184,11 +192,13 @@ pub use petsc_raw::InsertMode;
 ///     .args(std::env::args())
 ///     // Note, if we don't split the comm world and just use the default world
 ///     // then there is no need to use the world method as we do here.
-///     .world(Box::new(univ.world()))
+///     .world(univ.world().duplicate())
 ///     .help_msg("Hello, this is a help message\n")
 ///     .file("path/to/database/file")
 ///     .init().unwrap();
 /// ```
+///
+/// Look at [`PetscBuilder::world()`] for more info on setting the comm world.
 ///
 /// Note `Petsc::builder().init()` is the same as [`Petsc::init_no_args()`].
 ///
@@ -196,7 +206,7 @@ pub use petsc_raw::InsertMode;
 #[derive(Default)]
 pub struct PetscBuilder
 {
-    world: Option<Box<dyn Communicator>>,
+    world: Option<UserCommunicator>,
     args: Option<Vec<String>>,
     file: Option<String>,
     help_msg: Option<String>,
@@ -262,12 +272,12 @@ impl PetscBuilder
 
                 ierr = unsafe { petsc_raw::PetscInitialize(c_argc_p, c_args_p, file_c_str, help_c_str) };
 
-                world
+                ManuallyDrop::new(world)
             }, 
             _ => {
                 // Note, in this case MPI has not been initialized, it will be initialized by PETSc
                 ierr = unsafe { petsc_raw::PetscInitialize(c_argc_p, c_args_p, file_c_str, help_c_str) };
-                Box::new(mpi::topology::SystemCommunicator::world())
+                ManuallyDrop::new(mpi::topology::SystemCommunicator::world().duplicate())
             }
         }, _arg_data: self.args.as_ref().map(|_| (argc_boxed, cstr_args_owned, c_args_owned, c_args_boxed)) };
         Petsc::check_error(petsc.world(), ierr)?;
@@ -294,8 +304,13 @@ impl PetscBuilder
     /// are identical unless you wish to run PETSc on ONLY a subset of `MPI_COMM_WORLD`. That is where this
     /// method can be use. Note, you must initialize mpi (with [`mpi::initialize()`]).
     ///
+    /// This method takes in a [`UserCommunicator`]. If you have a different type of communicator,
+    /// use `.into()` To convert to a [`UserCommunicator`] or duplicate the communicator with [`Communicator::duplicate()`].
+    ///
+    /// Note, if no communicator is supplied then the system communicator will be used (duplicated as a [`UserCommunicator`]).
+    ///
     /// After you call [`PetscBuilder::init()`], the value returned by [`Petsc::world()`] is the value set here.
-    pub fn world(mut self, world: Box<dyn Communicator>) -> Self
+    pub fn world(mut self, world: UserCommunicator) -> Self
     {
         self.world = Some(world);
         self
@@ -326,7 +341,9 @@ impl PetscBuilder
 /// Also stores a reference to the the `MPI_COMM_WORLD`/`PETSC_COMM_WORLD` variable.
 pub struct Petsc {
     // This is functionally the same as `PETSC_COMM_WORLD` in the C api
-    pub(crate) world: Box<dyn Communicator>,
+    // Note, just because it is an option doesn't mean it will ever be None
+    // It is only set to none in the drop function (everywhere else it is some).
+    pub(crate) world: ManuallyDrop<UserCommunicator>,
 
     // This is used to drop the argc/args data when Petsc is dropped, we never actually use it
     // on the rust side.
@@ -336,7 +353,11 @@ pub struct Petsc {
 // Destructor
 impl Drop for Petsc {
     fn drop(&mut self) {
+        // SAFETY: PetscFinalize can call MPI_FINALIZE, which means we need to make sure our 
+        // comm world is dropped before that. Also after `ManuallyDrop::drop` is called `Petsc`
+        // is dropped so the zombie value is never used again
         unsafe {
+            ManuallyDrop::drop(&mut self.world);
             petsc_raw::PetscFinalize();
         }
     }
@@ -360,7 +381,8 @@ impl Petsc {
     /// [`PetscInitialize`]: petsc_raw::PetscInitialize
     pub fn init_no_args() -> Result<Self> {
         let ierr = unsafe { petsc_raw::PetscInitializeNoArguments() };
-        let petsc = Self { world: Box::new(mpi::topology::SystemCommunicator::world()), _arg_data: None };
+        let petsc = Self { world: ManuallyDrop::new(mpi::topology::SystemCommunicator::world().duplicate()),
+            _arg_data: None };
         Petsc::check_error(petsc.world(), ierr)?;
 
         Ok(petsc)
@@ -375,14 +397,14 @@ impl Petsc {
     /// The value is functionally the same as the `PETSC_COMM_WORLD` global in the C
     /// API. If you want to use a different comm world, then you have to define that outside
     /// of the [`Petsc`] object. Read docs for [`PetscBuilder::world()`] for more information.
-    pub fn world<'a>(&'a self) -> &'a dyn Communicator {
-        self.world.as_ref()
+    pub fn world(&self) -> &UserCommunicator {
+        self.world.deref()
     }
 
     /// Internal error checker
     /// replacement for the CHKERRQ macro in the C api
     #[doc(hidden)]
-    pub(crate) fn check_error(world: &dyn Communicator, ierr: petsc_raw::PetscErrorCode) -> Result<()> {
+    pub(crate) fn check_error<C: Communicator>(world: &C, ierr: petsc_raw::PetscErrorCode) -> Result<()> {
         // Return early if code is clean
         if ierr == 0 {
             return Ok(());
@@ -425,7 +447,7 @@ impl Petsc {
     /// }
     /// ```
     ///
-    pub fn set_error<E>(world: &dyn Communicator, error_kind: PetscErrorKind, err_msg: E) -> Result<()>
+    pub fn set_error<C: Communicator, E>(world: &C, error_kind: PetscErrorKind, err_msg: E) -> Result<()>
     where
         E: Into<Box<dyn std::error::Error + Send + Sync>>
     {
@@ -465,7 +487,7 @@ impl Petsc {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn print<T: ToString>(world: &dyn Communicator, msg: T) -> Result<()> {
+    pub fn print<C: Communicator, T: ToString>(world: &C, msg: T) -> Result<()> {
         let msg_cs = ::std::ffi::CString::new(msg.to_string()).expect("`CString::new` failed");
 
         // The first entry needs to be `%s` so that this function is not susceptible to printf injections.
@@ -499,7 +521,7 @@ impl Petsc {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn print_all<T: ToString>(world: &dyn Communicator, msg: T) -> Result<()> {
+    pub fn print_all<C: Communicator, T: ToString>(world: &C, msg: T) -> Result<()> {
         let msg_cs = ::std::ffi::CString::new(msg.to_string()).expect("`CString::new` failed");
 
         // The first entry needs to be `%s` so that this function is not susceptible to printf injections.
@@ -682,6 +704,70 @@ impl Petsc {
     /// Note, this is the same as using [`Viewer::create_ascii_stdout(petsc.world())`](Viewer::create_ascii_stdout()).
     pub fn viewer_create_ascii_stdout(&self) -> Result<crate::Viewer> {
         Viewer::create_ascii_stdout(self.world())
+    }
+}
+
+/// A rust type than can identify as a raw value understood by the PETSc C API.
+pub unsafe trait PetscAsRaw {
+    /// The raw MPI C API type
+    type Raw;
+    /// The raw value
+    fn as_raw(&self) -> Self::Raw;
+}
+
+/// A rust type than can provide a mutable pointer to a raw value understood by the PETSc C API.
+pub unsafe trait PetscAsRawMut: PetscAsRaw {
+    /// A mutable pointer to the raw value
+    fn as_raw_mut(&mut self) -> *mut <Self as PetscAsRaw>::Raw;
+}
+
+/// The trait that is implemented for any PETSc Object [`petsc-rs::vector::Vector`](Vector), 
+/// [`petsc-rs::mat::Mat`](Mat), [`petsc-rs::ksp::KSP`](KSP), etc.
+pub trait PetscObject<'a, PT>: PetscAsRaw<Raw = *mut PT> {
+    /// Gets the MPI communicator world for any [`PetscObject`] regardless of type;
+    fn world(&self) -> &'a UserCommunicator;
+
+    /// Sets a string name associated with a PETSc object.
+    fn set_name<T: ::std::string::ToString>(&mut self, name: T) -> crate::Result<()> {
+        let name_cs = ::std::ffi::CString::new(name.to_string()).expect("`CString::new` failed");
+        
+        let ierr = unsafe { crate::petsc_raw::PetscObjectSetName(self.as_raw() as *mut crate::petsc_raw::_p_PetscObject, name_cs.as_ptr()) };
+        Petsc::check_error(self.world(), ierr)
+    }
+
+    /// Gets a string name associated with a PETSc object.
+    fn get_name(&self) -> crate::Result<String> {
+        let mut c_buf = ::std::mem::MaybeUninit::<*const ::std::os::raw::c_char>::uninit();
+        
+        let ierr = unsafe { crate::petsc_raw::PetscObjectGetName(self.as_raw() as *mut crate::petsc_raw::_p_PetscObject, c_buf.as_mut_ptr()) };
+        Petsc::check_error(self.world(), ierr)?;
+
+        let c_str = unsafe { ::std::ffi::CStr::from_ptr(c_buf.assume_init()) };
+        crate::Result::Ok(c_str.to_string_lossy().to_string())
+    }
+
+    /// Determines whether a PETSc object is of a particular type (given as a string). 
+    fn type_compare<T: ToString>(&self, type_name: T) -> Result<bool> {
+        let type_name_cs = ::std::ffi::CString::new(type_name.to_string()).expect("`CString::new` failed");
+        let mut tmp = ::std::mem::MaybeUninit::<crate::petsc_raw::PetscBool>::uninit();
+
+        let ierr = unsafe { crate::petsc_raw::PetscObjectTypeCompare(
+            self.as_raw() as *mut _, type_name_cs.as_ptr(),
+            tmp.as_mut_ptr()
+        )};
+        Petsc::check_error(self.world(), ierr)?;
+
+        crate::Result::Ok(unsafe { tmp.assume_init() }.into())
+    }
+}
+
+// These are loose wrappers that are only intended to by accesses internally.
+pub(crate) trait PetscObjectPrivate<'a, PT>: PetscObject<'a, PT> {
+    wrap_simple_petsc_member_funcs! {
+        // TODO: should these be unsafe? for is it fine not to because the are internal?
+        PetscObjectReference, reference, takes mut, is unsafe, #[doc = "Indicates to any PetscObject that it is being referenced by another PetscObject. This increases the reference count for that object by one."];
+        PetscObjectDereference, dereference, takes mut, is unsafe, #[doc = "Indicates to any PetscObject that it is being referenced by one less PetscObject. This decreases the reference count for that object by one."];
+        PetscObjectGetReference, get_reference_count, output PetscInt, cnt, #[doc = "Gets the current reference count for any PETSc object."];
     }
 }
 

@@ -6,7 +6,7 @@ use crate::prelude::*;
 
 /// Abstract PETSc object that allows indexing. 
 pub struct IS<'a> {
-    pub(crate) world: &'a dyn Communicator,
+    pub(crate) world: &'a UserCommunicator,
 
     pub(crate) is_p: *mut petsc_raw::_p_IS,
 }
@@ -20,7 +20,7 @@ impl<'a> Drop for IS<'a> {
 
 impl<'a> IS<'a> {
     /// Creates an index set object. 
-    pub fn create(world: &'a dyn Communicator) -> Result<Self> {
+    pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut is_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::ISCreate(world.as_raw(), is_p.as_mut_ptr()) };
         Petsc::check_error(world, ierr)?;
@@ -32,6 +32,6 @@ impl<'a> IS<'a> {
     // }
 }
 
-impl_petsc_object_funcs!{ IS, is_p }
+impl_petsc_object_traits! { IS, is_p, petsc_raw::_p_IS }
 
-impl_petsc_view_func!{ IS, is_p, ISView }
+impl_petsc_view_func!{ IS, ISView }

@@ -8,15 +8,13 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/PC/index.html>
 
-use std::{mem::ManuallyDrop, pin::Pin};
-
 use crate::prelude::*;
 
 pub use crate::petsc_raw::PCTypeEnum as PCType;
 
 /// Abstract PETSc object that manages all preconditioners including direct solvers such as PCLU
 pub struct PC<'a, 'tl> {
-    pub(crate) world: &'a dyn Communicator,
+    pub(crate) world: &'a UserCommunicator,
     pub(crate) pc_p: *mut petsc_raw::_p_PC, // I could use petsc_raw::PC which is the same thing, but i think using a pointer is more clear
 
     // We take an `Rc` because we don't want ownership of the Mat. Under the hood, this is how the 
@@ -32,7 +30,7 @@ pub struct PC<'a, 'tl> {
 }
 
 struct PCShellSetApplyTrampolineData<'a, 'tl> {
-    world: &'a dyn Communicator,
+    world: &'a UserCommunicator,
     user_f: Box<dyn FnMut(&PC<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>,
 }
 
@@ -46,7 +44,7 @@ impl<'a> Drop for PC<'a, '_> {
 
 impl<'a, 'tl> PC<'a, 'tl> {
     /// Same as `PC { ... }` but sets all optional params to `None`
-    pub(crate) fn new(world: &'a dyn Communicator, pc_p: *mut petsc_raw::_p_PC) -> Self {
+    pub(crate) fn new(world: &'a UserCommunicator, pc_p: *mut petsc_raw::_p_PC) -> Self {
         PC { world, pc_p, ref_amat: None, ref_pmat: None,
             shell_set_apply_trampoline_data: None }
     }
@@ -57,7 +55,7 @@ impl<'a, 'tl> PC<'a, 'tl> {
     /// from a Krylov solver, [`KSP`], using the [`KSP::get_pc()`] method.
     ///
     /// [`KSP::get_pc`]: KSP::get_pc
-    pub fn create(world: &'a dyn Communicator) -> Result<Self> {
+    pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut pc_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::PCCreate(world.as_raw(), pc_p.as_mut_ptr()) };
         Petsc::check_error(world, ierr)?;
@@ -124,10 +122,10 @@ impl<'a, 'tl> PC<'a, 'tl> {
             let mut a_mat_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::PCGetOperators(self.pc_p, a_mat_p.as_mut_ptr(), std::ptr::null_mut()) };
             Petsc::check_error(self.world, ierr)?;
-            let ierr = unsafe { petsc_raw::PetscObjectReference(a_mat_p.assume_init() as *mut _) };
-            Petsc::check_error(self.world, ierr)?;
 
-            Rc::new(Mat { world: self.world, mat_p: unsafe { a_mat_p.assume_init() } })
+            let mut mat = Mat { world: self.world, mat_p: unsafe { a_mat_p.assume_init() } };
+            unsafe { mat.reference()?; }
+            Rc::new(mat)
         };
 
         let p_mat = if let Some(ref p_mat) = self.ref_pmat {
@@ -138,9 +136,9 @@ impl<'a, 'tl> PC<'a, 'tl> {
             let mut p_mat_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::PCGetOperators(self.pc_p, std::ptr::null_mut(), p_mat_p.as_mut_ptr()) };
             Petsc::check_error(self.world, ierr)?;
-            let ierr = unsafe { petsc_raw::PetscObjectReference(p_mat_p.assume_init() as *mut _) };
-            Petsc::check_error(self.world, ierr)?;
 
+            let mut mat = Mat { world: self.world, mat_p: unsafe { p_mat_p.assume_init() } };
+            unsafe { mat.reference()?; }
             Rc::new(Mat { world: self.world, mat_p: unsafe { p_mat_p.assume_init() } })
         };
 
@@ -259,11 +257,11 @@ impl<'a, 'tl> PC<'a, 'tl> {
 // Macro impls
 impl<'a> PC<'a, '_> {
     wrap_simple_petsc_member_funcs! {
-        PCSetFromOptions, set_from_options, pc_p, takes mut, #[doc = "Sets PC options from the options database. This routine must be called before PCSetUp() if the user is to be allowed to set the preconditioner method."];
-        PCSetUp, set_up, pc_p, takes mut, #[doc = "Prepares for the use of a preconditioner."];
+        PCSetFromOptions, pub set_from_options, takes mut, #[doc = "Sets PC options from the options database. This routine must be called before PCSetUp() if the user is to be allowed to set the preconditioner method."];
+        PCSetUp, pub set_up, takes mut, #[doc = "Prepares for the use of a preconditioner."];
     }
 }
 
-impl_petsc_object_funcs!{ PC, pc_p, '_ }
+impl_petsc_object_traits! { PC, pc_p, petsc_raw::_p_PC, '_ }
 
-impl_petsc_view_func!{ PC, pc_p, PCView, '_ }
+impl_petsc_view_func!{ PC, PCView, '_ }

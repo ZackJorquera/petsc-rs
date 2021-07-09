@@ -9,14 +9,12 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/KSP/index.html>
 
-use std::{mem::ManuallyDrop, pin::Pin};
-
 use crate::prelude::*;
 
 /// Abstract PETSc object that manages all Krylov methods. This is the object that manages the linear
 /// solves in PETSc (even those such as direct solvers that do no use Krylov accelerators).
 pub struct KSP<'a, 'tl> {
-    world: &'a dyn Communicator,
+    world: &'a UserCommunicator,
     pub(crate) ksp_p: *mut petsc_raw::_p_KSP, // I could use KSP which is the same thing, but i think using a pointer is more clear
 
     // As far as Petsc is concerned we own a reference to the PC as it is reference counted under the hood.
@@ -31,13 +29,13 @@ pub struct KSP<'a, 'tl> {
 }
 
 struct KSPComputeOperatorsTrampolineData<'a, 'tl> {
-    world: &'a dyn Communicator,
+    world: &'a UserCommunicator,
     user_f: Box<dyn FnMut(&KSP<'a, 'tl>, &mut Mat<'a>, &mut Mat<'a>) -> Result<()> + 'tl>,
     set_dm: bool,
 }
 
 struct KSPComputeRHSTrampolineData<'a, 'tl> {
-    world: &'a dyn Communicator,
+    world: &'a UserCommunicator,
     user_f: Box<dyn FnMut(&KSP<'a, 'tl>, &mut Vector<'a>) -> Result<()> + 'tl>,
     set_dm: bool,
 }
@@ -51,14 +49,14 @@ impl<'a> Drop for KSP<'a, '_> {
 
 impl<'a, 'tl> KSP<'a, 'tl> {
     /// Same as `KSP { ... }` but sets all optional params to `None`
-    pub(crate) fn new(world: &'a dyn Communicator, ksp_p: *mut petsc_raw::_p_KSP) -> Self {
+    pub(crate) fn new(world: &'a UserCommunicator, ksp_p: *mut petsc_raw::_p_KSP) -> Self {
         KSP { world, ksp_p, pc: None, dm: None,
             compute_operators_trampoline_data: None,
             compute_rhs_trampoline_data: None }
     }
 
     /// Same as [`Petsc::ksp_create()`].
-    pub fn create(world: &'a dyn Communicator) -> Result<Self> {
+    pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut ksp_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::KSPCreate(world.as_raw(), ksp_p.as_mut_ptr()) };
         Petsc::check_error(world, ierr)?;
@@ -120,10 +118,9 @@ impl<'a, 'tl> KSP<'a, 'tl> {
             let mut pc_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::KSPGetPC(self.ksp_p, pc_p.as_mut_ptr()) };
             Petsc::check_error(self.world, ierr)?;
-            let ierr = unsafe { petsc_raw::PetscObjectReference(pc_p.assume_init() as *mut petsc_raw::_p_PetscObject) };
-            Petsc::check_error(self.world, ierr)?;
 
             self.pc = Some(PC::new(self.world, unsafe { pc_p.assume_init() }));
+            unsafe { self.pc.as_mut().unwrap().reference()?; }
 
             Ok(self.pc.as_ref().unwrap())
         }
@@ -138,10 +135,9 @@ impl<'a, 'tl> KSP<'a, 'tl> {
             let mut pc_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::KSPGetPC(self.ksp_p, pc_p.as_mut_ptr()) };
             Petsc::check_error(self.world, ierr)?;
-            let ierr = unsafe { petsc_raw::PetscObjectReference(pc_p.assume_init() as *mut petsc_raw::_p_PetscObject) };
-            Petsc::check_error(self.world, ierr)?;
 
             self.pc = Some(PC::new(self.world, unsafe { pc_p.assume_init() }));
+            unsafe { self.pc.as_mut().unwrap().reference()?; }
 
             Ok(self.pc.as_mut().unwrap())
         }
@@ -185,10 +181,9 @@ impl<'a, 'tl> KSP<'a, 'tl> {
             let mut dm_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::KSPGetDM(self.ksp_p, dm_p.as_mut_ptr()) };
             Petsc::check_error(self.world, ierr)?;
-            let ierr = unsafe { petsc_raw::PetscObjectReference(dm_p.assume_init() as *mut petsc_raw::_p_PetscObject) };
-            Petsc::check_error(self.world, ierr)?;
 
             self.dm = Some(DM::new(self.world, unsafe { dm_p.assume_init() }));
+            unsafe { self.dm.as_mut().unwrap().reference()?; }
 
             Ok(self.dm.as_ref().unwrap())
         }
@@ -203,10 +198,9 @@ impl<'a, 'tl> KSP<'a, 'tl> {
             let mut dm_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::KSPGetDM(self.ksp_p, dm_p.as_mut_ptr()) };
             Petsc::check_error(self.world, ierr)?;
-            let ierr = unsafe { petsc_raw::PetscObjectReference(dm_p.assume_init() as *mut petsc_raw::_p_PetscObject) };
-            Petsc::check_error(self.world, ierr)?;
 
             self.dm = Some(DM::new(self.world, unsafe { dm_p.assume_init() }));
+            unsafe { self.dm.as_mut().unwrap().reference()?; }
 
             Ok(self.dm.as_mut().unwrap())
         }
@@ -397,10 +391,10 @@ impl<'a, 'tl> KSP<'a, 'tl> {
         let mut vec_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::KSPGetRhs(self.ksp_p, vec_p.as_mut_ptr()) };
         Petsc::check_error(self.world, ierr)?;
-        let ierr = unsafe { petsc_raw::PetscObjectReference(vec_p.assume_init() as *mut _) };
-        Petsc::check_error(self.world, ierr)?;
 
-        let rhs = Rc::new(Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } });
+        let mut vec = Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } };
+        unsafe { vec.reference()?; }
+        let rhs = Rc::new(vec);
 
         Ok(rhs)
     }
@@ -422,12 +416,12 @@ impl<'a, 'tl> KSP<'a, 'tl> {
 // macro impls
 impl<'a> KSP<'a, '_> {
     wrap_simple_petsc_member_funcs! {
-        KSPSetFromOptions, set_from_options, ksp_p, takes mut, #[doc = "Sets KSP options from the options database. This routine must be called before KSPSetUp() if the user is to be allowed to set the Krylov type."];
-        KSPSetUp, set_up, ksp_p, takes mut, #[doc = "Sets up the internal data structures for the later use of an iterative solver. . This will be automatically called with [`KSP::solve()`]."];
-        KSPGetIterationNumber, get_iteration_number, ksp_p, output PetscInt, iter_num, #[doc = "Gets the current iteration number; if the KSPSolve() is complete, returns the number of iterations used."];
+        KSPSetFromOptions, pub set_from_options, takes mut, #[doc = "Sets KSP options from the options database. This routine must be called before KSPSetUp() if the user is to be allowed to set the Krylov type."];
+        KSPSetUp, pub set_up, takes mut, #[doc = "Sets up the internal data structures for the later use of an iterative solver. . This will be automatically called with [`KSP::solve()`]."];
+        KSPGetIterationNumber, pub get_iteration_number, output PetscInt, iter_num, #[doc = "Gets the current iteration number; if the KSPSolve() is complete, returns the number of iterations used."];
     }
 }
 
-impl_petsc_object_funcs!{ KSP, ksp_p, '_ }
+impl_petsc_object_traits! { KSP, ksp_p, petsc_raw::_p_KSP, '_ }
 
-impl_petsc_view_func!{ KSP, ksp_p, KSPView, '_ }
+impl_petsc_view_func!{ KSP, KSPView, '_ }

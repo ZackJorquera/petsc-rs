@@ -17,8 +17,8 @@
 //! (ex23) Norm of error 1.14852e-2, Iters 318
 //! ```
 
-static HELP_MSG: &str = "Solves a linear system in parallel with KSP.
-Input parameters include:\n\n";
+static HELP_MSG: &str = "Introductory example that illustrates running PETSc on a subset of processes.\n\
+    Uses examples ksp-ex2 and ksp-ex23.\n\n";
 
 use mpi;
 use mpi::topology::Color;
@@ -66,7 +66,7 @@ fn main() -> petsc_rs::Result<()> {
     // init with no options
     let petsc = Petsc::builder()
         .args(std::env::args())
-        .world(Box::new(comm))
+        .world(comm)
         .help_msg(HELP_MSG)
         .init()?;
 
