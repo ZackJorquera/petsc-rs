@@ -197,12 +197,11 @@ impl<'a, 'tl> SNES<'a, 'tl> {
             let mut ksp_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::SNESGetKSP(self.snes_p, ksp_p.as_mut_ptr()) };
             Petsc::check_error(self.world, ierr)?;
-            let ierr = unsafe { petsc_raw::PetscObjectReference(ksp_p.assume_init() as *mut petsc_raw::_p_PetscObject) };
-            Petsc::check_error(self.world, ierr)?;
 
             // It is now ok to drop this because we incremented the C reference counter
             self.ksp = Some(KSP::new(self.world, unsafe { ksp_p.assume_init() }));
-
+            unsafe { self.ksp.as_mut().unwrap().reference()?; }
+            
             Ok(self.ksp.as_ref().unwrap())
         }
     }
@@ -219,11 +218,10 @@ impl<'a, 'tl> SNES<'a, 'tl> {
             let mut ksp_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::SNESGetKSP(self.snes_p, ksp_p.as_mut_ptr()) };
             Petsc::check_error(self.world, ierr)?;
-            let ierr = unsafe { petsc_raw::PetscObjectReference(ksp_p.assume_init() as *mut petsc_raw::_p_PetscObject) };
-            Petsc::check_error(self.world, ierr)?;
 
             // It is now ok to drop this because we incremented the C reference counter
             self.ksp = Some(KSP::new(self.world, unsafe { ksp_p.assume_init() }));
+            unsafe { self.ksp.as_mut().unwrap().reference()?; }
 
             Ok(self.ksp.as_mut().unwrap())
         }
@@ -698,10 +696,9 @@ impl<'a, 'tl> SNES<'a, 'tl> {
             let mut ls_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::SNESGetLineSearch(self.snes_p, ls_p.as_mut_ptr()) };
             Petsc::check_error(self.world, ierr)?;
-            let ierr = unsafe { petsc_raw::PetscObjectReference(ls_p.assume_init() as *mut petsc_raw::_p_PetscObject) };
-            Petsc::check_error(self.world, ierr)?;
 
             self.linesearch = Some(LineSearch { world: self.world, ls_p: unsafe { ls_p.assume_init() } });
+            unsafe { self.linesearch.as_mut().unwrap().reference()?; }
 
             Ok(self.linesearch.as_ref().unwrap())
         }
@@ -716,10 +713,9 @@ impl<'a, 'tl> SNES<'a, 'tl> {
             let mut ls_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::SNESGetLineSearch(self.snes_p, ls_p.as_mut_ptr()) };
             Petsc::check_error(self.world, ierr)?;
-            let ierr = unsafe { petsc_raw::PetscObjectReference(ls_p.assume_init() as *mut petsc_raw::_p_PetscObject) };
-            Petsc::check_error(self.world, ierr)?;
 
             self.linesearch = Some(LineSearch { world: self.world, ls_p: unsafe { ls_p.assume_init() } });
+            unsafe { self.linesearch.as_mut().unwrap().reference()?; }
 
             Ok(self.linesearch.as_mut().unwrap())
         }
@@ -922,10 +918,10 @@ impl<'a, 'tl> SNES<'a, 'tl> {
         let mut vec_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::SNESGetSolution(self.snes_p, vec_p.as_mut_ptr()) };
         Petsc::check_error(self.world, ierr)?;
-        let ierr = unsafe { petsc_raw::PetscObjectReference(vec_p.assume_init() as *mut _) };
-        Petsc::check_error(self.world, ierr)?;
 
-        let rhs = Rc::new(Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } });
+        let mut vec = Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } };
+        unsafe { vec.reference()?; }
+        let rhs = Rc::new(vec);
 
         Ok(rhs)
     }
@@ -1010,10 +1006,9 @@ impl<'a, 'tl> SNES<'a, 'tl> {
             let mut dm_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::SNESGetDM(self.snes_p, dm_p.as_mut_ptr()) };
             Petsc::check_error(self.world, ierr)?;
-            let ierr = unsafe { petsc_raw::PetscObjectReference(dm_p.assume_init() as *mut petsc_raw::_p_PetscObject) };
-            Petsc::check_error(self.world, ierr)?;
 
             self.dm = Some(DM::new(self.world, unsafe { dm_p.assume_init() }));
+            unsafe { self.dm.as_mut().unwrap().reference()?; }
 
             Ok(self.dm.as_ref().unwrap())
         }
@@ -1027,10 +1022,9 @@ impl<'a, 'tl> SNES<'a, 'tl> {
             let mut dm_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::SNESGetDM(self.snes_p, dm_p.as_mut_ptr()) };
             Petsc::check_error(self.world, ierr)?;
-            let ierr = unsafe { petsc_raw::PetscObjectReference(dm_p.assume_init() as *mut petsc_raw::_p_PetscObject) };
-            Petsc::check_error(self.world, ierr)?;
 
             self.dm = Some(DM::new(self.world, unsafe { dm_p.assume_init() }));
+            unsafe { self.dm.as_mut().unwrap().reference()?; }
 
             Ok(self.dm.as_mut().unwrap())
         }
@@ -1040,27 +1034,31 @@ impl<'a, 'tl> SNES<'a, 'tl> {
 // macro impls
 impl<'a> SNES<'a, '_> {
     wrap_simple_petsc_member_funcs! {
-        SNESSetFromOptions, pub set_from_options, snes_p, takes mut, #[doc = "Sets various SNES and KSP parameters from user options."];
-        SNESSetUp, pub set_up, snes_p, takes mut, #[doc = "Sets up the internal data structures for the later use of a nonlinear solver. This will be automatically called with [`SNES::solve()`]."];
-        SNESGetIterationNumber, pub get_iteration_number, snes_p, output PetscInt, it_num, #[doc = "Gets the number of nonlinear iterations completed at this time. (<https://petsc.org/release/docs/manualpages/SNES/SNESGetIterationNumber.html>)"];
-        SNESGetTolerances, pub get_tolerances, snes_p, output PetscReal, atol, output PetscReal, rtol, output PetscReal, stol, output PetscInt, maxit, output PetscInt, maxf, #[doc = "Gets various parameters used in convergence tests.\n\n\
+        SNESSetFromOptions, pub set_from_options, takes mut, #[doc = "Sets various SNES and KSP parameters from user options."];
+        SNESSetUp, pub set_up, takes mut, #[doc = "Sets up the internal data structures for the later use of a nonlinear solver. This will be automatically called with [`SNES::solve()`]."];
+        SNESGetIterationNumber, pub get_iteration_number, output PetscInt, it_num, #[doc = "Gets the number of nonlinear iterations completed at this time. (<https://petsc.org/release/docs/manualpages/SNES/SNESGetIterationNumber.html>)"];
+        SNESGetTolerances, pub get_tolerances, output PetscReal, atol, output PetscReal, rtol, output PetscReal, stol, output PetscInt, maxit, output PetscInt, maxf, #[doc = "Gets various parameters used in convergence tests.\n\n\
             # Outputs (in order)\n\n\
             * `atol` - absolute convergence tolerance\n\
             * `rtol` - relative convergence tolerance\n\
             * `stol` - convergence tolerance in terms of the norm of the change in the solution between steps\n\
             * `maxit` - maximum number of iterations\n\
             * `maxf` - maximum number of function evaluations\n"];
-        SNESGetConvergedReason, pub get_converged_reason, snes_p, output SNESConvergedReason, conv_reas, #[doc = "Gets the reason the SNES iteration was stopped."];
-        SNESSetErrorIfNotConverged, pub set_error_if_not_converged, snes_p, input bool, flg, takes mut, #[doc = "Causes [`SNES::solve()`] to generate an error if the solver has not converged.\n\n\
+        SNESGetConvergedReason, pub get_converged_reason, output SNESConvergedReason, conv_reas, #[doc = "Gets the reason the SNES iteration was stopped."];
+        SNESSetErrorIfNotConverged, pub set_error_if_not_converged, input bool, flg, takes mut, #[doc = "Causes [`SNES::solve()`] to generate an error if the solver has not converged.\n\n\
             Or the database key `-snes_error_if_not_converged` can be used.\n\nNormally PETSc continues if a linear solver fails to converge, you can call [`SNES::get_converged_reason()`] after a [`SNES::solve()`] to determine if it has converged."];
         // TODO: these use interior mutability without UnsafeCell, is that ok? do we need to use UnsafeCell?
-        SNESSetJacobianDomainError, pub(crate) set_jacobian_domain_error, snes_p, takes mut, #[doc = "Tells [`SNES`] that compute jacobian does not make sense any more.\n\n\
+        SNESSetJacobianDomainError, pub(crate) set_jacobian_domain_error, takes mut, #[doc = "Tells [`SNES`] that compute jacobian does not make sense any more.\n\n\
             For example there is a negative element transformation. You probably want to use [`DomainErr`] instead of this function."];
-        SNESSetFunctionDomainError, pub(crate) set_function_domain_error, snes_p, takes mut, #[doc = "Tells [`SNES`] that the input vector to your SNES Function is not in the functions domain.\n\n\
+        SNESSetFunctionDomainError, pub(crate) set_function_domain_error, takes mut, #[doc = "Tells [`SNES`] that the input vector to your SNES Function is not in the functions domain.\n\n\
             For example, negative pressure. You probably want to use [`DomainErr`] instead of this function."];
     }
 }
 
-impl_petsc_object_funcs!{ SNES, snes_p, '_ }
+impl_petsc_object_traits! { SNES, snes_p, petsc_raw::_p_SNES, '_ }
 
-impl_petsc_view_func!{ SNES, snes_p, SNESView, '_ }
+impl_petsc_view_func!{ SNES, SNESView, '_ }
+
+impl_petsc_object_traits! { LineSearch, ls_p, petsc_raw::_p_LineSearch }
+
+impl_petsc_view_func!{ LineSearch, SNESLineSearchView }

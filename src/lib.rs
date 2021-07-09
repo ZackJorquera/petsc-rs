@@ -63,6 +63,9 @@ pub mod prelude {
         PetscScalar,
         PetscReal,
         PetscComplex,
+        AsRaw,
+        AsRawMut,
+        PetscObject,
         petsc_println,
         petsc_println_all,
         vector::{Vector, VecOption, },
@@ -83,6 +86,7 @@ pub mod prelude {
     pub(crate) use std::mem::MaybeUninit;
     pub(crate) use std::ffi::{CString, CStr, };
     pub(crate) use std::rc::Rc;
+    pub(crate) use crate::PetscObjectPrivate;
 }
 
 use prelude::*;
@@ -682,6 +686,70 @@ impl Petsc {
     /// Note, this is the same as using [`Viewer::create_ascii_stdout(petsc.world())`](Viewer::create_ascii_stdout()).
     pub fn viewer_create_ascii_stdout(&self) -> Result<crate::Viewer> {
         Viewer::create_ascii_stdout(self.world())
+    }
+}
+
+/// A rust type than can identify as a raw value understood by the PETSc C API.
+pub unsafe trait AsRaw {
+    /// The raw MPI C API type
+    type Raw;
+    /// The raw value
+    fn as_raw(&self) -> Self::Raw;
+}
+
+/// A rust type than can provide a mutable pointer to a raw value understood by the PETSc C API.
+pub unsafe trait AsRawMut: AsRaw {
+    /// A mutable pointer to the raw value
+    fn as_raw_mut(&mut self) -> *mut <Self as AsRaw>::Raw;
+}
+
+/// The trait that is implemented for any PETSc Object [`petsc-rs::vector::Vector`](Vector), 
+/// [`petsc-rs::mat::Mat`](Mat), [`petsc-rs::ksp::KSP`](KSP), etc.
+pub trait PetscObject<'a, PT>: AsRaw<Raw = *mut PT> {
+    /// Gets the MPI communicator world for any [`PetscObject`] regardless of type;
+    fn world(&self) -> &'a dyn Communicator;
+
+    /// Sets a string name associated with a PETSc object.
+    fn set_name<T: ::std::string::ToString>(&mut self, name: T) -> crate::Result<()> {
+        let name_cs = ::std::ffi::CString::new(name.to_string()).expect("`CString::new` failed");
+        
+        let ierr = unsafe { crate::petsc_raw::PetscObjectSetName(self.as_raw() as *mut crate::petsc_raw::_p_PetscObject, name_cs.as_ptr()) };
+        Petsc::check_error(self.world(), ierr)
+    }
+
+    /// Gets a string name associated with a PETSc object.
+    fn get_name(&self) -> crate::Result<String> {
+        let mut c_buf = ::std::mem::MaybeUninit::<*const ::std::os::raw::c_char>::uninit();
+        
+        let ierr = unsafe { crate::petsc_raw::PetscObjectGetName(self.as_raw() as *mut crate::petsc_raw::_p_PetscObject, c_buf.as_mut_ptr()) };
+        Petsc::check_error(self.world(), ierr)?;
+
+        let c_str = unsafe { ::std::ffi::CStr::from_ptr(c_buf.assume_init()) };
+        crate::Result::Ok(c_str.to_string_lossy().to_string())
+    }
+
+    /// Determines whether a PETSc object is of a particular type (given as a string). 
+    fn type_compare<T: ToString>(&self, type_name: T) -> Result<bool> {
+        let type_name_cs = ::std::ffi::CString::new(type_name.to_string()).expect("`CString::new` failed");
+        let mut tmp = ::std::mem::MaybeUninit::<crate::petsc_raw::PetscBool>::uninit();
+
+        let ierr = unsafe { crate::petsc_raw::PetscObjectTypeCompare(
+            self.as_raw() as *mut _, type_name_cs.as_ptr(),
+            tmp.as_mut_ptr()
+        )};
+        Petsc::check_error(self.world(), ierr)?;
+
+        crate::Result::Ok(unsafe { tmp.assume_init() }.into())
+    }
+}
+
+// These are loose wrappers that are only intended to by accesses internally.
+pub(crate) trait PetscObjectPrivate<'a, PT>: PetscObject<'a, PT> {
+    wrap_simple_petsc_member_funcs! {
+        // TODO: should these be unsafe? for is it fine not to because the are internal?
+        PetscObjectReference, reference, takes mut, is unsafe, #[doc = "Indicates to any PetscObject that it is being referenced by another PetscObject. This increases the reference count for that object by one."];
+        PetscObjectDereference, dereference, takes mut, is unsafe, #[doc = "Indicates to any PetscObject that it is being referenced by one less PetscObject. This decreases the reference count for that object by one."];
+        PetscObjectGetReference, get_reference_count, output PetscInt, cnt, #[doc = "Gets the current reference count for any PETSc object."];
     }
 }
 

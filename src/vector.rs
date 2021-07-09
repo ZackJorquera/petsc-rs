@@ -709,28 +709,28 @@ impl<'a> DerefMut for BorrowVectorMut<'a, '_> {
 // macro impls
 impl<'a> Vector<'a> {
     wrap_simple_petsc_member_funcs! {
-        VecSetFromOptions, pub set_from_options, vec_p, takes mut, #[doc = "Configures the vector from the options database."];
-        VecSetUp, pub set_up, vec_p, takes mut, #[doc = "Sets up the internal vector data structures for the later use."];
-        VecAssemblyBegin, pub assembly_begin, vec_p, takes mut, #[doc = "Begins assembling the vector. This routine should be called after completing all calls to VecSetValues()."];
-        VecAssemblyEnd, pub assembly_end, vec_p, takes mut, #[doc = "Completes assembling the vector. This routine should be called after VecAssemblyBegin()."];
-        VecSet, pub set_all, vec_p, input PetscScalar, alpha, takes mut, #[doc = "Sets all components of a vector to a single scalar value.\n\nYou CANNOT call this after you have called [`Vector::set_values()`]."];
-        VecGetLocalSize, pub get_local_size, vec_p, output PetscInt, ls, #[doc = "Returns the number of elements of the vector stored in local memory."];
-        VecGetSize, pub get_global_size, vec_p, output PetscInt, gs, #[doc = "Returns the global number of elements of the vector."];
-        VecNorm, pub norm, vec_p, input NormType, norm_type, output PetscReal, tmp1, #[doc = "Computes the vector norm."];
-        VecScale, pub scale, vec_p, input PetscScalar, alpha, takes mut, #[doc = "Scales a vector (`x[i] *= alpha` for each `i`)."];
-        VecAXPY, pub axpy, vec_p, input PetscScalar, alpha, input &Vector, other.vec_p, takes mut, #[doc = "Computes `self += alpha * other`."];
-        VecAYPX, pub aypx, vec_p, input PetscScalar, alpha, input &Vector, other.vec_p, takes mut, #[doc = "Computes `self = other + alpha * self`."];
-        VecAXPBY, pub axpby, vec_p, input PetscScalar, alpha, input PetscScalar, beta, input &Vector, other.vec_p, takes mut, #[doc = "Computes `self = alpha * other + beta * self`."];
-        VecAXPBYPCZ, pub axpbypcz, vec_p, input PetscScalar, alpha, input PetscScalar, beta, input PetscScalar, gamma, input &Vector, x.vec_p, input &Vector, y.vec_p, takes mut, #[doc = "Computes `self = alpha * x + beta * y + gamma * self`."];
-        VecDot, pub dot, vec_p, input &Vector, y.vec_p, output PetscScalar, res, #[doc = "Computes the vector dot product.\n\n\
+        VecSetFromOptions, pub set_from_options, takes mut, #[doc = "Configures the vector from the options database."];
+        VecSetUp, pub set_up, takes mut, #[doc = "Sets up the internal vector data structures for the later use."];
+        VecAssemblyBegin, pub assembly_begin, takes mut, #[doc = "Begins assembling the vector. This routine should be called after completing all calls to VecSetValues()."];
+        VecAssemblyEnd, pub assembly_end, takes mut, #[doc = "Completes assembling the vector. This routine should be called after VecAssemblyBegin()."];
+        VecSet, pub set_all, input PetscScalar, alpha, takes mut, #[doc = "Sets all components of a vector to a single scalar value.\n\nYou CANNOT call this after you have called [`Vector::set_values()`]."];
+        VecGetLocalSize, pub get_local_size, output PetscInt, ls, #[doc = "Returns the number of elements of the vector stored in local memory."];
+        VecGetSize, pub get_global_size, output PetscInt, gs, #[doc = "Returns the global number of elements of the vector."];
+        VecNorm, pub norm, input NormType, norm_type, output PetscReal, tmp1, #[doc = "Computes the vector norm."];
+        VecScale, pub scale, input PetscScalar, alpha, takes mut, #[doc = "Scales a vector (`x[i] *= alpha` for each `i`)."];
+        VecAXPY, pub axpy, input PetscScalar, alpha, input &Vector, other.vec_p, takes mut, #[doc = "Computes `self += alpha * other`."];
+        VecAYPX, pub aypx, input PetscScalar, alpha, input &Vector, other.vec_p, takes mut, #[doc = "Computes `self = other + alpha * self`."];
+        VecAXPBY, pub axpby, input PetscScalar, alpha, input PetscScalar, beta, input &Vector, other.vec_p, takes mut, #[doc = "Computes `self = alpha * other + beta * self`."];
+        VecAXPBYPCZ, pub axpbypcz, input PetscScalar, alpha, input PetscScalar, beta, input PetscScalar, gamma, input &Vector, x.vec_p, input &Vector, y.vec_p, takes mut, #[doc = "Computes `self = alpha * x + beta * y + gamma * self`."];
+        VecDot, pub dot, input &Vector, y.vec_p, output PetscScalar, res, #[doc = "Computes the vector dot product.\n\n\
             Note, for complex vectors it does `val = (x,y) = y^H x` where `y^H` denotes the conjugate transpose of y.\
             If you with to force using the transpose you should use [`dot_t`](Vector::dot_t)."];
-        VecTDot, pub dot_t, vec_p, input &Vector, y.vec_p, output PetscScalar, res, #[doc = "Computes an indefinite vector dot product.\n\n\
+        VecTDot, pub dot_t, input &Vector, y.vec_p, output PetscScalar, res, #[doc = "Computes an indefinite vector dot product.\n\n\
             That is, as opposed to [`dot`](Vector::dot), this routine does NOT use the complex conjugate."];
-        VecSetOption, pub set_option, vec_p, input VecOption, option, input bool, flg, #[doc = "Sets an option for controling a vector's behavior."];
+        VecSetOption, pub set_option, input VecOption, option, input bool, flg, #[doc = "Sets an option for controling a vector's behavior."];
     }
 }
 
-impl_petsc_object_funcs!{ Vector, vec_p }
+impl_petsc_object_traits! { Vector, vec_p, petsc_raw::_p_Vec }
 
-impl_petsc_view_func!{ Vector, vec_p, VecView }
+impl_petsc_view_func!{ Vector, VecView }

@@ -124,10 +124,10 @@ impl<'a, 'tl> PC<'a, 'tl> {
             let mut a_mat_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::PCGetOperators(self.pc_p, a_mat_p.as_mut_ptr(), std::ptr::null_mut()) };
             Petsc::check_error(self.world, ierr)?;
-            let ierr = unsafe { petsc_raw::PetscObjectReference(a_mat_p.assume_init() as *mut _) };
-            Petsc::check_error(self.world, ierr)?;
 
-            Rc::new(Mat { world: self.world, mat_p: unsafe { a_mat_p.assume_init() } })
+            let mut mat = Mat { world: self.world, mat_p: unsafe { a_mat_p.assume_init() } };
+            unsafe { mat.reference()?; }
+            Rc::new(mat)
         };
 
         let p_mat = if let Some(ref p_mat) = self.ref_pmat {
@@ -138,9 +138,9 @@ impl<'a, 'tl> PC<'a, 'tl> {
             let mut p_mat_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::PCGetOperators(self.pc_p, std::ptr::null_mut(), p_mat_p.as_mut_ptr()) };
             Petsc::check_error(self.world, ierr)?;
-            let ierr = unsafe { petsc_raw::PetscObjectReference(p_mat_p.assume_init() as *mut _) };
-            Petsc::check_error(self.world, ierr)?;
 
+            let mut mat = Mat { world: self.world, mat_p: unsafe { p_mat_p.assume_init() } };
+            unsafe { mat.reference()?; }
             Rc::new(Mat { world: self.world, mat_p: unsafe { p_mat_p.assume_init() } })
         };
 
@@ -259,11 +259,11 @@ impl<'a, 'tl> PC<'a, 'tl> {
 // Macro impls
 impl<'a> PC<'a, '_> {
     wrap_simple_petsc_member_funcs! {
-        PCSetFromOptions, pub set_from_options, pc_p, takes mut, #[doc = "Sets PC options from the options database. This routine must be called before PCSetUp() if the user is to be allowed to set the preconditioner method."];
-        PCSetUp, pub set_up, pc_p, takes mut, #[doc = "Prepares for the use of a preconditioner."];
+        PCSetFromOptions, pub set_from_options, takes mut, #[doc = "Sets PC options from the options database. This routine must be called before PCSetUp() if the user is to be allowed to set the preconditioner method."];
+        PCSetUp, pub set_up, takes mut, #[doc = "Prepares for the use of a preconditioner."];
     }
 }
 
-impl_petsc_object_funcs!{ PC, pc_p, '_ }
+impl_petsc_object_traits! { PC, pc_p, petsc_raw::_p_PC, '_ }
 
-impl_petsc_view_func!{ PC, pc_p, PCView, '_ }
+impl_petsc_view_func!{ PC, PCView, '_ }

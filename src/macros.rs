@@ -22,7 +22,7 @@
 ///
 /// ```ignore
 /// wrap_simple_petsc_member_funcs! {
-///     VecNorm, norm, vec_p, input NormType, norm_type, output f64, tmp1, #[doc = "Computes the vector norm."];
+///     VecNorm, norm, input NormType, norm_type, output f64, tmp1, #[doc = "Computes the vector norm."];
 /// }
 /// ```
 ///
@@ -34,11 +34,11 @@
 /// ```ignore
 /// pub struct Vector<'a> {
 ///     pub(crate) world: &'a dyn Communicator,
-///     pub(crate) test_p: petsc_raw::Vec,
+///     pub(crate) vec_p: petsc_raw::Vec,
 /// }
 /// ```
-/// Note, you need to have a member `world: &'a dyn Communicator` and some pointer type to the C petsc type
-/// for this macro to work.
+/// Note, for the macro to work, the type must implement crate::AsRaw and crate::PetscObject.
+/// This can be done with the [`impl_petsc_object_traits!`] macro.
 ///
 /// We can then using the macro in the following way to create the function 
 /// `pub fn set_ab_ret_cd(&mut self, a: i32, b: f64) -> crate::Result<(f64, i32)>`
@@ -46,10 +46,10 @@
 /// ```ignore
 /// impl Vec<'_> {
 ///     wrap_simple_petsc_member_funcs! {
-///         VecSetABRetCD, pub set_ab_ret_cd, vec_p, input i32, a, input f64, b, 
-/// //         ^            ^         ^          ^        ^
-/// //    Petsc func name   └- vis    |   pointer member  |- Then for each input
-/// //                           rust func name          put `input type, param_name,`
+///         VecSetABRetCD, pub set_ab_ret_cd, input i32, a, input f64, b, 
+/// //         ^            ^         ^            ^
+/// //    Petsc func name   └- vis    |            |- Then for each input
+/// //                           rust func name   put `input type, param_name,`
 ///             output f64, c, output i32, d, takes mut, #[doc = "doc-string"];
 /// //           ^                              ^
 /// //           |- for each output             |- If you want the method to take
@@ -72,7 +72,7 @@
 /// ```ignore
 /// impl Vec<'_> {
 ///     wrap_simple_petsc_member_funcs! {
-///         VecAXPY, pub axpy, vec_p, input PetscScalar, alpha, input &Vector,
+///         VecAXPY, pub axpy, input PetscScalar, alpha, input &Vector,
 ///             other .vec_p, #[doc = "doc-string"];
 /// //                ^ just add `.member_name` after the param_name
 ///     }
@@ -86,7 +86,7 @@
 /// ```ignore
 /// impl NullSpace<'_> {
 ///     wrap_simple_petsc_member_funcs! {
-///         MatNullSpaceTest, pub test, ns_p, input &Mat, vec .mat_p,
+///         MatNullSpaceTest, pub test, input &Mat, vec .mat_p,
 ///         output bool, is_null .into from petsc_raw::PetscBool, #[doc = "doc-string"];
 /// //                           ^      ^      ^
 /// //                    add `.into`   |      |
@@ -100,26 +100,27 @@
 /// pointer cast is done automatically.
 macro_rules! wrap_simple_petsc_member_funcs {
     {$(
-        $raw_func:ident, $vis_par:vis $new_func:ident, $raw_ptr_var:ident,
+        $raw_func:ident, $vis_par:vis $new_func:ident,
         $(input $param_type:ty, $param_name:ident $(.$member_name:ident)? ,)*
         $(output $ret_type:ty, $tmp_ident:ident $(.$into_fn:ident from $raw_ret_type:ty)? ,)*
-        $(takes $mut_tag:tt,)? #[$doc:meta];
+        $(takes $mut_tag:tt,)? $(is $is_unsafe:ident,)? #[$doc:meta];
     )*} => {
 $(
     #[$doc]
     #[allow(unused_parens)]
-    $vis_par fn $new_func(& $($mut_tag)? self, $( $param_name: $param_type ),*)
+    $vis_par $($is_unsafe)? fn $new_func(& $($mut_tag)? self, $( $param_name: $param_type ),*)
         -> crate::Result<($( $ret_type ),*)>
     {
         $(
             let mut $tmp_ident = ::std::mem::MaybeUninit $(::<$raw_ret_type>)? ::uninit();
         )*
+        #[allow(unused_unsafe)]
         let ierr = unsafe { crate::petsc_raw::$raw_func(
-            self.$raw_ptr_var,
+            self.as_raw() as *mut _,
             $( $param_name $(.$member_name)?.into() , )*
             $( $tmp_ident.as_mut_ptr() as *mut _ ),*
         )};
-        Petsc::check_error(self.world, ierr)?;
+        Petsc::check_error(self.world(), ierr)?;
 
         #[allow(unused_unsafe)]
         crate::Result::Ok(unsafe { ( $( $tmp_ident.assume_init() $(.$into_fn())? ),* ) })
@@ -134,69 +135,56 @@ $(
 /// These can be repeated multiple times to define multiple like methods.
 macro_rules! wrap_prealloc_petsc_member_funcs {
     {$(
-        $raw_func:ident, $new_func:ident, $raw_ptr_var:ident, $(block $arg1:ident,)? $(nz $arg2:ident, $arg3:ident,)+ #[$doc:meta];
+        $raw_func:ident, $new_func:ident, $(block $arg1:ident,)? $(nz $arg2:ident, $arg3:ident,)+ #[$doc:meta];
     )*} => {
 $(
     #[$doc]
     pub fn $new_func(&mut self, $($arg1: PetscInt,)? $($arg2: PetscInt, $arg3: ::std::option::Option<&[PetscInt]>),+) -> crate::Result<()> {
         let ierr = unsafe { crate::petsc_raw::$raw_func(
-            self.$raw_ptr_var, 
+            self.as_raw(), 
             $( $arg1, )?
             $(
                 $arg2,
                 $arg3.map(|o| o.as_ptr()).unwrap_or(::std::ptr::null()) 
             ),+ ) };
-        Petsc::check_error(self.world, ierr)
+        Petsc::check_error(self.world(), ierr)
     }
 )*
     };
 }
 
-/// Defines `set_name`, `get_name`, and TODO: add more maybe
-macro_rules! impl_petsc_object_funcs {
-    ($struct_name:ident, $raw_ptr_var:ident $(, $add_lt:lifetime)*) => {
-        impl<'a> $struct_name<'a, $( $add_lt ),*>
-        {
-            /// Sets a string name associated with a PETSc object.
-            pub fn set_name<T: ::std::string::ToString>(&mut self, name: T) -> crate::Result<()> {
-                let name_cs = ::std::ffi::CString::new(name.to_string()).expect("`CString::new` failed");
-                
-                let ierr = unsafe { crate::petsc_raw::PetscObjectSetName(self.$raw_ptr_var as *mut crate::petsc_raw::_p_PetscObject, name_cs.as_ptr()) };
-                Petsc::check_error(self.world, ierr)
+macro_rules! impl_petsc_object_traits {
+    ($struct_name:ident, $raw_ptr_var:ident, $raw_ptr_ty:ty $(, $add_lt:lifetime)*) => {
+        unsafe impl<'a> crate::AsRaw for $struct_name<'a, $( $add_lt ),*> {
+            type Raw = *mut $raw_ptr_ty;
+
+            #[inline]
+            fn as_raw(&self) -> Self::Raw {
+                self.$raw_ptr_var
             }
+        } 
 
-            /// Gets a string name associated with a PETSc object.
-            pub fn get_name(&self) -> crate::Result<String> {
-                let mut c_buf = ::std::mem::MaybeUninit::<*const ::std::os::raw::c_char>::uninit();
-                
-                let ierr = unsafe { crate::petsc_raw::PetscObjectGetName(self.$raw_ptr_var as *mut crate::petsc_raw::_p_PetscObject, c_buf.as_mut_ptr()) };
-                Petsc::check_error(self.world, ierr)?;
-
-                let c_str = unsafe { ::std::ffi::CStr::from_ptr(c_buf.assume_init()) };
-                crate::Result::Ok(c_str.to_string_lossy().to_string())
+        unsafe impl<'a> crate::AsRawMut for $struct_name<'a, $( $add_lt ),*> {
+            #[inline]
+            fn as_raw_mut(&mut self) -> *mut Self::Raw {
+                &mut self.$raw_ptr_var as *mut _
             }
+        } 
 
-            /// Determines whether a PETSc object is of a particular type (given as a string). 
-            pub fn type_compare<T: ToString>(&self, type_name: T) -> Result<bool> {
-                let type_name_cs = ::std::ffi::CString::new(type_name.to_string()).expect("`CString::new` failed");
-                let mut tmp = ::std::mem::MaybeUninit::<crate::petsc_raw::PetscBool>::uninit();
-
-                let ierr = unsafe { crate::petsc_raw::PetscObjectTypeCompare(
-                    self.$raw_ptr_var as *mut _, type_name_cs.as_ptr(),
-                    tmp.as_mut_ptr()
-                )};
-                Petsc::check_error(self.world, ierr)?;
-
-                #[allow(unused_unsafe)]
-                crate::Result::Ok(unsafe { tmp.assume_init() }.into())
+        impl<'a> crate::PetscObject<'a, $raw_ptr_ty> for $struct_name<'a, $( $add_lt ),*> {
+            #[inline]
+            fn world(&self) -> &'a dyn mpi::traits::Communicator {
+                self.world
             }
         }
+
+        impl<'a> crate::PetscObjectPrivate<'a, $raw_ptr_ty> for $struct_name<'a, $( $add_lt ),*> { }
     };
 }
 
 // defines `view_with`
 macro_rules! impl_petsc_view_func {
-    ($struct_name:ident, $raw_ptr_var:ident, $raw_view_func:ident $(, $add_lt:lifetime)*) => {
+    ($struct_name:ident, $raw_view_func:ident $(, $add_lt:lifetime)*) => {
         impl<'a> $struct_name<'a, $( $add_lt ),*>
         {
             /// Views the object with a viewer
@@ -208,7 +196,7 @@ macro_rules! impl_petsc_view_func {
                     owned_viewer = Some(crate::viewer::Viewer::create_ascii_stdout(self.world)?);
                     owned_viewer.as_ref().unwrap()
                 };
-                let ierr = unsafe { crate::petsc_raw::$raw_view_func(self.$raw_ptr_var, viewer.viewer_p) };
+                let ierr = unsafe { crate::petsc_raw::$raw_view_func(self.as_raw(), viewer.viewer_p) };
                 Petsc::check_error(self.world, ierr)
             }
         }

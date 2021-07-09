@@ -874,11 +874,11 @@ impl Clone for DM<'_> {
 // macro impls
 impl<'a> DM<'a> {
     wrap_simple_petsc_member_funcs! {
-        DMSetFromOptions, pub set_from_options, dm_p, takes mut, #[doc = "Sets various SNES and KSP parameters from user options."];
-        DMSetUp, pub set_up, dm_p, takes mut, #[doc = "Sets up the internal data structures for the later use of a nonlinear solver. This will be automatically called with [`SNES::solve()`]."];
-        DMGetDimension, pub get_dimension, dm_p, output PetscInt, dim, #[doc = "Return the topological dimension of the DM"];
+        DMSetFromOptions, pub set_from_options, takes mut, #[doc = "Sets various SNES and KSP parameters from user options."];
+        DMSetUp, pub set_up, takes mut, #[doc = "Sets up the internal data structures for the later use of a nonlinear solver. This will be automatically called with [`SNES::solve()`]."];
+        DMGetDimension, pub get_dimension, output PetscInt, dim, #[doc = "Return the topological dimension of the DM"];
         
-        DMDAGetInfo, pub da_get_info, dm_p, output PetscInt, dim, output PetscInt, bm, output PetscInt, bn, output PetscInt, bp, output PetscInt, m,
+        DMDAGetInfo, pub da_get_info, output PetscInt, dim, output PetscInt, bm, output PetscInt, bn, output PetscInt, bp, output PetscInt, m,
             output PetscInt, n, output PetscInt, p, output PetscInt, dof, output PetscInt, s, output DMBoundaryType, bx, output DMBoundaryType, by,
             output DMBoundaryType, bz, output DMDAStencilType, st,
             #[doc = "Gets information about a given distributed array.\n\n\
@@ -889,24 +889,24 @@ impl<'a> DM<'a> {
             * `dof` - number of degrees of freedom per node\n\
             * `s` - stencil width\n * `bx,by,bz` - type of ghost nodes at boundary\n\
             * `st` - stencil type"];
-        DMDAGetCorners, pub da_get_corners, dm_p, output PetscInt, x, output PetscInt, y, output PetscInt, z, output PetscInt, m, output PetscInt, n, output PetscInt, p,
+        DMDAGetCorners, pub da_get_corners, output PetscInt, x, output PetscInt, y, output PetscInt, z, output PetscInt, m, output PetscInt, n, output PetscInt, p,
             #[doc = "Returns the global (x,y,z) indices of the lower left corner and size of the local region, excluding ghost points.\n\n\
             # Outputs (in order)\n\n\
             * `x,y,z` - the corner indices (where y and z are optional; these are used for 2D and 3D problems)\n\
             * `m,n,p` - widths in the corresponding directions (where n and p are optional; these are used for 2D and 3D problems)"];
-        DMDAGetGhostCorners, pub da_get_ghost_corners, dm_p, output PetscInt, x, output PetscInt, y, output PetscInt, z, output PetscInt, m, output PetscInt, n, output PetscInt, p,
+        DMDAGetGhostCorners, pub da_get_ghost_corners, output PetscInt, x, output PetscInt, y, output PetscInt, z, output PetscInt, m, output PetscInt, n, output PetscInt, p,
             #[doc = "Returns the global (x,y,z) indices of the lower left corner and size of the local region, including ghost points.\n\n\
             # Outputs (in order)\n\n\
             * `x,y,z` - the corner indices (where y and z are optional; these are used for 2D and 3D problems)\n\
             * `m,n,p` - widths in the corresponding directions (where n and p are optional; these are used for 2D and 3D problems)"];
         // TODO: would it be nicer to have this take in a Range<PetscReal>? (then we couldn't use the macro)
-        DMDASetUniformCoordinates, pub da_set_uniform_coordinates, dm_p, input PetscReal, x_min, input PetscReal, x_max, input PetscReal, y_min,
+        DMDASetUniformCoordinates, pub da_set_uniform_coordinates, input PetscReal, x_min, input PetscReal, x_max, input PetscReal, y_min,
             input PetscReal, y_max, input PetscReal, z_min, input PetscReal, z_max, #[doc = "Sets a DMDA coordinates to be a uniform grid.\n\n\
             `y` and `z` values will be ignored for 1 and 2 dimensional problems."];
-        DMCompositeGetNumberDM, pub composite_get_num_dms_petsc, dm_p, output PetscInt, ndms, #[doc = "idk remove this maybe"];
+        DMCompositeGetNumberDM, pub composite_get_num_dms_petsc, output PetscInt, ndms, #[doc = "idk remove this maybe"];
     }
 }
 
-impl_petsc_object_funcs!{ DM, dm_p }
+impl_petsc_object_traits! { DM, dm_p, petsc_raw::_p_DM }
 
-impl_petsc_view_func!{ DM, dm_p, DMView }
+impl_petsc_view_func!{ DM, DMView }
