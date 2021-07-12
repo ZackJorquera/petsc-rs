@@ -106,12 +106,10 @@ impl<'a> DM<'a> {
         nx: PetscInt, ny: PetscInt, px: impl Into<Option<PetscInt>>, py: impl Into<Option<PetscInt>>, dof: PetscInt, s: PetscInt,
         lx: impl Into<Option<&'ll1 [PetscInt]>>, ly: impl Into<Option<&'ll2 [PetscInt]>>) -> Result<Self>
     {
-        let px = px.into();
-        let py = py.into();
         let lx = lx.into();
         let ly = ly.into();
-        let px = px.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
-        let py = py.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
+        let px = px.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
+        let py = py.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
         assert!(lx.map_or(true, |lx| lx.len() as PetscInt == px));
         assert!(ly.map_or(true, |ly| ly.len() as PetscInt == py));
 
@@ -142,15 +140,12 @@ impl<'a> DM<'a> {
         nx: PetscInt, ny: PetscInt, nz: PetscInt, px: impl Into<Option<PetscInt>>, py: impl Into<Option<PetscInt>>, pz: impl Into<Option<PetscInt>>, dof: PetscInt, s: PetscInt,
         lx: impl Into<Option<&'ll1 [PetscInt]>>, ly: impl Into<Option<&'ll2 [PetscInt]>>, lz: impl Into<Option<&'ll3 [PetscInt]>>) -> Result<Self>
     {
-        let px = px.into();
-        let py = py.into();
-        let pz = pz.into();
         let lx = lx.into();
         let ly = ly.into();
         let lz = lz.into();
-        let px = px.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
-        let py = py.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
-        let pz = pz.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
+        let px = px.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
+        let py = py.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
+        let pz = pz.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
         assert!(lx.map_or(true, |lx| lx.len() as PetscInt == px));
         assert!(ly.map_or(true, |ly| ly.len() as PetscInt == py));
         assert!(lz.map_or(true, |lz| lz.len() as PetscInt == pz));
