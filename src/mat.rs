@@ -105,12 +105,12 @@ impl<'a> Mat<'a> {
     ///
     /// For rows and columns, local and global cannot be both None. If one processor calls this with a global of None then all processors must, otherwise the program will hang.
     /// If None is not used for the local sizes, then the user must ensure that they are chosen to be compatible with the vectors.
-    pub fn set_sizes(&mut self, local_rows: Option<PetscInt>, local_cols: Option<PetscInt>, global_rows: Option<PetscInt>, global_cols: Option<PetscInt>) -> Result<()> {
+    pub fn set_sizes(&mut self, local_rows: impl Into<Option<PetscInt>>, local_cols: impl Into<Option<PetscInt>>, global_rows: impl Into<Option<PetscInt>>, global_cols: impl Into<Option<PetscInt>>) -> Result<()> {
         let ierr = unsafe { petsc_raw::MatSetSizes(
-            self.mat_p, local_rows.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
-            local_cols.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
-            global_rows.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
-            global_cols.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER)) };
+            self.mat_p, local_rows.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
+            local_cols.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
+            global_rows.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
+            global_cols.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER)) };
         Petsc::check_error(self.world, ierr)
     }
 
@@ -579,11 +579,11 @@ impl<'a> Mat<'a> {
     ///
     /// Expected fill as ratio of `nnz(C)/(nnz(self) + nnz(other))`, use `None` if you do not have
     /// a good estimate. If the result is a dense matrix this is irrelevant.
-    pub fn mat_mult(&self, other: &Mat, fill: Option<PetscReal>) -> Result<Mat<'a>>{
+    pub fn mat_mult(&self, other: &Mat, fill: impl Into<Option<PetscReal>>) -> Result<Mat<'a>>{
         let mut mat_out_p = MaybeUninit::uninit();
         // TODO: do we want other MatReuse options
         let ierr = unsafe { petsc_raw::MatMatMult(self.mat_p, other.mat_p, MatReuse::MAT_INITIAL_MATRIX,
-            fill.unwrap_or(petsc_raw::PETSC_DEFAULT_REAL), mat_out_p.as_mut_ptr()) };
+            fill.into().unwrap_or(petsc_raw::PETSC_DEFAULT_REAL), mat_out_p.as_mut_ptr()) };
         Petsc::check_error(self.world, ierr)?;
 
         Ok(Mat { world: self.world, mat_p: unsafe { mat_out_p.assume_init() } })
@@ -598,9 +598,9 @@ impl<'a> Mat<'a> {
     /// [`NullSpace::remove_from()`].
     // TODO: I don't like this api, we only force it to be a `Rc` because we dont want the caller editing
     // the nullspace after they set it (we don't actually use it to reference count).
-    pub fn set_nullspace(&mut self, nullspace: Option<Rc<NullSpace<'a>>>) -> Result<()> {
+    pub fn set_nullspace(&mut self, nullspace: impl Into<Option<Rc<NullSpace<'a>>>>) -> Result<()> {
         let ierr = unsafe { petsc_raw::MatSetNullSpace(self.mat_p,
-            nullspace.as_ref().map_or(std::ptr::null_mut(), |ns| ns.ns_p)) };
+            nullspace.into().as_ref().map_or(std::ptr::null_mut(), |ns| ns.ns_p)) };
         Petsc::check_error(self.world, ierr)
     }
 
@@ -611,9 +611,9 @@ impl<'a> Mat<'a> {
     ///
     /// Krylov solvers can produce the minimal norm solution to the least squares problem by utilizing
     /// [`NullSpace::remove_from()`].
-    pub fn set_left_nullspace(&mut self, nullspace: Option<Rc<NullSpace<'a>>>) -> Result<()> {
+    pub fn set_left_nullspace(&mut self, nullspace: impl Into<Option<Rc<NullSpace<'a>>>>) -> Result<()> {
         let ierr = unsafe { petsc_raw::MatSetTransposeNullSpace(self.mat_p,
-            nullspace.as_ref().map_or(std::ptr::null_mut(), |ns| ns.ns_p)) };
+            nullspace.into().as_ref().map_or(std::ptr::null_mut(), |ns| ns.ns_p)) };
         Petsc::check_error(self.world, ierr)
     }
 
@@ -623,9 +623,9 @@ impl<'a> Mat<'a> {
     ///
     /// This null space is used by the linear solvers. Overwrites any previous null space that may
     /// have been attached. You can remove the null space by calling this routine with `None`.
-    pub fn set_near_nullspace(&mut self, nullspace: Option<Rc<NullSpace<'a>>>) -> Result<()> {
+    pub fn set_near_nullspace(&mut self, nullspace: impl Into<Option<Rc<NullSpace<'a>>>>) -> Result<()> {
         let ierr = unsafe { petsc_raw::MatSetNearNullSpace(self.mat_p,
-            nullspace.as_ref().map_or(std::ptr::null_mut(), |ns| ns.ns_p)) };
+            nullspace.into().as_ref().map_or(std::ptr::null_mut(), |ns| ns.ns_p)) };
         Petsc::check_error(self.world, ierr)
     }
 
@@ -656,7 +656,7 @@ impl<'a> Mat<'a> {
     }
 }
 
-impl Clone for Mat<'_> {
+impl<'a> Clone for Mat<'a> {
     /// Same as [`x.duplicate(MatDuplicateOption::MAT_COPY_VALUES)`](Mat::duplicate()).
     fn clone(&self) -> Self {
         self.duplicate(MatDuplicateOption::MAT_COPY_VALUES).unwrap()
@@ -734,7 +734,7 @@ impl<'a> Mat<'a> {
         MatAssemblyEnd, pub assembly_end, input MatAssemblyType, assembly_type, takes mut, #[doc = "Completes assembling the matrix. This routine should be called after MatAssemblyBegin()."];
         MatGetLocalSize, pub get_local_size, output PetscInt, res1, output PetscInt, res2, #[doc = "Returns the number of local rows and local columns of a matrix.\n\nThat is the local size of the left and right vectors as returned by `MatCreateVecs()`"];
         MatGetSize, pub get_global_size, output PetscInt, res1, output PetscInt, res2, #[doc = "Returns the number of global rows and columns of a matrix."];
-        MatMult, pub mult, input &Vector, x.vec_p, input &mut Vector, y.vec_p, #[doc = "Computes the matrix-vector product, y = Ax"];
+        MatMult, pub mult, input &Vector, x.as_raw, input &mut Vector, y.as_raw, #[doc = "Computes the matrix-vector product, y = Ax"];
         MatNorm, pub norm, input NormType, norm_type, output PetscReal, tmp1, #[doc = "Calculates various norms of a matrix."];
         MatSetOption, pub set_option, input MatOption, option, input bool, flg, takes mut, #[doc = "Sets a parameter option for a matrix.\n\n\
             Some options may be specific to certain storage formats. Some options determine how values will be inserted (or added). Sorted, row-oriented input will generally assemble the fastest. The default is row-oriented."];
@@ -799,8 +799,8 @@ impl_petsc_view_func!{ Mat, MatView }
 
 impl<'a> NullSpace<'a> {
     wrap_simple_petsc_member_funcs! {
-        MatNullSpaceRemove, pub remove_from, input &mut Vector, vec.vec_p, #[doc = "Removes all the components of a null space from a vector."];
-        MatNullSpaceTest, pub test, input &Mat, vec .mat_p, output bool, is_null .into from petsc_raw::PetscBool, #[doc = "Tests if the claimed null space is really a null space of a matrix."];
+        MatNullSpaceRemove, pub remove_from, input &mut Vector, vec.as_raw, #[doc = "Removes all the components of a null space from a vector."];
+        MatNullSpaceTest, pub test, input &Mat, vec .as_raw, output bool, is_null .into from petsc_raw::PetscBool, #[doc = "Tests if the claimed null space is really a null space of a matrix."];
     }
 }
 

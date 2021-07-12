@@ -65,7 +65,7 @@ fn main() -> petsc_rs::Result<()> {
     let mut lxk = lxu;
     lxk[0] -= 1;
 
-    let mut dak = DM::da_create_1d(petsc.world(), DMBoundaryType::DM_BOUNDARY_NONE, m-1, 1, 1, Some(&lxk))?;
+    let mut dak = DM::da_create_1d(petsc.world(), DMBoundaryType::DM_BOUNDARY_NONE, m-1, 1, 1, lxk.as_ref())?;
     // DMSetOptionsPrefix(dak,"k_");
     dak.set_from_options()?;
     dak.set_up()?;

@@ -286,6 +286,8 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     /// # Ok(())
     /// # }
     /// ```
+    // TODO: so this is a problem input_vec should take a mutable refrence (but that
+    // causes error and i dont know why)
     pub fn set_function<F>(&mut self, input_vec: Option<&'tl Vector<'a>>, user_f: F) -> Result<()>
     where
         F: FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl

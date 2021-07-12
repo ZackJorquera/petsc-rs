@@ -1,12 +1,40 @@
 #![warn(rustdoc::broken_intra_doc_links)]
 #![warn(missing_docs)]
 
-//! # petsc-rs: PETSc rust bindings
+//! # [petsc-rs](#): PETSc rust bindings
 //!
-//! read <https://petsc.org/release/documentation/manual/getting_started> for a quick start using the C API.
-//! TODO: take some topic and add them here (or in the README.md).
+//! PETSc, pronounced PET-see (/ˈpɛt-siː/), is a suite of data structures and routines for the scalable
+//! (parallel) solution of scientific applications modeled by partial differential equations. PETSc supports
+//! MPI through the [rsmpi](https://github.com/rsmpi/rsmpi) crate.
 //!
-//! Also look at <https://github.com/ZackJorquera/petsc-rs>.
+//! # Basic Usage
+//! 
+//! First, you will need to add `petsc-rs` to your `Cargo.toml`. Next, to get access to all the important
+//! traits and types you can use `use petsc_rs::prelude::*`. Some of the important types that are included are:
+//!
+//! * Index sets ([`IS`]), including permutations, for indexing into vectors, renumbering, etc
+//! * Vectors ([`Vector`])
+//! * Matrices ([`Mat`]) (generally sparse)
+//! * Krylov subspace methods ([`KSP`])
+//! * Preconditioners ([`PC`])
+//! * Nonlinear solvers ([`SNES`])
+//! * Managing interactions between mesh data structures and vectors, matrices, and solvers ([`DM`])
+//!
+//! Most PETSc programs begin by initializing PETSc which can be done with [`PetscBuilder::init()`]
+//! or [`Petsc::init_no_args()`].
+//!
+//! ```
+//! use petsc_rs::prelude::*;
+//! fn main() -> petsc_rs::Result<()> {
+//!     let p = Petsc::init_no_args()?;
+//!     petsc_println!(p.world(), "Hello, PETSc!")?;
+//!     Ok(())
+//! }
+//! ```
+//! 
+//! All PETSc routines return a [`petsc_rs::Result`](crate::Result), which is a wrapper around the
+//! standard [`Result`](std::result::Result) type which indicates whether an error has occurred during
+//! the call.
 //!
 //! # Features
 //! 
@@ -31,6 +59,14 @@
 //! ```text
 //! petsc-rs = { version = "*", default-features = false, features = ["petsc-real-f32", "petsc-int-i64"] }
 //! ```
+//!
+//! # Further Reading
+//! 
+//! - [C API Getting Started](https://petsc.org/release/documentation/manual/getting_started/)
+//!
+//! - [C API Programming with PETSc/TAO](https://petsc.org/release/documentation/manual/programming/)
+//!
+//! - [`petsc-rs` github page](https://github.com/ZackJorquera/petsc-rs)
 
 use std::ops::Deref;
 use std::os::raw::{c_char, c_int};
