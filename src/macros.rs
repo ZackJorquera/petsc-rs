@@ -73,8 +73,8 @@
 /// impl Vec<'_> {
 ///     wrap_simple_petsc_member_funcs! {
 ///         VecAXPY, pub axpy, input PetscScalar, alpha, input &Vector,
-///             other .vec_p, #[doc = "doc-string"];
-/// //                ^ just add `.member_name` after the param_name
+///             other .as_raw, #[doc = "doc-string"];
+/// //                ^ just add `.as_raw` after the param_name
 ///     }
 /// }
 /// ```
@@ -86,7 +86,7 @@
 /// ```ignore
 /// impl NullSpace<'_> {
 ///     wrap_simple_petsc_member_funcs! {
-///         MatNullSpaceTest, pub test, input &Mat, vec .mat_p,
+///         MatNullSpaceTest, pub test, input &Mat, vec .as_raw,
 ///         output bool, is_null .into from petsc_raw::PetscBool, #[doc = "doc-string"];
 /// //                           ^      ^      ^
 /// //                    add `.into`   |      |
@@ -101,7 +101,7 @@
 macro_rules! wrap_simple_petsc_member_funcs {
     {$(
         $raw_func:ident, $vis_par:vis $new_func:ident,
-        $(input $param_type:ty, $param_name:ident $(.$member_name:ident)? ,)*
+        $(input $param_type:ty, $param_name:ident $(.$as_raw_fn:ident)? ,)*
         $(output $ret_type:ty, $tmp_ident:ident $(.$into_fn:ident from $raw_ret_type:ty)? ,)*
         $(takes $mut_tag:tt,)? $(is $is_unsafe:ident,)? #[$doc:meta];
     )*} => {
@@ -117,7 +117,7 @@ $(
         #[allow(unused_unsafe)]
         let ierr = unsafe { crate::petsc_raw::$raw_func(
             self.as_raw() as *mut _,
-            $( $param_name $(.$member_name)?.into() , )*
+            $( $param_name $(.$as_raw_fn())?.into() , )*
             $( $tmp_ident.as_mut_ptr() as *mut _ ),*
         )};
         Petsc::check_error(self.world(), ierr)?;
@@ -185,7 +185,7 @@ macro_rules! impl_petsc_object_traits {
 // defines `view_with`
 macro_rules! impl_petsc_view_func {
     ($struct_name:ident, $raw_view_func:ident $(, $add_lt:lifetime)*) => {
-        impl<'a> $struct_name<'a, $( $add_lt ),*>
+        impl $struct_name<'_, $( $add_lt ),*>
         {
             /// Views the object with a viewer
             pub fn view_with(&self, viewer: Option<&crate::viewer::Viewer>) -> crate::Result<()> {

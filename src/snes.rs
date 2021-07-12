@@ -77,7 +77,7 @@ struct SNESFunctionTrampolineData<'a, 'tl> {
     // This field is only used for its ownership/lifetime.
     // The usage of the pointer/reference is all handled on the c side.
     // However, we might want to use it for something like `get_residuals()`
-    _vec: Option<&'tl Vector<'a>>,
+    _vec: Option<&'tl mut Vector<'a>>,
     user_f: Box<dyn FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl>,
     set_dm: bool,
 }
@@ -259,13 +259,13 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     /// # let petsc = Petsc::init_no_args()?;
     /// let n = 10;
     /// let mut r = petsc.vec_create()?;
-    /// r.set_sizes(None, Some(n))?;
+    /// r.set_sizes(None, n)?;
     /// r.set_from_options()?;
     /// let g = r.duplicate()?;
     ///
     /// let mut snes = petsc.snes_create()?;
     ///
-    /// snes.set_function(Some(&mut r), |_snes, x: &Vector, f: &mut Vector| {
+    /// snes.set_function(&mut r, |_snes, x: &Vector, f: &mut Vector| {
     ///     let x_view = x.view()?;
     ///     let mut f_view = f.view_mut()?;
     ///     let g_view = g.view()?;
@@ -286,7 +286,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn set_function<F>(&mut self, input_vec: Option<&'tl Vector<'a>>, user_f: F) -> Result<()>
+    pub fn set_function<'av: 'tl, F>(&mut self, input_vec: impl Into<Option<&'tl mut Vector<'av>>>, user_f: F) -> Result<()>
     where
         F: FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl
     {
@@ -298,14 +298,24 @@ impl<'a, 'tl> SNES<'a, 'tl> {
         // TODO: look at how rsmpi did the trampoline stuff:
         // https://github.com/rsmpi/rsmpi/blob/master/src/collective.rs#L1684
         // They used libffi, that could be a safer way to do it.
+        
+        let input_vec = input_vec.into();
 
         let closure_anchor = Box::new(user_f);
 
         let input_vec_p = input_vec.as_ref().map_or(std::ptr::null_mut(), |v| v.vec_p);
         // Note, we only store input_vec in the trampoline data so it isn't dropped,
         // we never actually use it.
+        // TODO: is this transmute safe? I don't think it is? With out it, i have no idea how to
+        // make this function work. The alternative and "correct" was to do this is to make `'av: 'a`,
+        // or get rid of `'av` in place of `'a`. But, this doesn't work, and i dont know why.
+        // I think using a transmute should be fine because we never edit anything todo with the world,
+        // which is what has the `'a`/`'av` attached to it. We only touch what the vec_p points to 
+        // (through the C API). In fact, in rust, we never touch `_vec` at all. It acts more as phantom
+        // data than anything. Also, when we give the user access to the vec, it has the world from the
+        // `trampoline_data`, i.e. from self.
         let trampoline_data = Box::pin(SNESFunctionTrampolineData { 
-            world: self.world, _vec: input_vec, user_f: closure_anchor,
+            world: self.world, _vec: unsafe { std::mem::transmute(input_vec) }, user_f: closure_anchor,
             set_dm: self.dm.is_some() });
 
         // drop old trampoline_data

@@ -98,7 +98,7 @@ impl<'a> Vector<'a> {
     /// allocates storage for the new vector. Use [`Vector::copy_data_from()`] to copy a vector.
     ///
     /// Note, if you want to duplicate and copy data you should use [`Vector::clone()`].
-    pub fn duplicate(&self) -> Result<Self> {
+    pub fn duplicate(&self) -> Result<Vector<'a>> {
         let mut vec2_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::VecDuplicate(self.vec_p, vec2_p.as_mut_ptr()) };
         Petsc::check_error(self.world, ierr)?;
@@ -119,10 +119,10 @@ impl<'a> Vector<'a> {
     /// The inputs can be `None` to have PETSc decide the size.
     /// `local_size` and `global_size` cannot be both `None`. If one processor calls this with
     /// `global_size` of `None` then all processors must, otherwise the program will hang.
-    pub fn set_sizes(&mut self, local_size: Option<PetscInt>, global_size: Option<PetscInt>) -> Result<()> {
+    pub fn set_sizes(&mut self, local_size: impl Into<Option<PetscInt>>, global_size: impl Into<Option<PetscInt>>) -> Result<()> {
         let ierr = unsafe { petsc_raw::VecSetSizes(
-            self.vec_p, local_size.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
-            global_size.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER)) };
+            self.vec_p, local_size.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
+            global_size.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER)) };
         Petsc::check_error(self.world, ierr)
     }
 
@@ -569,7 +569,7 @@ impl<'a> Vector<'a> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn from_slice(world: &'a UserCommunicator, slice: &[PetscScalar]) -> Result<Self> {
+    pub fn from_slice(world: &'a UserCommunicator, slice: &[PetscScalar]) -> Result<Vector<'a>> {
         let mut v = Vector::create(world)?;
         v.set_sizes(Some(slice.len() as PetscInt), None)?; // create vector of size 10
         v.set_from_options()?;
@@ -583,9 +583,9 @@ impl<'a> Vector<'a> {
     }
 }
 
-impl Clone for Vector<'_> {
+impl<'a> Clone for Vector<'a> {
     /// Will use [`Vector::duplicate()`] and [`Vector::copy_data_from()`].
-    fn clone(&self) -> Self {
+    fn clone(&self) -> Vector<'a> {
         let mut new_vec = self.duplicate().unwrap();
         // TODO: only copy data if data has been set. It is hard to tell if data has been set.
         // We could maybe use something like `PetscObjectStateGet` to check if the vec has been modified
@@ -718,14 +718,14 @@ impl<'a> Vector<'a> {
         VecGetSize, pub get_global_size, output PetscInt, gs, #[doc = "Returns the global number of elements of the vector."];
         VecNorm, pub norm, input NormType, norm_type, output PetscReal, tmp1, #[doc = "Computes the vector norm."];
         VecScale, pub scale, input PetscScalar, alpha, takes mut, #[doc = "Scales a vector (`x[i] *= alpha` for each `i`)."];
-        VecAXPY, pub axpy, input PetscScalar, alpha, input &Vector, other.vec_p, takes mut, #[doc = "Computes `self += alpha * other`."];
-        VecAYPX, pub aypx, input PetscScalar, alpha, input &Vector, other.vec_p, takes mut, #[doc = "Computes `self = other + alpha * self`."];
-        VecAXPBY, pub axpby, input PetscScalar, alpha, input PetscScalar, beta, input &Vector, other.vec_p, takes mut, #[doc = "Computes `self = alpha * other + beta * self`."];
-        VecAXPBYPCZ, pub axpbypcz, input PetscScalar, alpha, input PetscScalar, beta, input PetscScalar, gamma, input &Vector, x.vec_p, input &Vector, y.vec_p, takes mut, #[doc = "Computes `self = alpha * x + beta * y + gamma * self`."];
-        VecDot, pub dot, input &Vector, y.vec_p, output PetscScalar, res, #[doc = "Computes the vector dot product.\n\n\
+        VecAXPY, pub axpy, input PetscScalar, alpha, input &Vector, other.as_raw, takes mut, #[doc = "Computes `self += alpha * other`."];
+        VecAYPX, pub aypx, input PetscScalar, alpha, input &Vector, other.as_raw, takes mut, #[doc = "Computes `self = other + alpha * self`."];
+        VecAXPBY, pub axpby, input PetscScalar, alpha, input PetscScalar, beta, input &Vector, other.as_raw, takes mut, #[doc = "Computes `self = alpha * other + beta * self`."];
+        VecAXPBYPCZ, pub axpbypcz, input PetscScalar, alpha, input PetscScalar, beta, input PetscScalar, gamma, input &Vector, x.as_raw, input &Vector, y.as_raw, takes mut, #[doc = "Computes `self = alpha * x + beta * y + gamma * self`."];
+        VecDot, pub dot, input &Vector, y.as_raw, output PetscScalar, res, #[doc = "Computes the vector dot product.\n\n\
             Note, for complex vectors it does `val = (x,y) = y^H x` where `y^H` denotes the conjugate transpose of y.\
             If you with to force using the transpose you should use [`dot_t`](Vector::dot_t)."];
-        VecTDot, pub dot_t, input &Vector, y.vec_p, output PetscScalar, res, #[doc = "Computes an indefinite vector dot product.\n\n\
+        VecTDot, pub dot_t, input &Vector, y.as_raw, output PetscScalar, res, #[doc = "Computes an indefinite vector dot product.\n\n\
             That is, as opposed to [`dot`](Vector::dot), this routine does NOT use the complex conjugate."];
         VecSetOption, pub set_option, input VecOption, option, input bool, flg, #[doc = "Sets an option for controling a vector's behavior."];
     }

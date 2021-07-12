@@ -1,17 +1,20 @@
-# petsc-rs: PETSc rust bindings
+# `petsc-rs`: PETSc rust bindings
 
-PETSc, pronounced PET-see (/ˈpɛt-siː/), is a suite of data structures and routines for the scalable (parallel) solution of scientific applications modeled by partial differential equations. It supports MPI, ~~and GPUs through CUDA or OpenCL, as well as hybrid MPI-GPU parallelism~~. ~~PETSc (sometimes called PETSc/TAO) also contains the TAO optimization software library~~. (I crossed these out because petsc-rs does not support them).
+PETSc, pronounced PET-see (/ˈpɛt-siː/), is a suite of data structures and routines for the scalable (parallel) solution of scientific applications modeled by partial differential equations. It supports MPI, ~~and GPUs through CUDA or OpenCL, as well as hybrid MPI-GPU parallelism~~. ~~PETSc (sometimes called PETSc/TAO) also contains the TAO optimization software library~~. (I crossed these out because `petsc-rs` does not support them yet).
 
-PETSc is intended for use in large-scale application projects, many ongoing computational science projects are built around the PETSc libraries. PETSc is easy to use for beginners. Moreover, its careful design allows advanced users to have detailed control over the solution process. petsc-rs includes a large suite of parallel linear, nonlinear equation solvers and ODE integrators that are easily used in application codes written in Rust. PETSc provides many of the mechanisms needed within parallel application codes, such as simple parallel matrix and vector assembly routines that allow the overlap of communication and computation. In addition, PETSc includes support for parallel distributed arrays useful for finite difference methods.
+PETSc is intended for use in large-scale application projects, many ongoing computational science projects are built around the PETSc libraries. PETSc is easy to use for beginners. Moreover, its careful design allows advanced users to have detailed control over the solution process. `petsc-rs` includes a large suite of parallel linear, nonlinear equation solvers and ODE integrators that are easily used in application codes written in Rust. PETSc provides many of the mechanisms needed within parallel application codes, such as simple parallel matrix and vector assembly routines that allow the overlap of communication and computation. In addition, PETSc includes support for parallel distributed arrays useful for finite difference methods.
 
 ## Usage
 
-To call petsc-rs from a Rust package, the following Cargo.toml can be used.
+To use `petsc-rs` from a Rust package, the following Cargo.toml can put in your `Cargo.toml`.
 ```toml
+[dependencies]
 petsc-rs = { git = "https://github.com/ZackJorquera/petsc-rs/", branch = "main" }
 ```
 
-In order for this to work correctly, you need to [download PETSc](https://www.mcs.anl.gov/petsc/download/index.html) (version 3.15 or above). Then you need to [configure and install PETSc](https://www.mcs.anl.gov/petsc/documentation/installation.html). I haven't tested all the different ways to install PETSc, but the following works. Note, it is required that you install an MPI library globally and not have PETSc install it for you. Im using `openmpi`, which gives me `mpicc` and `mpicxx`.
+Note, `petsc-rs` is supported for rust 1.52 and above. However, some of the examples and documentation examples require rust 1.53 or above.
+
+In order for `petsc-rs` to work correctly, you need to [download PETSc](https://petsc.org/release/download/) (version 3.15 or above, using the main branch is recommended). Then you need to [configure and install PETSc](https://petsc.org/release/install/). I haven't tested all the different ways to install PETSc, but the following works for `petsc-rs`. Note, it is required that you install an MPI library globally and not have PETSc install it for you. This is needed by the [rsmpi](https://github.com/rsmpi/rsmpi) crate (look at its [requirements](https://github.com/rsmpi/rsmpi#requirements) for more information). Im using `openmpi` 3.1.3, which gives me `mpicc` and `mpicxx`.
 ```text
 ./configure --with-cc=mpicc --with-cxx=mpicxx --download-f2cblaslapack --with-fc=0
 make all check
@@ -19,16 +22,22 @@ make all check
 
 Then you must set the environment variables `PETSC_DIR` and `PETSC_ARCH` to where you installed PETSc.
 
-Note, for the linking on the Rust side to work, you will also need to install a version of LLVM/Clang.
+Note, for the linking on the Rust side to work, you will also need to install `libclang`. See the [bindgen project's requirements](https://rust-lang.github.io/rust-bindgen/requirements.html) for more information.
 
-From here, you should be able to compile your projects using petsc-rs. However, if you get linking errors when you run a program, you might need to set the `LD_LIBRARY_PATH` environment variable to include `$PETSC_DIR/$PETSC_ARCH/lib`.
+From here, you should be able to compile your projects using cargo. However, if you get linking errors when you run a program, you might need to set the `LD_LIBRARY_PATH` environment variable to include `$PETSC_DIR/$PETSC_ARCH/lib`. This is automatically done for use when you use any cargo command such as `cargo run`, but might not be set when you manually run the binary.
 
 ### Optional Build Parameters
 
-If you want to use a PETSc with non-standard precisions for floats or integers, or complex numbers you can include something like the following in your Cargo.toml.
+If you want to use a PETSc with non-standard precisions for floats or integers, or for complex numbers (experimental only) you can include something like the following in your Cargo.toml.
 ```toml
-petsc-rs = { git = "https://github.com/ZackJorquera/petsc-rs/", branch = "main", default-features = false, features = ["petsc-real-f32", "petsc-int-i64"] }
+[dependencies.petsc-rs]
+git = "https://github.com/ZackJorquera/petsc-rs/"
+branch = "main"
+default-features = false
+features = ["petsc-real-f32", "petsc-int-i64"]
 ```
+
+Note, you will have to build PETSc with the same settings that you wish to use for `petsc-rs`. When building, the petsc-sys package will validate that the PETSc install matches the requested feature flags.
 
 If you want to have a release build you will have to set the `PETSC_ARCH_RELEASE` environment variable with the directory in `PETSC_DIR` where the release build is. Then when compile with release mode, the PETSc release build will be used. 
 
@@ -64,7 +73,7 @@ mpiexec -n 8 target/debug/petsc_program_name [petsc_options]
 
 ## Getting Started Example
 
-To help the user start using PETSc immediately, we begin with a simple uniprocessor example that solves the one-dimensional Laplacian problem with finite differences. This sequential code, which can be found in [`examples/ksp/src/ex1.rs`](examples/ksp/src/ex1.rs), illustrates the solution of a linear system with KSP, the interface to the preconditioners, Krylov subspace methods, and direct linear solvers of PETSc.
+To help the user start using PETSc immediately, we begin with a simple uniprocessor example that solves the one-dimensional Laplacian problem with finite differences. This sequential code, which can be found in [`examples/ksp/src/ex1.rs`](https://github.com/ZackJorquera/petsc-rs/blob/main/examples/ksp/src/ex1.rs), illustrates the solution of a linear system with KSP, the interface to the preconditioners, Krylov subspace methods, and direct linear solvers of PETSc.
 
 ```rust
 //! This file will show how to do the kps ex1 example in rust using the petsc-rs bindings.
@@ -198,7 +207,7 @@ fn main() -> petsc_rs::Result<()> {
 
 ## Examples
 
-More examples can be found in [`examples/`](examples/)
+More examples can be found in [`examples/`](https://github.com/ZackJorquera/petsc-rs/tree/main/examples)
 
 ## C API Documentation
 

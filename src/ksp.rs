@@ -69,8 +69,10 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     /// `ksp.get_pc_mut().set_operators()`.
     ///
     /// Passing a `None` for `a_mat` or `p_mat` removes the matrix that is currently used.
-    pub fn set_operators(&mut self, a_mat: Option<Rc<Mat<'a>>>, p_mat: Option<Rc<Mat<'a>>>) -> Result<()>
+    pub fn set_operators(&mut self, a_mat: impl Into<Option<Rc<Mat<'a>>>>, p_mat: impl Into<Option<Rc<Mat<'a>>>>) -> Result<()>
     {
+        let a_mat = a_mat.into();
+        let p_mat = p_mat.into();
         // TODO: should we call `KSPSetOperators`? or should we just call `PC::set_operators`
         // The source for KSPSetOperators basically just calls PCSetOperators but does something with 
         // `ksp->setupstage` so idk.
@@ -218,12 +220,12 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     /// * `atol` - The absolute convergence tolerance absolute size of the (possibly preconditioned) residual norm
     /// * `dtol` - the divergence tolerance, amount (possibly preconditioned) residual norm can increase before KSPConvergedDefault() concludes that the method is diverging
     /// * `max_iters` - Maximum number of iterations to use
-    pub fn set_tolerances(&mut self, rtol: Option<PetscReal>, atol: Option<PetscReal>, 
-            dtol: Option<PetscReal>, max_iters: Option<PetscInt>) -> Result<()>
+    pub fn set_tolerances(&mut self, rtol: impl Into<Option<PetscReal>>, atol: impl Into<Option<PetscReal>>, 
+            dtol: impl Into<Option<PetscReal>>, max_iters: impl Into<Option<PetscInt>>) -> Result<()>
     {
         let ierr = unsafe { petsc_raw::KSPSetTolerances(
-            self.ksp_p, rtol.unwrap_or(petsc_raw::PETSC_DEFAULT_REAL), atol.unwrap_or(petsc_raw::PETSC_DEFAULT_REAL),
-            dtol.unwrap_or(petsc_raw::PETSC_DEFAULT_REAL), max_iters.unwrap_or(petsc_raw::PETSC_DEFAULT_INTEGER)) };
+            self.ksp_p, rtol.into().unwrap_or(petsc_raw::PETSC_DEFAULT_REAL), atol.into().unwrap_or(petsc_raw::PETSC_DEFAULT_REAL),
+            dtol.into().unwrap_or(petsc_raw::PETSC_DEFAULT_REAL), max_iters.into().unwrap_or(petsc_raw::PETSC_DEFAULT_INTEGER)) };
         Petsc::check_error(self.world, ierr)
     }
 

@@ -78,8 +78,9 @@ impl<'a, 'tl> PC<'a, 'tl> {
     /// Passing a `None` for `a_mat` or `p_mat` removes the matrix that is currently used.
     // TODO: should we pass in `Rc`s or should we just transfer ownership.
     // or we could do `Rc<RefCell<Mat>>` so that when you remove the mats we can give mut access back.
-    pub fn set_operators(&mut self, a_mat: Option<Rc<Mat<'a>>>, p_mat: Option<Rc<Mat<'a>>>) -> Result<()>
-    {
+    pub fn set_operators(&mut self, a_mat: impl Into<Option<Rc<Mat<'a>>>>, p_mat: impl Into<Option<Rc<Mat<'a>>>>) -> Result<()> {
+        let a_mat = a_mat.into();
+        let p_mat = p_mat.into();
         // TODO: should we make a_mat an `Rc<RefCell<Mat>>`, `Rc<Mat>`, or just a `Mat`
         // if this consumes a_mat and p_mat, make `set_operators_single_mat` so that you can set
         // them to be the same.

@@ -65,7 +65,7 @@ fn main() -> petsc_rs::Result<()> {
     let mut lxk = lxu;
     lxk[0] -= 1;
 
-    let mut dak = DM::da_create_1d(petsc.world(), DMBoundaryType::DM_BOUNDARY_NONE, m-1, 1, 1, Some(&lxk))?;
+    let mut dak = DM::da_create_1d(petsc.world(), DMBoundaryType::DM_BOUNDARY_NONE, m-1, 1, 1, lxk.as_ref())?;
     // DMSetOptionsPrefix(dak,"k_");
     dak.set_from_options()?;
     dak.set_up()?;
@@ -112,7 +112,7 @@ fn main() -> petsc_rs::Result<()> {
     
             let mut snes = SNES::create(petsc.world())?;
             snes.set_dm(dms[0].clone())?; // TODO: does this work
-            snes.set_function(Some(&mut f_parts[0]), |snes, x, y| {
+            snes.set_function(f_parts[0].deref_mut(), |snes, x, y| {
                 // TODO: idk if we need to do this, we might be able to just use the dms
                 // from outside of the closure
                 let dms = [snes.try_get_dm().unwrap(), &dms[1]];
@@ -170,7 +170,7 @@ fn main() -> petsc_rs::Result<()> {
             
             snes.set_dm(dms[1].clone())?; // TODO: does this work
             
-            snes.set_function(Some(&mut f_parts[1]), |snes, x, y| {
+            snes.set_function(f_parts[1].deref_mut(), |snes, x, y| {
                 // TODO: idk if we need to do this, we might be able to just use the dms
                 // from outside of the closure
                 let dms = [&dms[0], snes.try_get_dm().unwrap()];

@@ -74,7 +74,10 @@ impl<'a> DM<'a> {
     /// * `lx` _(optional)_ - array containing number of nodes in the x direction on each processor, or `None`.
     /// If `Some(...)`, must be of length as the number of processes in the MPI world (i.e. `world.size()`).
     /// The sum of these entries must equal `nx`.
-    pub fn da_create_1d(world: &'a UserCommunicator, bx: DMBoundaryType, nx: PetscInt, dof: PetscInt, s: PetscInt, lx: Option<&[PetscInt]>) -> Result<Self> {
+    pub fn da_create_1d<'ll>(world: &'a UserCommunicator, bx: DMBoundaryType, nx: PetscInt, dof: PetscInt,
+        s: PetscInt, lx: impl Into<Option<&'ll [PetscInt]>>) -> Result<Self>
+    {
+        let lx = lx.into();
         assert!(lx.map_or(true, |lx| lx.len() == world.size() as usize));
         let mut dm_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMDACreate1d(world.as_raw(), bx, nx,
@@ -99,11 +102,14 @@ impl<'a> DM<'a> {
     /// coordinates, or `None`. If `Some(...)`, these must the same length as `px` and `py`, and the
     /// corresponding `px` and `py` cannot be `None`. The sum of the `lx` entries must be `nx`, and
     /// the sum of the `ly` entries must be `ny`.
-    pub fn da_create_2d(world: &'a UserCommunicator, bx: DMBoundaryType, by: DMBoundaryType, stencil_type: DMDAStencilType, 
-        nx: PetscInt, ny: PetscInt, px: Option<PetscInt>, py: Option<PetscInt>, dof: PetscInt, s: PetscInt, lx: Option<&[PetscInt]>, ly: Option<&[PetscInt]>) -> Result<Self>
+    pub fn da_create_2d<'ll1, 'll2>(world: &'a UserCommunicator, bx: DMBoundaryType, by: DMBoundaryType, stencil_type: DMDAStencilType, 
+        nx: PetscInt, ny: PetscInt, px: impl Into<Option<PetscInt>>, py: impl Into<Option<PetscInt>>, dof: PetscInt, s: PetscInt,
+        lx: impl Into<Option<&'ll1 [PetscInt]>>, ly: impl Into<Option<&'ll2 [PetscInt]>>) -> Result<Self>
     {
-        let px = px.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
-        let py = py.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
+        let lx = lx.into();
+        let ly = ly.into();
+        let px = px.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
+        let py = py.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
         assert!(lx.map_or(true, |lx| lx.len() as PetscInt == px));
         assert!(ly.map_or(true, |ly| ly.len() as PetscInt == py));
 
@@ -130,13 +136,16 @@ impl<'a> DM<'a> {
     /// coordinates, or `None`. If `Some(...)`, these must the same length as `px`, `py`, and `pz`, and the
     /// corresponding `px`, `py`, and `pz` cannot be `None`. The sum of the `lx` entries must be `nx`,
     /// the sum of the `ly` entries must be `ny`, and the sum of the `lz` entries must be `nz`.
-    pub fn da_create_3d(world: &'a UserCommunicator, bx: DMBoundaryType, by: DMBoundaryType, bz: DMBoundaryType, stencil_type: DMDAStencilType, 
-        nx: PetscInt, ny: PetscInt, nz: PetscInt, px: Option<PetscInt>, py: Option<PetscInt>, pz: Option<PetscInt>, dof: PetscInt, s: PetscInt,
-        lx: Option<&[PetscInt]>, ly: Option<&[PetscInt]>, lz: Option<&[PetscInt]>) -> Result<Self>
+    pub fn da_create_3d<'ll1, 'll2, 'll3>(world: &'a UserCommunicator, bx: DMBoundaryType, by: DMBoundaryType, bz: DMBoundaryType, stencil_type: DMDAStencilType, 
+        nx: PetscInt, ny: PetscInt, nz: PetscInt, px: impl Into<Option<PetscInt>>, py: impl Into<Option<PetscInt>>, pz: impl Into<Option<PetscInt>>, dof: PetscInt, s: PetscInt,
+        lx: impl Into<Option<&'ll1 [PetscInt]>>, ly: impl Into<Option<&'ll2 [PetscInt]>>, lz: impl Into<Option<&'ll3 [PetscInt]>>) -> Result<Self>
     {
-        let px = px.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
-        let py = py.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
-        let pz = pz.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
+        let lx = lx.into();
+        let ly = ly.into();
+        let lz = lz.into();
+        let px = px.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
+        let py = py.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
+        let pz = pz.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER);
         assert!(lx.map_or(true, |lx| lx.len() as PetscInt == px));
         assert!(ly.map_or(true, |ly| ly.len() as PetscInt == py));
         assert!(lz.map_or(true, |lz| lz.len() as PetscInt == pz));
@@ -852,7 +861,7 @@ impl<'a> DM<'a> {
     }
 }
 
-impl Clone for DM<'_> {
+impl<'a> Clone for DM<'a> {
     fn clone(&self) -> Self {
         // TODO: the docs say this is a shallow clone. How should we deal with this for rust
         // (rust (and the caller) thinks/expects it is a deep clone)
