@@ -295,7 +295,7 @@ fn main() -> petsc_rs::Result<()> {
             snes.solve(None, &mut x)?;
         },
         _ => {
-            Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_USER_INPUT,
+            Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_USER_INPUT,
                 format!("{} is not valid for `-problem_type`. Please use 0, 1, or 2.", problem_type))?;
         }
     }

@@ -259,7 +259,7 @@ impl<'a> DM<'a> {
                 }
             })
         } else {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERROR_ARG_WRONGSTATE,
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                 format!("There are no composite dms set, line: {}", line!())).map(|_| unreachable!())
         }
     }
@@ -279,7 +279,7 @@ impl<'a> DM<'a> {
                 }
             })
         } else {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERROR_ARG_WRONGSTATE,
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                 format!("There are no composite dms set, line: {}", line!())).map(|_| unreachable!())
         }
     }
@@ -417,7 +417,7 @@ impl<'a> DM<'a> {
     ///         rhs_array.slice(s![xs..(xs+xm), ys..(ys+ym)]).dim());
     ///     assert_eq!(g_view.slice(s![.., ..]), rhs_array.slice(s![xs..(xs+xm), ys..(ys+ym)]));
     /// } else {
-    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, 
+    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, 
     ///         "This example only work with 1 or 2 processors!")?;
     /// }
     /// # Ok(())
@@ -669,7 +669,7 @@ impl<'a> DM<'a> {
         let dim = self.get_dimension()?;
 
         if dim > 3 || dim < 1 {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERROR_ARG_CORRUPT, 
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT, 
                 format!("DMDA dimension not 1, 2, or 3, it is {}\n",dim))?;
         }
 
@@ -702,7 +702,7 @@ impl<'a> DM<'a> {
     /// Gets the dms in the composite dm created with [`DM::composite_create()`].
     pub fn composite_dms(&self) -> Result<&[DM<'a>]> {
         self.composite_dms.as_ref().map(|c| c.as_ref()).ok_or_else(|| 
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERROR_ARG_WRONGSTATE,
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                 format!("There are no composite dms set, line: {}", line!())).unwrap_err())
     }
 
@@ -710,7 +710,7 @@ impl<'a> DM<'a> {
     //     if let Some(c) = self.composite_dms.as_mut() {
     //         Ok(c.iter_mut().collect())
     //     } else {
-    //         Petsc::set_error(self.world, PetscErrorKind::PETSC_ERROR_ARG_WRONGSTATE,
+    //         Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
     //             format!("There are no composite dms set, line: {}", line!())).map(|_| unreachable!())
     //     }
     // }
@@ -727,7 +727,7 @@ impl<'a> DM<'a> {
             let ierr = unsafe { petsc_raw::DMCompositeScatterArray(self.dm_p, gvec.vec_p, lvecs_p.as_mut_ptr()) };
             Petsc::check_error(self.world, ierr)
         } else {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERROR_ARG_WRONGSTATE,
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                 format!("There are no composite dms set, line: {}", line!()))
         }
     }
@@ -761,7 +761,7 @@ impl<'a> DM<'a> {
             }).collect())
 
         } else {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERROR_ARG_WRONGSTATE,
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                 format!("There are no composite dms set, line: {}", line!())).map(|_| unreachable!())
         }
     }
@@ -793,7 +793,7 @@ impl<'a> DM<'a> {
 
             Ok(ret_vec)
         } else {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERROR_ARG_WRONGSTATE,
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                 format!("There are no composite dms set, line: {}", line!())).map(|_| unreachable!())
         }
     }
@@ -830,7 +830,7 @@ impl<'a> DM<'a> {
 
             Ok(ret_vec)
         } else {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERROR_ARG_WRONGSTATE,
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                 format!("There are no composite dms set, line: {}", line!())).map(|_| unreachable!())
         }
     }
