@@ -2,7 +2,17 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/Viewer/index.html>
 
-use crate::prelude::*;
+use std::mem::MaybeUninit;
+use crate::{
+    Petsc,
+    petsc_raw,
+    Result,
+    PetscAsRaw,
+    PetscObject,
+    PetscObjectPrivate
+};
+use mpi::topology::UserCommunicator;
+use mpi::traits::*;
 
 pub use petsc_sys::PetscViewerFormat;
 

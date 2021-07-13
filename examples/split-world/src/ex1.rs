@@ -20,9 +20,8 @@
 static HELP_MSG: &str = "Introductory example that illustrates running PETSc on a subset of processes.\n\
     Uses examples ksp-ex2 and ksp-ex23.\n\n";
 
-use mpi;
-use mpi::topology::Color;
 use petsc_rs::prelude::*;
+use mpi::{self, traits::*, topology::Color};
 
 struct Opt {
     /// number of mesh points in x-direction (for ex2)

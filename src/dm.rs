@@ -13,6 +13,25 @@
 // TODO: use `PetscObjectTypeCompare` to make sure we are using the correct type of DM
 
 use core::slice;
+use std::mem::{MaybeUninit, ManuallyDrop};
+use std::ffi::CString;
+use std::rc::Rc;
+use crate::{
+    Petsc,
+    petsc_raw,
+    Result,
+    PetscAsRaw,
+    PetscObject,
+    PetscReal,
+    PetscInt,
+    PetscErrorKind,
+    InsertMode,
+    vector::{self, Vector, },
+    mat::{Mat, },
+    indexset::{IS, },
+};
+use mpi::topology::UserCommunicator;
+use mpi::traits::*;
 
 use ndarray::{ArrayView, ArrayViewMut};
 
@@ -27,9 +46,6 @@ pub struct DM<'a> {
 pub use crate::petsc_raw::DMBoundaryType;
 pub use crate::petsc_raw::DMDAStencilType;
 pub use crate::petsc_raw::DMTypeEnum as DMType;
-
-use crate::prelude::*;
-use crate::vector;
 
 impl<'a> Drop for DM<'a> {
     fn drop(&mut self) {
@@ -324,6 +340,7 @@ impl<'a> DM<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # use ndarray::{Dimension, array, s};
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
@@ -411,6 +428,7 @@ impl<'a> DM<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # use ndarray::{Dimension, array, s};
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
@@ -530,6 +548,7 @@ impl<'a> DM<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # use ndarray::{Dimension, array, s};
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
@@ -883,7 +902,7 @@ impl<'a> Clone for DM<'a> {
 impl<'a> DM<'a> {
     wrap_simple_petsc_member_funcs! {
         DMSetFromOptions, pub set_from_options, takes mut, #[doc = "Sets various SNES and KSP parameters from user options."];
-        DMSetUp, pub set_up, takes mut, #[doc = "Sets up the internal data structures for the later use of a nonlinear solver. This will be automatically called with [`SNES::solve()`]."];
+        DMSetUp, pub set_up, takes mut, #[doc = "Sets up the internal data structures for the later use of a nonlinear solver. This will be automatically called with [`SNES::solve()`](crate::snes::SNES::solve())."];
         DMGetDimension, pub get_dimension, output PetscInt, dim, #[doc = "Return the topological dimension of the DM"];
         
         DMDAGetInfo, pub da_get_info, output PetscInt, dim, output PetscInt, bm, output PetscInt, bn, output PetscInt, bp, output PetscInt, m,

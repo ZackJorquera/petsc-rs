@@ -64,6 +64,7 @@
 static HELP_MSG: &str = "Tests VecView() contour plotting for 2d DMDAs.\n\n";
 
 use petsc_rs::prelude::*;
+use mpi::traits::*;
 
 struct Opt {
     star_stencil: bool,

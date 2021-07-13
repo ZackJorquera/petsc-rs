@@ -13,6 +13,7 @@ static HELP_MSG: &str = "Newton method to solve u'' + u^{2} = f, sequentially.\n
 This example employs a user-defined monitoring routine.\n\n";
 
 use petsc_rs::prelude::*;
+use mpi::traits::*;
 
 fn main() -> petsc_rs::Result<()> {
     // optionally initialize mpi

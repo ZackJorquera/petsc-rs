@@ -23,6 +23,7 @@
 static HELP_MSG: &str = "Solves 2D inhomogeneous Laplacian using multigrid.\n\n";
 
 use petsc_rs::prelude::*;
+use mpi::traits::*;
 use ndarray::prelude::*;
 
 use std::fmt;

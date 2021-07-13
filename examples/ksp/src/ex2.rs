@@ -18,6 +18,7 @@ static HELP_MSG: &str = "Solves a linear system in parallel with KSP.
 Input parameters include:\n\n";
 
 use petsc_rs::prelude::*;
+use mpi::traits::*;
 
 // TODO: make this a derive macro like stuctopt
 // #[derive(PetscOpt)]

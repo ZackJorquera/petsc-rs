@@ -23,5 +23,5 @@ name = "snes-ex28"
 path = "src/ex28.rs"
 
 [dependencies]
-mpi = {git = "https://github.com/rsmpi/rsmpi.git", branch = "master", default-features = false }
+mpi = {git = "https://github.com/rsmpi/rsmpi.git", rev = "82e1d35", default-features = false }
 petsc-rs = { path = "../../" }

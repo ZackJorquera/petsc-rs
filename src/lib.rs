@@ -12,13 +12,13 @@
 //! First, you will need to add `petsc-rs` to your `Cargo.toml`. Next, to get access to all the important
 //! traits and types you can use `use petsc_rs::prelude::*`. Some of the important types that are included are:
 //!
-//! * Index sets ([`IS`]), including permutations, for indexing into vectors, renumbering, etc
-//! * Vectors ([`Vector`])
-//! * Matrices ([`Mat`]) (generally sparse)
-//! * Krylov subspace methods ([`KSP`])
-//! * Preconditioners ([`PC`])
-//! * Nonlinear solvers ([`SNES`])
-//! * Managing interactions between mesh data structures and vectors, matrices, and solvers ([`DM`])
+//! * Index sets ([`IS`](indexset::IS)), including permutations, for indexing into vectors, renumbering, etc
+//! * Vectors ([`Vector`](vector::Vector))
+//! * Matrices ([`Mat`](mat::Mat)) (generally sparse)
+//! * Krylov subspace methods ([`KSP`](ksp::KSP))
+//! * Preconditioners ([`PC`](pc::PC))
+//! * Nonlinear solvers ([`SNES`](snes::SNES))
+//! * Managing interactions between mesh data structures and vectors, matrices, and solvers ([`DM`](dm::DM))
 //!
 //! Most PETSc programs begin by initializing PETSc which can be done with [`PetscBuilder::init()`]
 //! or [`Petsc::init_no_args()`].
@@ -79,6 +79,11 @@ pub(crate) mod petsc_raw {
 pub use petsc_raw::{PetscInt, PetscReal};
 pub use petsc_raw::NormType;
 
+use mpi::{self, traits::*};
+use std::mem::{MaybeUninit, ManuallyDrop};
+use std::ffi::{CString, CStr, };
+use mpi::topology::UserCommunicator;
+
 pub(crate) mod macros;
 
 pub mod vector;
@@ -89,6 +94,12 @@ pub mod viewer;
 pub mod snes;
 pub mod dm;
 pub mod indexset;
+
+use vector::Vector;
+use mat::Mat;
+use ksp::KSP;
+use snes::SNES;
+use viewer::Viewer;
 
 pub mod prelude {
     //! Commonly used items.
@@ -117,20 +128,7 @@ pub mod prelude {
         NormType,
         PetscOpt,
     };
-    pub use mpi::traits::*;
-    pub(crate) use crate::Result;
-    pub(crate) use mpi::{self, traits::*};
-    pub(crate) use mpi::raw::AsRaw;
-    pub(crate) use crate::petsc_raw;
-    pub(crate) use std::mem::{MaybeUninit, ManuallyDrop};
-    pub(crate) use std::ffi::{CString, CStr, };
-    pub(crate) use std::rc::Rc;
-    pub(crate) use mpi::topology::UserCommunicator;
-    pub(crate) use std::pin::Pin;
-    pub(crate) use crate::PetscObjectPrivate;
 }
-
-use prelude::*;
 
 #[cfg(feature = "petsc-use-complex")]
 use num_complex::Complex;
@@ -148,6 +146,7 @@ use num_complex::Complex;
 ///
 /// ```
 /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
 /// # fn main() -> petsc_rs::Result<()> {
 /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
 ///
@@ -179,6 +178,7 @@ macro_rules! petsc_println {
 ///
 /// ```
 /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
 /// # fn main() -> petsc_rs::Result<()> {
 /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
 ///
@@ -224,6 +224,7 @@ pub use petsc_raw::InsertMode;
 ///
 /// ```no_run
 /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
 /// let univ = mpi::initialize().unwrap();
 /// let petsc = Petsc::builder()
 ///     .args(std::env::args())
@@ -477,6 +478,7 @@ impl Petsc {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
     /// if petsc.world().size() != 1 {
     ///     // note, cargo wont run tests with mpi so this will never be reached
@@ -515,6 +517,7 @@ impl Petsc {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
     /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
     ///
@@ -547,6 +550,7 @@ impl Petsc {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
     /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
     ///
@@ -676,6 +680,7 @@ impl Petsc {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// let petsc = Petsc::init_no_args().unwrap();
     /// let vec = petsc.vec_create().unwrap();
     /// ```
@@ -693,6 +698,7 @@ impl Petsc {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// let petsc = Petsc::init_no_args().unwrap();
     /// let mat = petsc.mat_create().unwrap();
     /// ```
@@ -710,6 +716,7 @@ impl Petsc {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// let petsc = Petsc::init_no_args().unwrap();
     /// let ksp = petsc.ksp_create().unwrap();
     /// ```
@@ -727,6 +734,7 @@ impl Petsc {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// let petsc = Petsc::init_no_args().unwrap();
     /// let snes = petsc.snes_create().unwrap();
     /// ```
@@ -815,6 +823,7 @@ pub(crate) trait PetscObjectPrivate<'a, PT>: PetscObject<'a, PT> {
 ///
 /// ```
 /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
 /// struct Opt {
 ///     m: PetscInt,
 ///     n: PetscInt,
@@ -876,6 +885,7 @@ pub type PetscComplex = petsc_sys::PetscComplex;
 ///
 /// ```
 /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
 /// // This will always work
 /// let a = PetscScalar::from(1.5);
 /// ```
@@ -897,6 +907,7 @@ pub type PetscScalar = PetscReal;
 ///
 /// ```
 /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
 /// // This will always work
 /// let a = PetscScalar::from(1.5);
 /// ```

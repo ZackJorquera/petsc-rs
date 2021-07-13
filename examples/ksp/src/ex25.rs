@@ -22,6 +22,7 @@
 static HELP_MSG: &str = "Solves 1D variable coefficient Laplacian using multigrid.\n\n";
 
 use petsc_rs::prelude::*;
+use mpi::traits::*;
 
 struct Opt {
     /// The conductivity

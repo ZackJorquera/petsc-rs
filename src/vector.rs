@@ -3,8 +3,21 @@
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/Vec/index.html>
 
 use std::{marker::PhantomData, ops::{Deref, DerefMut}};
-
-use crate::prelude::*;
+use std::mem::{MaybeUninit, ManuallyDrop};
+use crate::{
+    Petsc,
+    petsc_raw,
+    Result,
+    PetscAsRaw,
+    PetscObject,
+    PetscScalar,
+    PetscReal,
+    PetscInt,
+    InsertMode,
+    NormType,
+};
+use mpi::topology::UserCommunicator;
+use mpi::traits::*;
 
 use ndarray::{ArrayView, ArrayViewMut};
 
@@ -33,7 +46,7 @@ pub struct VectorViewMut<'a, 'b> {
 ///
 /// Gives mutable access to the underlining [`Vector`].
 ///
-/// For example, it is used with [`DM::get_local_vector()`].
+/// For example, it is used with [`DM::get_local_vector()`](crate::dm::DM::get_local_vector()).
 pub struct BorrowVectorMut<'a, 'bv> {
     pub(crate) owned_vec: ManuallyDrop<Vector<'a>>,
     drop_func: Option<Box<dyn FnOnce(&mut Self) + 'bv>>,
@@ -44,7 +57,7 @@ pub struct BorrowVectorMut<'a, 'bv> {
 
 /// A wrapper around [`Vector`] that is used when the [`Vector`] shouldn't be destroyed.
 ///
-/// For example, it is used with [`DM::get_local_vector()`].
+/// For example, it is used with [`DM::get_local_vector()`](crate::dm::DM::get_local_vector()).
 pub struct BorrowVector<'a, 'bv> {
     pub(crate) owned_vec: ManuallyDrop<Vector<'a>>,
     drop_func: Option<Box<dyn FnOnce(&mut Self) + 'bv>>,
@@ -80,6 +93,7 @@ impl<'a> Vector<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// let petsc = Petsc::init_no_args().unwrap();
     ///
     /// Vector::create(petsc.world()).unwrap();
@@ -153,6 +167,7 @@ impl<'a> Vector<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # let petsc = Petsc::init_no_args().unwrap();
     /// if petsc.world().size() != 1 {
     ///     // note, cargo wont run tests with mpi so this will never be reached,
@@ -205,6 +220,7 @@ impl<'a> Vector<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
     /// if petsc.world().size() != 1 {
@@ -259,6 +275,7 @@ impl<'a> Vector<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
     /// if petsc.world().size() != 1 {
@@ -312,6 +329,7 @@ impl<'a> Vector<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # let petsc = Petsc::init_no_args().unwrap();
     /// if petsc.world().size() != 1 {
     ///     // note, cargo wont run tests with mpi so this will never be reached,
@@ -365,6 +383,7 @@ impl<'a> Vector<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
     /// // note, cargo wont run tests with mpi so this will always be run with
@@ -449,6 +468,7 @@ impl<'a> Vector<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
     /// if petsc.world().size() != 1 {
@@ -506,6 +526,7 @@ impl<'a> Vector<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
     /// if petsc.world().size() != 1 {
@@ -551,6 +572,7 @@ impl<'a> Vector<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
     /// // note, cargo wont run tests with mpi so this will always be run with

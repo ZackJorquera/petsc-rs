@@ -10,6 +10,7 @@
 static HELP_MSG: &str = "Newton's method for a two-variable system, sequential.\n\n";
 
 use petsc_rs::prelude::*;
+use mpi::traits::*;
 
 fn main() -> petsc_rs::Result<()> {
     let n = 2;

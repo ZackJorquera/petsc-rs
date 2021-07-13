@@ -15,7 +15,7 @@ petsc-int-i64 = []
 petsc-use-complex = ["num-complex"]
 
 [dependencies]
-mpi = {git = "https://github.com/rsmpi/rsmpi.git", branch = "master", default-features = false }
+mpi = {git = "https://github.com/rsmpi/rsmpi.git", rev = "82e1d35", default-features = false }
 num-complex = { version = "0.4", optional = true }
 
 [build-dependencies]
