@@ -2,13 +2,29 @@
 //!
 //! KSP users can set various preconditioning options at runtime via the options database 
 //! (e.g., -pc_type jacobi ). KSP users can also set PC options directly in application codes by 
-//! first extracting the PC context from the KSP context via [`KSP::get_pc()`] and then directly
+//! first extracting the PC context from the KSP context via [`KSP::get_pc()`](crate::ksp::KSP::get_pc()) and then directly
 //! calling the PC routines listed below (e.g., [`PC::set_type()`]). PC components can be used directly
 //! to create and destroy solvers; this is not needed for users but is for library developers.
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/PC/index.html>
 
-use crate::prelude::*;
+use std::mem::{MaybeUninit, ManuallyDrop};
+use std::ffi::{CString, };
+use std::rc::Rc;
+use std::pin::Pin;
+use crate::{
+    Petsc,
+    petsc_raw,
+    Result,
+    PetscAsRaw,
+    PetscObject,
+    PetscObjectPrivate,
+    vector::{Vector, },
+    mat::{Mat, },
+    indexset::{IS, },
+};
+use mpi::topology::UserCommunicator;
+use mpi::traits::*;
 
 pub use crate::petsc_raw::PCTypeEnum as PCType;
 
@@ -52,7 +68,7 @@ impl<'a, 'tl> PC<'a, 'tl> {
     /// Creates a preconditioner context.
     ///
     /// You will most likely create a preconditioner context from a solver type such as
-    /// from a Krylov solver, [`KSP`], using the [`KSP::get_pc()`] method.
+    /// from a Krylov solver, [`KSP`](crate::ksp::KSP), using the [`KSP::get_pc()`](crate::ksp::KSP::get_pc()) method.
     ///
     /// [`KSP::get_pc`]: KSP::get_pc
     pub fn create(world: &'a UserCommunicator) -> Result<Self> {
@@ -107,7 +123,7 @@ impl<'a, 'tl> PC<'a, 'tl> {
     /// Gets the matrix associated with the linear system and possibly a different
     /// one associated with the preconditioner.
     ///
-    /// If the operators have NOT been set with [`KSP`](KSP::set_operators())/[`PC::set_operators()`]
+    /// If the operators have NOT been set with [`KSP`](crate::ksp::KSP::set_operators())/[`PC::set_operators()`](crate::pc::PC::set_operators())
     /// then the operators are created in the PC and returned to the user. In this case, two DIFFERENT
     /// operators will be returned.
     pub fn get_operators(&self) -> Result<(Rc<Mat<'a>>, Rc<Mat<'a>>)> {

@@ -5,13 +5,32 @@
 //! SNES users can set various algorithmic options at runtime via the
 //! options database (e.g., specifying a trust region method via -snes_type newtontr ). SNES internally
 //! employs [KSP](crate::ksp) for the solution of its linear systems. SNES users can also set [`KSP`](KSP) options
-//! directly in application codes by first extracting the [`KSP`](KSP) context from the [`SNES`](SNES) context via
-//! [`SNES::get_ksp()`](#) and then directly calling various [`KSP`](KSP) (and [`PC`](PC)) routines
+//! directly in application codes by first extracting the [`KSP`](KSP) context from the [`SNES`](crate::snes::SNES) context via
+//! [`SNES::get_ksp()`](#) and then directly calling various [`KSP`](KSP) (and [`PC`](crate::pc::PC)) routines
 //! (e.g., [`PC::set_type()`](#)).
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/SNES/index.html>
 
-use crate::prelude::*;
+use std:: pin::Pin;
+use std::mem::{MaybeUninit, ManuallyDrop};
+use std::ffi::CStr;
+use std::rc::Rc;
+use crate::{
+    Petsc,
+    petsc_raw,
+    Result,
+    PetscAsRaw,
+    PetscObject,
+    PetscObjectPrivate,
+    PetscReal,
+    PetscInt,
+    vector::{Vector, },
+    mat::{Mat, },
+    ksp::{KSP, },
+    dm::{DM, },
+};
+use mpi::topology::UserCommunicator;
+use mpi::traits::*;
 
 /// Abstract PETSc object that manages all nonlinear solves
 pub struct SNES<'a, 'tl> {
@@ -45,7 +64,7 @@ pub struct LineSearch <'a> {
     ls_p: *mut petsc_sys::_p_LineSearch,
 }
 
-/// A PETSc error type with a [`DomainErr`] variant.
+/// A PETSc error type with a [`DomainErr`](DomainOrPetscError::DomainErr) variant.
 ///
 /// Implements [`From<PetscError>`](From), so it works nicely with the try operator, `?`,
 /// on [`Err(PetscError)`](crate::PetscError).
@@ -255,6 +274,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
     /// let n = 10;
@@ -412,6 +432,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
     /// let n = 10;
@@ -540,6 +561,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
     /// let n = 10;

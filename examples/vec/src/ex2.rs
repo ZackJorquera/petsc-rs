@@ -17,6 +17,7 @@ static HELP_MSG: &'static str = "Builds a parallel vector with 1 component on th
     Then each processor adds one to all elements except the last rank.\n\n";
 
 use petsc_rs::prelude::*;
+use mpi::traits::*;
 
 fn main() -> petsc_rs::Result<()> {
     // optionally initialize mpi

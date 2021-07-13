@@ -17,6 +17,7 @@
 static HELP_MSG: &str = "Solves a tridiagonal linear system with KSP.\n\n";
 
 use petsc_rs::prelude::*;
+use mpi::traits::*;
 
 fn main() -> petsc_rs::Result<()> {
     // optionally initialize mpi

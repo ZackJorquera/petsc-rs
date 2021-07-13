@@ -9,7 +9,25 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/KSP/index.html>
 
-use crate::prelude::*;
+use std:: pin::Pin;
+use std::mem::{MaybeUninit, ManuallyDrop};
+use std::rc::Rc;
+use crate::{
+    Petsc,
+    petsc_raw,
+    Result,
+    PetscAsRaw,
+    PetscObject,
+    PetscObjectPrivate,
+    PetscReal,
+    PetscInt,
+    vector::{Vector, },
+    mat::{Mat, },
+    pc::{PC, },
+    dm::{DM, },
+};
+use mpi::topology::UserCommunicator;
+use mpi::traits::*;
 
 /// Abstract PETSc object that manages all Krylov methods. This is the object that manages the linear
 /// solves in PETSc (even those such as direct solvers that do no use Krylov accelerators).

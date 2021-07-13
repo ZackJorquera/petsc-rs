@@ -2,7 +2,10 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/IS/index.html>
 
-use crate::prelude::*;
+use std::mem::MaybeUninit;
+use crate::{Petsc, petsc_raw, Result, PetscAsRaw};
+use mpi::topology::UserCommunicator;
+use mpi::traits::*;
 
 /// Abstract PETSc object that allows indexing. 
 pub struct IS<'a> {

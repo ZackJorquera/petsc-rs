@@ -64,6 +64,7 @@
 static HELP_MSG: &str = "Tests VecView() contour plotting for 2d DMDAs.\n\n";
 
 use petsc_rs::prelude::*;
+use mpi::traits::*;
 
 struct Opt {
     star_stencil: bool,
@@ -72,8 +73,8 @@ struct Opt {
 
 impl PetscOpt for Opt {
     fn from_petsc(petsc: &Petsc) -> petsc_rs::Result<Self> {
-        let star_stencil = petsc.options_try_get_bool("-test_solver")?.unwrap_or(false);
-        let view_global = petsc.options_try_get_bool("-check_matis")?.unwrap_or(false);
+        let star_stencil = petsc.options_try_get_bool("-star_stencil")?.unwrap_or(false);
+        let view_global = petsc.options_try_get_bool("-view_global")?.unwrap_or(false);
         Ok(Opt { star_stencil, view_global })
     }
 }

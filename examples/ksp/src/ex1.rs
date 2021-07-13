@@ -3,8 +3,8 @@
 //! Concepts: KSP^solving a system of linear equations
 //! Processors: 1
 //!
-//! Use "petsc_rs::prelude::*" to get direct access to all important petsc-rs bindings
-//!     and mpi traits which allow you to call things like `world.size()`.
+//! Use "petsc_rs::prelude::*" to get direct access to all important petsc-rs bindings.
+//! Use "mpi::traits::*" to get access to all mpi traits which allow you to call things like `world.size()`.
 //!
 //! To run:
 //! ```text
@@ -22,6 +22,7 @@
 static HELP_MSG: &str = "Solves a tridiagonal linear system with KSP.\n\n";
 
 use petsc_rs::prelude::*;
+use mpi::traits::*;
 
 fn main() -> petsc_rs::Result<()> {
     let petsc = Petsc::builder()

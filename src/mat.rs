@@ -3,11 +3,25 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/Mat/index.html>
 
-use std::marker::PhantomData;
-use std::ops::Deref;
-use std::ops::DerefMut;
-
-use crate::prelude::*;
+use std::{marker::PhantomData, ops::{Deref, DerefMut}};
+use std::mem::{MaybeUninit, ManuallyDrop};
+use std::rc::Rc;
+use crate::{
+    Petsc,
+    petsc_raw,
+    Result,
+    PetscAsRaw,
+    PetscObject,
+    PetscScalar,
+    PetscReal,
+    PetscInt,
+    InsertMode,
+    NormType,
+    vector::{Vector, },
+    indexset::{IS, },
+};
+use mpi::topology::UserCommunicator;
+use mpi::traits::*;
 
 /// Abstract PETSc matrix object used to manage all linear operators in PETSc, even those
 /// without an explicit sparse representation (such as matrix-free operators).
@@ -144,6 +158,7 @@ impl<'a> Mat<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args().unwrap();
     /// if petsc.world().size() != 1 {
@@ -291,6 +306,7 @@ impl<'a> Mat<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args().unwrap();
     /// if petsc.world().size() != 1 {
@@ -360,6 +376,7 @@ impl<'a> Mat<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args().unwrap();
     /// if petsc.world().size() != 1 {
@@ -507,6 +524,7 @@ impl<'a> Mat<'a> {
     /// 
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args().unwrap();
     /// if petsc.world().size() != 1 {
