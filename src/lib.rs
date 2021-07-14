@@ -146,7 +146,7 @@ use num_complex::Complex;
 ///
 /// ```
 /// # use petsc_rs::prelude::*;
-    /// # use mpi::traits::*;
+/// # use mpi::traits::*;
 /// # fn main() -> petsc_rs::Result<()> {
 /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
 ///
@@ -178,7 +178,7 @@ macro_rules! petsc_println {
 ///
 /// ```
 /// # use petsc_rs::prelude::*;
-    /// # use mpi::traits::*;
+/// # use mpi::traits::*;
 /// # fn main() -> petsc_rs::Result<()> {
 /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
 ///
@@ -224,7 +224,7 @@ pub use petsc_raw::InsertMode;
 ///
 /// ```no_run
 /// # use petsc_rs::prelude::*;
-    /// # use mpi::traits::*;
+/// # use mpi::traits::*;
 /// let univ = mpi::initialize().unwrap();
 /// let petsc = Petsc::builder()
 ///     .args(std::env::args())
@@ -295,29 +295,34 @@ impl PetscBuilder
         let help_cstring = self.help_msg.map(|ref h| CString::new(h.to_string()).ok()).flatten();
         let help_c_str = help_cstring.as_ref().map_or_else(|| std::ptr::null(), |v| v.as_ptr());
 
+        let drop_world_first;
         let ierr;
         // We pass in the args data so that we can reconstruct the vec to free all the memory.
         let petsc = Petsc { world: match self.world { 
-            Some(world) => {
-                // Note, in this case MPI has already initialized
+                Some(world) => {
+                    // Note, in this case MPI has already initialized
 
-                // SAFETY: Nothing should use the global variable `PETSC_COMM_WORLD` directly
-                // everything should access it through the `Petsc.world()` method which is only
-                // accessible after this (at least on the rust side of things). 
-                // Additional info on using this variable can be found here:
-                // https://petsc.org/release/docs/manualpages/Sys/PETSC_COMM_WORLD.html
-                unsafe { petsc_raw::PETSC_COMM_WORLD = world.as_raw(); }
+                    // SAFETY: Nothing should use the global variable `PETSC_COMM_WORLD` directly
+                    // everything should access it through the `Petsc.world()` method which is only
+                    // accessible after this (at least on the rust side of things). 
+                    // Additional info on using this variable can be found here:
+                    // https://petsc.org/release/docs/manualpages/Sys/PETSC_COMM_WORLD.html
+                    unsafe { petsc_raw::PETSC_COMM_WORLD = world.as_raw(); }
+                    drop_world_first = false;
+                    ierr = unsafe { petsc_raw::PetscInitialize(c_argc_p, c_args_p, file_c_str, help_c_str) };
 
-                ierr = unsafe { petsc_raw::PetscInitialize(c_argc_p, c_args_p, file_c_str, help_c_str) };
-
-                ManuallyDrop::new(world)
-            }, 
-            _ => {
-                // Note, in this case MPI has not been initialized, it will be initialized by PETSc
-                ierr = unsafe { petsc_raw::PetscInitialize(c_argc_p, c_args_p, file_c_str, help_c_str) };
-                ManuallyDrop::new(mpi::topology::SystemCommunicator::world().duplicate())
-            }
-        }, _arg_data: self.args.as_ref().map(|_| (argc_boxed, cstr_args_owned, c_args_owned, c_args_boxed)) };
+                    ManuallyDrop::new(world)
+                }, 
+                _ => {
+                    // Note, in this case MPI has not been initialized, it will be initialized by PETSc
+                    ierr = unsafe { petsc_raw::PetscInitialize(c_argc_p, c_args_p, file_c_str, help_c_str) };
+                    drop_world_first = true;
+                    ManuallyDrop::new(mpi::topology::SystemCommunicator::world().duplicate())
+                }
+            },
+            _arg_data: self.args.as_ref().map(|_| (argc_boxed, cstr_args_owned, c_args_owned, c_args_boxed)),
+            drop_world_first
+        };
         Petsc::check_error(petsc.world(), ierr)?;
 
         Ok(petsc)
@@ -385,18 +390,26 @@ pub struct Petsc {
 
     // This is used to drop the argc/args data when Petsc is dropped, we never actually use it
     // on the rust side.
-    _arg_data: Option<(Box<c_int>, Vec<CString>, Vec<*mut c_char>, Box<*mut *mut c_char>)>
+    _arg_data: Option<(Box<c_int>, Vec<CString>, Vec<*mut c_char>, Box<*mut *mut c_char>)>,
+
+    drop_world_first: bool,
 }
 
 // Destructor
 impl Drop for Petsc {
     fn drop(&mut self) {
-        // SAFETY: PetscFinalize can call MPI_FINALIZE, which means we need to make sure our 
-        // comm world is dropped before that. Also after `ManuallyDrop::drop` is called `Petsc`
-        // is dropped so the zombie value is never used again
+        // SAFETY: PetscFinalize might call MPI_FINALIZE, which means we need to make sure our 
+        // comm world is dropped before that if that is the case. Otherwise, we want to drop our
+        // comm world after. Also `ManuallyDrop::drop` is only called once and then the zombie
+        // value is never used again.
         unsafe {
-            ManuallyDrop::drop(&mut self.world);
+            if self.drop_world_first {
+                ManuallyDrop::drop(&mut self.world);
+            }
             petsc_raw::PetscFinalize();
+            if !self.drop_world_first {
+                ManuallyDrop::drop(&mut self.world);
+            }
         }
     }
 }
@@ -420,7 +433,7 @@ impl Petsc {
     pub fn init_no_args() -> Result<Self> {
         let ierr = unsafe { petsc_raw::PetscInitializeNoArguments() };
         let petsc = Self { world: ManuallyDrop::new(mpi::topology::SystemCommunicator::world().duplicate()),
-            _arg_data: None };
+            _arg_data: None, drop_world_first: true };
         Petsc::check_error(petsc.world(), ierr)?;
 
         Ok(petsc)
@@ -823,7 +836,7 @@ pub(crate) trait PetscObjectPrivate<'a, PT>: PetscObject<'a, PT> {
 ///
 /// ```
 /// # use petsc_rs::prelude::*;
-    /// # use mpi::traits::*;
+/// # use mpi::traits::*;
 /// struct Opt {
 ///     m: PetscInt,
 ///     n: PetscInt,
@@ -885,7 +898,7 @@ pub type PetscComplex = petsc_sys::PetscComplex;
 ///
 /// ```
 /// # use petsc_rs::prelude::*;
-    /// # use mpi::traits::*;
+/// # use mpi::traits::*;
 /// // This will always work
 /// let a = PetscScalar::from(1.5);
 /// ```
@@ -900,14 +913,14 @@ pub type PetscScalar = PetscReal;
 /// Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
 /// float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
 /// call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
-/// but if `PetscScalar` is complex it will construct a complex value which the imaginary part being 
+/// but if `PetscScalar` is complex it will construct a complex value which the imaginary part being
 /// set to `0`.
 ///
 /// # Example
 ///
 /// ```
 /// # use petsc_rs::prelude::*;
-    /// # use mpi::traits::*;
+/// # use mpi::traits::*;
 /// // This will always work
 /// let a = PetscScalar::from(1.5);
 /// ```
