@@ -111,7 +111,7 @@ fn main() -> petsc_rs::Result<()> {
     let n = petsc.options_try_get_int("-n")?.unwrap_or(10);
 
     if petsc.world().size() != 1 {
-        Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE,
+        Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE,
             "This is a uniprocessor example only!")?;
     }
 

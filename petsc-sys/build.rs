@@ -1,13 +1,74 @@
 extern crate bindgen;
 extern crate syn;
 
+use std::borrow::Cow;
 use std::env;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
+use std::process::Stdio;
 
-use quote::ToTokens;
+use quote::{ToTokens, quote};
+use proc_macro2::{Ident, Span};
+use syn::ItemConst;
+
+fn rustfmt_string(code_str: &str) -> Cow<'_, str> {
+    if let Ok(mut child) = Command::new("rustfmt")
+        .arg("--emit=stdout")
+        .arg("--edition=2018")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        child.stdin.as_mut().unwrap().write_all(code_str.as_bytes()).unwrap();
+        
+        if let Ok(output) = child.wait_with_output() {
+            if output.status.success() {
+                return Cow::Owned(String::from_utf8(output.stdout).unwrap());
+            }
+        }
+    }
+    Cow::Borrowed(code_str)
+}
+
+fn create_enum_from_consts(name: Ident, items: Vec<ItemConst>, repr_type: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
+    let fn_ident = Ident::new(&format!("create_enum_from_consts_test_layout_{}", name), Span::call_site());
+    let item_idents = items.into_iter().map(|i| i.ident);
+    let item_idents2 = item_idents.clone();
+    quote! {
+        #[repr(#repr_type)]
+        #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+        pub enum #name {
+            #(
+                #item_idents = #item_idents as #repr_type,
+            )*
+        }
+
+        #[test]
+        fn #fn_ident() {
+            assert_eq!(
+                ::std::mem::size_of::<#name>(),
+                ::std::mem::size_of::<#repr_type>(),
+                concat!("Size of: ", stringify!(#name))
+            );
+            assert_eq!(
+                ::std::mem::align_of::<#name>(),
+                ::std::mem::align_of::<#repr_type>(),
+                concat!("Alignment of ", stringify!(#name))
+            );
+            #(
+                assert_eq!(
+                    unsafe { ::std::mem::transmute::<#name, #repr_type>(#name::#item_idents2) },
+                    #item_idents2 as #repr_type,
+                    concat!("Value of: ", stringify!(#name::#item_idents2))
+                );
+            )*
+        }
+    }
+}
 
 fn main() {
     // TODO: get source and build petsc (idk, follow what rsmpi does maybe)
@@ -188,38 +249,54 @@ fn main() {
     let raw = syn::parse_file(&content).expect("Could not read generated bindings");
 
     // Find all variables named: PETSC_USE_*
-    let petsc_use_idents = raw.items.iter()
+    let petsc_use_consts = raw.items.iter()
         .filter_map(|item| match item {
             syn::Item::Const(c_item) => Some(format!("{}", c_item.ident.to_token_stream())),
             _ => None,
         }).filter(|ident| ident.contains("PETSC_USE_"))
         .collect::<Vec<_>>();
 
+    // Find all variables named: PETSC_ERR_*
+    let petsc_err_consts = raw.items.iter()
+        .filter_map(|item| match item {
+            syn::Item::Const(c_item) if format!("{}", c_item.ident.to_token_stream())
+                .contains("PETSC_ERR_") => Some(c_item.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    
+    let enum_file = out_path.join("enums.rs");
+    let mut f = File::create(enum_file).unwrap();
+    // we want i32 because `PetscErrorCode` is i32 (or really it is c_int)
+    let code_string = format!("{}", create_enum_from_consts(Ident::new("PetscErrorCodeEnum", Span::call_site()), petsc_err_consts, quote!{i32}).into_token_stream());
+    // TODO: we should format the code
+    f.write(rustfmt_string(&code_string).as_bytes()) .unwrap();
+
     // do asserts
     match real_features[0]
     {
-        "CARGO_FEATURE_PETSC_REAL_F64" => assert!(petsc_use_idents.contains(&"PETSC_USE_REAL_DOUBLE".into()),
+        "CARGO_FEATURE_PETSC_REAL_F64" => assert!(petsc_use_consts.contains(&"PETSC_USE_REAL_DOUBLE".into()),
             "PETSc is not compiled to use `f64` for real, but the feature \"petsc-real-f64\" is set."),
-        "CARGO_FEATURE_PETSC_REAL_F32" => assert!(petsc_use_idents.contains(&"PETSC_USE_REAL_SINGLE".into()),
+        "CARGO_FEATURE_PETSC_REAL_F32" => assert!(petsc_use_consts.contains(&"PETSC_USE_REAL_SINGLE".into()),
             "PETSc is not compiled to use `f32` for real, but the feature \"petsc-real-f32\" is set."),
         _ => panic!("Invalid feature type for petsc real")
     }
 
     if use_complex_feature {
-        assert!(petsc_use_idents.contains(&"PETSC_USE_COMPLEX".into()),
+        assert!(petsc_use_consts.contains(&"PETSC_USE_COMPLEX".into()),
                 "PETSc is not compiled to use complex for scalar, but the feature \"petsc-use-complex\" is set.");
 
         panic!("Using complex numbers as PetscScalar is currently not available. Please disable \"petsc-use-complex\".");
     } else {
-        assert!(!petsc_use_idents.contains(&"PETSC_USE_COMPLEX".into()),
+        assert!(!petsc_use_consts.contains(&"PETSC_USE_COMPLEX".into()),
                 "PETSc is compiled to use complex for scalar, but the feature \"petsc-use-complex\" is no set.");
     }
     
     match int_features[0]
     {
-        "CARGO_FEATURE_PETSC_INT_I64" => assert!(petsc_use_idents.contains(&"PETSC_USE_64BIT_INDICES".into()),
+        "CARGO_FEATURE_PETSC_INT_I64" => assert!(petsc_use_consts.contains(&"PETSC_USE_64BIT_INDICES".into()),
             "PETSc is not compiled to use `i64` for ints, but the feature \"petsc-int-i64\" is set."),
-        "CARGO_FEATURE_PETSC_INT_I32" => assert!(!petsc_use_idents.contains(&"PETSC_USE_64BIT_INDICES".into()),
+        "CARGO_FEATURE_PETSC_INT_I32" => assert!(!petsc_use_consts.contains(&"PETSC_USE_64BIT_INDICES".into()),
             "PETSc is not compiled to use `i32` for ints, but the feature \"petsc-int-i32\" is set."),
         _ => panic!("Invalid feature type for petsc int")
     }

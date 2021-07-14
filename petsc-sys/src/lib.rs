@@ -24,6 +24,7 @@
 #![allow(missing_docs)]
 #![allow(deref_nullptr)] // this is done in bindgen tests
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+include!(concat!(env!("OUT_DIR"), "/enums.rs"));
 
 #[cfg(feature = "petsc-use-complex")]
 use num_complex::Complex;
