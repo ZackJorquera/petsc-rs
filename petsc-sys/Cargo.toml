@@ -26,3 +26,5 @@ syn = { version = "1.0", features = ["full"] }
 quote = "1.0"
 proc-macro2 = "1.0"
 build-probe-mpi = "*"
+semver = "1.0"
+build-probe-petsc = { path = "../build-probe-petsc"}

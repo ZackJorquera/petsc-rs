@@ -39,7 +39,7 @@ pub struct SNES<'a, 'tl> {
 
     ksp: Option<KSP<'a, 'tl>>,
     linesearch: Option<LineSearch<'a>>,
-    dm: Option<DM<'a>>,
+    dm: Option<DM<'a, 'tl>>,
 
     function_trampoline_data: Option<Pin<Box<SNESFunctionTrampolineData<'a, 'tl>>>>,
     jacobian_trampoline_data: Option<SNESJacobianTrampolineData<'a, 'tl>>,
@@ -958,7 +958,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     
     /// Sets the [DM](DM) that may be used by some nonlinear solvers or their underlying
     /// [preconditioners](crate::pc).
-    pub fn set_dm(&mut self, dm: DM<'a>) -> Result<()> {
+    pub fn set_dm(&mut self, dm: DM<'a, 'tl>) -> Result<()> {
         
         let ierr = unsafe { petsc_raw::SNESSetDM(self.snes_p, dm.dm_p) };
         Petsc::check_error(self.world, ierr)?;
@@ -1024,12 +1024,12 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     ///
     /// Note, this does not return a [`Result`](crate::Result) because it can never
     /// fail, instead it will return `None`.
-    pub fn try_get_dm(&self) -> Option<&DM<'a>> {
+    pub fn try_get_dm(&self) -> Option<&DM<'a, 'tl>> {
         self.dm.as_ref()
     }
 
     /// Returns a reference to the [DM](DM).
-    pub fn get_dm(&mut self) -> Result<&DM<'a>> {
+    pub fn get_dm(&mut self) -> Result<&DM<'a, 'tl>> {
         if self.dm.is_some() {
             Ok(self.dm.as_ref().unwrap())
         } else {
@@ -1045,7 +1045,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     }
 
     /// Returns a mutable reference to the [DM](DM).
-    pub fn get_dm_mut(&mut self) -> Result<&mut DM<'a>> {
+    pub fn get_dm_mut(&mut self) -> Result<&mut DM<'a, 'tl>> {
         if self.dm.is_some() {
             Ok(self.dm.as_mut().unwrap())
         } else {

@@ -1,0 +1,15 @@
+[package]
+name = "build-probe-petsc"
+version = "0.1.0"
+authors = ["Zack Jorquera <zackary.jorquera@colorado.edu>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+semver = "1.0"
+pkg-config = "0.3"
+bindgen = "0.58"
+quote = "1.0"
+syn = { version = "1.0", features = ["full"] }
+regex = "1.5"

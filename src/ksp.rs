@@ -40,7 +40,7 @@ pub struct KSP<'a, 'tl> {
     // default `KSPDestroy` accounts for references.
     pc: Option<PC<'a, 'tl>>,
 
-    dm: Option<DM<'a>>,
+    dm: Option<DM<'a, 'tl>>,
 
     compute_operators_trampoline_data: Option<Pin<Box<KSPComputeOperatorsTrampolineData<'a, 'tl>>>>,
     compute_rhs_trampoline_data: Option<Pin<Box<KSPComputeRHSTrampolineData<'a, 'tl>>>>,
@@ -168,7 +168,7 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     /// If this is used then the KSP will attempt to use the DM to create the matrix and use the routine
     /// set with [`DMKSPSetComputeOperators()`](#) or [`KSP::set_compute_operators()`]. Use
     /// [`KSP::set_dm_active(false)`] to instead use the matrix you've provided with [`KSP::set_operators()`].
-    pub fn set_dm(&mut self, dm: DM<'a>) -> Result<()>
+    pub fn set_dm(&mut self, dm: DM<'a, 'tl>) -> Result<()>
     {
         
         let ierr = unsafe { petsc_raw::KSPSetDM(self.ksp_p, dm.dm_p) };
@@ -188,12 +188,12 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     ///
     /// Note, this does not return a [`Result`](crate::Result) because it can never
     /// fail, instead it will return `None`.
-    pub fn try_get_dm<'b>(&'b self) -> Option<&'b DM<'a>> {
+    pub fn try_get_dm<'b>(&'b self) -> Option<&'b DM<'a, 'tl>> {
         self.dm.as_ref()
     }
 
     /// Returns a reference to the [DM](DM) that may be used by some [preconditioners](crate::pc).
-    pub fn get_dm<'b>(&'b mut self) -> Result<&'b DM<'a>>
+    pub fn get_dm<'b>(&'b mut self) -> Result<&'b DM<'a, 'tl>>
     {
         if self.dm.is_some() {
             Ok(self.dm.as_ref().unwrap())
@@ -210,7 +210,7 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     }
 
     /// Returns a mutable reference to the [DM](DM) that may be used by some [preconditioners](crate::pc).
-    pub fn get_dm_mut<'b>(&'b mut self) -> Result<&'b mut DM<'a>>
+    pub fn get_dm_mut<'b>(&'b mut self) -> Result<&'b mut DM<'a, 'tl>>
     {
         if self.dm.is_some() {
             Ok(self.dm.as_mut().unwrap())
