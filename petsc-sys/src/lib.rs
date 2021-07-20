@@ -222,3 +222,47 @@ impl From<bool> for PetscBool {
         }
     }
 }
+
+// TODO: add more, or maybe use a derive macro or something (maybe try strum_macros)
+impl std::str::FromStr for DMBoundaryType {
+    type Err = std::io::Error;
+    fn from_str(input: &str) -> std::result::Result<DMBoundaryType, std::io::Error> {
+        let dm_types_p = unsafe { DMBoundaryTypes.as_ptr() };
+        let dm_types_slice =  unsafe { std::slice::from_raw_parts(dm_types_p, 5) };
+        if input.to_uppercase().as_str() 
+            == unsafe { std::ffi::CStr::from_ptr(dm_types_slice[DMBoundaryType::DM_BOUNDARY_NONE as usize]) }.to_str().unwrap() {
+            Ok(DMBoundaryType::DM_BOUNDARY_NONE)
+        } else if input.to_uppercase().as_str() 
+            == unsafe { std::ffi::CStr::from_ptr(dm_types_slice[DMBoundaryType::DM_BOUNDARY_GHOSTED as usize]) }.to_str().unwrap() {
+            Ok(DMBoundaryType::DM_BOUNDARY_GHOSTED)
+        } else if input.to_uppercase().as_str() 
+            == unsafe { std::ffi::CStr::from_ptr(dm_types_slice[DMBoundaryType::DM_BOUNDARY_MIRROR as usize]) }.to_str().unwrap() {
+            Ok(DMBoundaryType::DM_BOUNDARY_MIRROR)
+        } else if input.to_uppercase().as_str() 
+            == unsafe { std::ffi::CStr::from_ptr(dm_types_slice[DMBoundaryType::DM_BOUNDARY_PERIODIC as usize]) }.to_str().unwrap() {
+            Ok(DMBoundaryType::DM_BOUNDARY_PERIODIC)
+        } else if input.to_uppercase().as_str() 
+            == unsafe { std::ffi::CStr::from_ptr(dm_types_slice[DMBoundaryType::DM_BOUNDARY_TWIST as usize]) }.to_str().unwrap() {
+            Ok(DMBoundaryType::DM_BOUNDARY_TWIST)
+        } else {
+            Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("{}, is not valid", input)))
+        }
+    }
+}
+
+impl std::fmt::Display for DMBoundaryType {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        // SAFETY: this c array is defined in dm.c and is defined to be of size 8.
+        // But the header petscdm.h (and then bindgen) defines it as size 0 array.
+        // Thus we have to trick rust into thinking it is size 5, becayse that's all
+        // we care about.
+        let dm_types_p = unsafe { DMBoundaryTypes.as_ptr() };
+        let dm_types_slice =  unsafe { std::slice::from_raw_parts(dm_types_p, 5) };
+        write!(f, "{}", unsafe { 
+            std::ffi::CStr::from_ptr(dm_types_slice[*self as usize]) }.to_str().unwrap())
+    }
+}
+
+impl Default for DMBoundaryType {
+    fn default() -> Self { DMBoundaryType::DM_BOUNDARY_NONE }
+}

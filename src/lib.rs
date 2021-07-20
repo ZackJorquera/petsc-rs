@@ -122,7 +122,7 @@ pub mod prelude {
         ksp::{KSP, },
         snes::{SNES, DomainOrPetscError::DomainErr, },
         pc::{PC, PCType, },
-        dm::{DM, DMBoundaryType, DMDAStencilType, DMType, },
+        dm::{DM, DMBoundaryType, DMDAStencilType, DMType, Field },
         indexset::{IS, },
         viewer::{Viewer, PetscViewerFormat, },
         NormType,

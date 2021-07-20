@@ -103,10 +103,10 @@ macro_rules! wrap_simple_petsc_member_funcs {
         $raw_func:ident, $vis_par:vis $new_func:ident,
         $(input $param_type:ty, $param_name:ident $(.$as_raw_fn:ident)? ,)*
         $(output $ret_type:ty, $tmp_ident:ident $(.$into_fn:ident from $raw_ret_type:ty)? ,)*
-        $(takes $mut_tag:tt,)? $(is $is_unsafe:ident,)? #[$doc:meta];
+        $(takes $mut_tag:tt,)? $(is $is_unsafe:ident,)? $( #[$att:meta] )+;
     )*} => {
 $(
-    #[$doc]
+    $( #[$att] )+
     #[allow(unused_parens)]
     $vis_par $($is_unsafe)? fn $new_func(& $($mut_tag)? self, $( $param_name: $param_type ),*)
         -> crate::Result<($( $ret_type ),*)>
@@ -135,10 +135,10 @@ $(
 /// These can be repeated multiple times to define multiple like methods.
 macro_rules! wrap_prealloc_petsc_member_funcs {
     {$(
-        $raw_func:ident, $new_func:ident, $(block $arg1:ident,)? $(nz $arg2:ident, $arg3:ident,)+ #[$doc:meta];
+        $raw_func:ident, $new_func:ident, $(block $arg1:ident,)? $(nz $arg2:ident, $arg3:ident,)+ $( #[$att:meta] )+;
     )*} => {
 $(
-    #[$doc]
+    $( #[$att] )+
     pub fn $new_func(&mut self, $($arg1: PetscInt,)? $($arg2: PetscInt, $arg3: ::std::option::Option<&[PetscInt]>),+) -> crate::Result<()> {
         let ierr = unsafe { crate::petsc_raw::$raw_func(
             self.as_raw(), 
