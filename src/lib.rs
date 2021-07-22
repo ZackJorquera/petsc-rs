@@ -94,6 +94,7 @@ pub mod viewer;
 pub mod snes;
 pub mod dm;
 pub mod indexset;
+pub mod spaces;
 
 use vector::Vector;
 use mat::Mat;
@@ -122,9 +123,10 @@ pub mod prelude {
         ksp::{KSP, },
         snes::{SNES, DomainOrPetscError::DomainErr, },
         pc::{PC, PCType, },
-        dm::{DM, DMBoundaryType, DMDAStencilType, DMType, Field },
+        dm::{DM, DMBoundaryType, DMDAStencilType, DMType, Field, DS, WeakForm, DMLabel, },
         indexset::{IS, },
         viewer::{Viewer, PetscViewerFormat, },
+        spaces::{Space, },
         NormType,
         PetscOpt,
     };
@@ -773,6 +775,22 @@ pub unsafe trait PetscAsRaw {
     fn as_raw(&self) -> Self::Raw;
 }
 
+unsafe impl<'a, T: PetscAsRaw + 'a> PetscAsRaw for &'a T {
+    type Raw = <T as PetscAsRaw>::Raw;
+    fn as_raw(&self) -> Self::Raw {
+        (*self).as_raw()
+    }
+}
+
+// We do this impl so that we want use it in the `wrap_simple_petsc_member_funcs!` macro.
+unsafe impl<PT, T: PetscAsRaw<Raw = *mut PT>> PetscAsRaw for Option<T> {
+    type Raw = <T as PetscAsRaw>::Raw;
+
+    fn as_raw(&self) -> Self::Raw {
+        self.as_ref().map_or(std::ptr::null_mut(), |inner| inner.as_raw())
+    }
+}
+
 /// A rust type than can provide a mutable pointer to a raw value understood by the PETSc C API.
 pub unsafe trait PetscAsRawMut: PetscAsRaw {
     /// A mutable pointer to the raw value
@@ -816,6 +834,14 @@ pub trait PetscObject<'a, PT>: PetscAsRaw<Raw = *mut PT> {
         Petsc::check_error(self.world(), ierr)?;
 
         crate::Result::Ok(unsafe { tmp.assume_init() }.into())
+    }
+
+    /// Sets the prefix used for searching for all options of PetscObjectType in the database. 
+    fn set_options_prefix<T: ::std::string::ToString>(&mut self, prefix: T) -> crate::Result<()> {
+        let name_cs = ::std::ffi::CString::new(prefix.to_string()).expect("`CString::new` failed");
+        
+        let ierr = unsafe { crate::petsc_raw::PetscObjectSetOptionsPrefix(self.as_raw() as *mut crate::petsc_raw::_p_PetscObject, name_cs.as_ptr()) };
+        Petsc::check_error(self.world(), ierr)
     }
 }
 

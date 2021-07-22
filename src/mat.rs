@@ -3,7 +3,7 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/Mat/index.html>
 
-use std::{marker::PhantomData, ops::{Deref, DerefMut}};
+use std::{ffi::CString, marker::PhantomData, ops::{Deref, DerefMut}};
 use std::mem::{MaybeUninit, ManuallyDrop};
 use std::rc::Rc;
 use crate::{
@@ -671,6 +671,15 @@ impl<'a> Mat<'a> {
                     let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap ?
                 })),
         ))
+    }
+
+    
+
+    /// Builds [`Mat`] for a particular type
+    pub fn set_type_str(&mut self, pc_type: &str) -> Result<()> {
+        let cstring = CString::new(pc_type).expect("`CString::new` failed");
+        let ierr = unsafe { petsc_raw::MatSetType(self.mat_p, cstring.as_ptr()) };
+        Petsc::check_error(self.world, ierr)
     }
 }
 

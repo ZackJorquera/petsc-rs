@@ -181,6 +181,42 @@ pub enum DMTypeEnum {
     DMSTAG,
 }
 
+// Redefined stuff from `petscfe.h`
+/// This table is from: <https://petsc.org/release/docs/manualpages/FE/PetscSpaceType.html>
+pub static PETSCSPACETYPE_TABLE: &'static [&str] = &[
+    "poly",
+    "tensor",
+    "sum",
+    "point",
+    "subspace",
+];
+
+/// This enum is from: <https://petsc.org/release/docs/manualpages/FE/PetscSpaceType.html>
+pub enum PetscSpaceTypeEnum {
+    PETSCSPACEPOLYNOMIAL = 0,
+    PETSCSPACETENSOR,
+    PETSCSPACESUM,
+    PETSCSPACEPOINT,
+    PETSCSPACESUBSPACE,
+}
+
+// Redefined stuff from `petscfe.h`
+/// This table is from: <https://petsc.org/release/docs/manualpages/FE/PetscSpaceType.html>
+pub static PETSCDUALSPACETYPE_TABLE: &'static [&str] = &[
+    "lagrange",
+    "simple",
+    "refined",
+    "bdm",
+];
+
+/// This enum is from: <https://petsc.org/release/docs/manualpages/FE/PetscSpaceType.html>
+pub enum PetscDualSpaceTypeEnum {
+    PETSCDUALSPACELAGRANGE = 0,
+    PETSCDUALSPACESIMPLE,
+    PETSCDUALSPACEREFINED,
+    PETSCDUALSPACEBDM,
+}
+
 // TODO: num_complex::Complex docs say:
 // "Note that Complex<F> where F is a floating point type is only memory layout compatible with C’s
 // complex types, not necessarily calling convention compatible. This means that for FFI you can

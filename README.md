@@ -16,7 +16,7 @@ Note, `petsc-rs` is supported for rust 1.52 and above. However, some of the exam
 
 In order for `petsc-rs` to work correctly, you need to [download PETSc](https://petsc.org/release/download/) (version 3.15 or above, using the main branch is recommended). Then you need to [configure and install PETSc](https://petsc.org/release/install/). I haven't tested all the different ways to install PETSc, but the following works for `petsc-rs`. Note, it is required that you install an MPI library globally and not have PETSc install it for you. This is needed by the [rsmpi](https://github.com/rsmpi/rsmpi) crate (look at its [requirements](https://github.com/rsmpi/rsmpi#requirements) for more information). Im using `openmpi` 3.1.3, which gives me `mpicc` and `mpicxx`.
 ```text
-./configure --with-cc=mpicc --with-cxx=mpicxx --download-f2cblaslapack --with-fc=0
+./configure --with-cc=mpicc --with-cxx=mpicxx --download-f2cblaslapack --download-triangle --with-fc=0
 make all check
 ```
 

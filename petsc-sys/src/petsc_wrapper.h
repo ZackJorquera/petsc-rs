@@ -9,5 +9,7 @@
 
 // These include files are additional private headers
 #include <petsc/private/petscdsimpl.h>
+#include <petsc/private/dmimpl.h>
+#include <petsc/private/dmlabelimpl.h>
 
 #endif //PETSC_FFI_WRAPPER_H
