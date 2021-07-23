@@ -119,7 +119,7 @@ pub mod prelude {
         petsc_println,
         petsc_println_all,
         vector::{Vector, VecOption, },
-        mat::{Mat, MatAssemblyType, MatOption, MatDuplicateOption, MatStencil, NullSpace },
+        mat::{Mat, MatAssemblyType, MatOption, MatDuplicateOption, MatStencil, NullSpace, MatType },
         ksp::{KSP, },
         snes::{SNES, DomainOrPetscError::DomainErr, },
         pc::{PC, PCType, },

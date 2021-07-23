@@ -12,7 +12,7 @@ use std::process::Stdio;
 use quote::{ToTokens, quote};
 use proc_macro2::{Ident, Span};
 use syn::ItemConst;
-use semver::Version;
+// use semver::Version;
 
 fn rustfmt_string(code_str: &str) -> Cow<'_, str> {
     if let Ok(mut child) = Command::new("rustfmt")
@@ -70,6 +70,94 @@ fn create_enum_from_consts(name: Ident, items: Vec<ItemConst>, repr_type: proc_m
     }
 }
 
+fn create_type_enum_and_table(name: Ident, items: Vec<ItemConst>) -> proc_macro2::TokenStream {
+    let enum_ident = Ident::new(&format!("{}Enum", name), Span::call_site());
+    let table_ident = Ident::new(&format!("{}_TABLE", name).to_uppercase(), Span::call_site());
+    let fn_ident = Ident::new(&format!("create_type_enum_and_table_test_values_{}", name), Span::call_site());
+    let item_idents = items.into_iter().map(|i| i.ident).collect::<Vec<_>>();
+    let i = 0usize..item_idents.len();
+    let item_idents2 = item_idents.clone();
+    quote! {
+        #[repr(usize)]
+        #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+        pub enum #enum_ident {
+            #(
+                #item_idents = #i,
+            )*
+        }
+
+        pub static #table_ident: &'static [&'static [u8]] = &[
+            #(
+                #item_idents,
+            )*
+        ];
+
+        #[test]
+        fn #fn_ident() {
+            #(
+                assert_eq!(
+                    #table_ident[#enum_ident::#item_idents2 as usize],
+                    #item_idents2,
+                    concat!("Value of: ", stringify!(#enum_ident::#item_idents2))
+                );
+            )*
+        }
+    }
+}
+
+fn create_all_type_enums(consts: &Vec<ItemConst>) -> proc_macro2::TokenStream {
+    // I think these are correct. They might miss a few or grab to many
+    // but i think it is better than manually grabbing everything.
+    let enum_ident_strs = &[
+        r"MatType",
+        r"DMType",
+        r"PCType",
+        r"KSPType",
+        r"PetscSpaceType",
+        r"PetscDualSpaceType",
+    ];
+    // These work in pairs, the first is something it must match
+    // the second is something it cant match. This array MUST be
+    // exactly 2 times as long as `enum_ident_strs`.
+    let regex_pats = &[
+        r"^MAT[A-Z0-9]+$",
+        r"^MAT(SOLVE|PRODUCT|ORDERING|COLORING|PARTITIONING|SEQUSFFT)[A-Z0-9]*$",
+        r"^DM[A-Z0-9]+$",
+        r"^DM(FIELD)[A-Z0-9]*$",
+        r"^PC[A-Z0-9]+$",
+        r"^PC(GAMG[AGC])[A-Z0-9]*$",
+        r"^KSP[A-Z0-9]+$",
+        r"^PC(GUESS)[A-Z0-9]*$",
+        r"^PETSCSPACE[A-Z0-9]+$",
+        r"^PETSCSPACE$", // Nothing should match this
+        r"^PETSCDUALSPACE[A-Z0-9]+$",
+        r"^PETSCDUALSPACE$", // Nothing should match this
+    ];
+    assert_eq!(enum_ident_strs.len() * 2, regex_pats.len());
+
+    let token_streams = enum_ident_strs.iter().zip(regex_pats.chunks_exact(2)).map(|(&name, pats)| {
+        let ident = Ident::new(name, Span::call_site());
+        let re1 = regex::Regex::new(pats[0]).unwrap();
+        let re2 = regex::Regex::new(pats[1]).unwrap();
+        let consts_for_enum = consts.iter().filter_map(|c| {
+            let s = format!("{}", c.ident.to_token_stream());
+            if re1.is_match(&s) && !re2.is_match(&s) {
+                Some(c.clone())
+            } else {
+                None
+            }
+        });
+        
+        create_type_enum_and_table(ident, consts_for_enum.collect())
+    });
+
+    quote! {
+        #(
+            #token_streams
+        )*
+    }
+}
+
 fn main() {
     // TODO: get source and build petsc (idk, follow what rsmpi does maybe)
     // also look at libffi and how they do it with an external src
@@ -105,10 +193,9 @@ fn main() {
     let petsc_lib = build_probe_petsc::probe(None);
     let lib = &petsc_lib.lib;
 
-    let lib_version = Version::parse(&lib.version).unwrap();
-    let header_version = petsc_lib.get_version_from_consts();
-
-    eprintln!("lib found: {:?}, lib version: {:?} header version: {:?}", lib, lib_version, header_version);
+    // let lib_version = Version::parse(&lib.version).unwrap();
+    // let header_version = petsc_lib.get_version_from_consts();
+    // eprintln!("lib found: {:?}, lib version: {:?} header version: {:?}", lib, lib_version, header_version);
     
     let mut bindings = bindgen::Builder::default();
 
@@ -208,21 +295,28 @@ fn main() {
     file.read_to_string(&mut content).unwrap();
     let raw = syn::parse_file(&content).expect("Could not read generated bindings");
 
-    // Find all variables named: PETSC_ERR_*
-    let petsc_err_consts = raw.items.iter()
+    let raw_const_items = raw.items.iter()
         .filter_map(|item| match item {
-            syn::Item::Const(c_item) if format!("{}", c_item.ident.to_token_stream())
-                .contains("PETSC_ERR_") => Some(c_item.clone()),
+            syn::Item::Const(c_item) => Some(c_item.clone()),
             _ => None,
-        })
-        .collect::<Vec<_>>();
+        }).collect::<Vec<_>>();
+
+    // Find all variables named: PETSC_ERR_*
+    let petsc_err_consts = raw_const_items.iter()
+        .filter_map(|c_item| if format!("{}", c_item.ident.to_token_stream()).contains("PETSC_ERR_") {
+            Some(c_item.clone())
+        } else {
+            None
+        }).collect::<Vec<_>>();
     
     let enum_file = out_path.join("enums.rs");
     let mut f = File::create(enum_file).unwrap();
     // we want i32 because `PetscErrorCode` is i32 (or really it is c_int)
-    let code_string = format!("{}", create_enum_from_consts(Ident::new("PetscErrorCodeEnum", Span::call_site()), petsc_err_consts, quote!{i32}).into_token_stream());
+    let code_string = format!("{}\n{}", 
+        create_enum_from_consts(Ident::new("PetscErrorCodeEnum", Span::call_site()), petsc_err_consts, quote!{i32}).into_token_stream(),
+        create_all_type_enums(&raw_const_items).into_token_stream());
     // TODO: we should format the code
-    f.write(rustfmt_string(&code_string).as_bytes()) .unwrap();
+    f.write(rustfmt_string(&code_string).as_bytes()).unwrap();
 
     // do asserts
     match real_features[0]

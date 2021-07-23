@@ -4,7 +4,7 @@
 
 // TODO: should we add NullSpace to this file
 
-use std::{ffi::CString, mem::MaybeUninit};
+use std::mem::MaybeUninit;
 use crate::{
     Petsc,
     petsc_raw,
@@ -67,8 +67,7 @@ impl<'a> Space<'a> {
     pub fn set_type(&mut self, space_type: SpaceType) -> Result<()> {
         // This could be use the macro probably 
         let option_str = petsc_raw::PETSCSPACETYPE_TABLE[space_type as usize];
-        let cstring = CString::new(option_str).expect("`CString::new` failed");
-        let ierr = unsafe { petsc_raw::PetscSpaceSetType(self.s_p, cstring.as_ptr()) };
+        let ierr = unsafe { petsc_raw::PetscSpaceSetType(self.s_p, option_str.as_ptr() as *const _) };
         Petsc::check_error(self.world, ierr)
     }
 }
@@ -90,8 +89,7 @@ impl<'a, 'tl> DualSpace<'a, 'tl> {
     pub fn set_type(&mut self, ds_type: DualSpaceType) -> Result<()> {
         // This could be use the macro probably 
         let option_str = petsc_raw::PETSCDUALSPACETYPE_TABLE[ds_type as usize];
-        let cstring = CString::new(option_str).expect("`CString::new` failed");
-        let ierr = unsafe { petsc_raw::PetscDualSpaceSetType(self.ds_p, cstring.as_ptr()) };
+        let ierr = unsafe { petsc_raw::PetscDualSpaceSetType(self.ds_p, option_str.as_ptr() as *const _) };
         Petsc::check_error(self.world, ierr)
     }
 

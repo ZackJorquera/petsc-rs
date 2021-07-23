@@ -82,9 +82,8 @@ impl<'a, 'tl> PC<'a, 'tl> {
     /// Builds PC for a particular preconditioner type
     pub fn set_type(&mut self, pc_type: PCType) -> Result<()>
     {
-        let option_str = petsc_raw::PCTYPE_TABLE[pc_type as usize];
-        let cstring = CString::new(option_str).expect("`CString::new` failed");
-        let ierr = unsafe { petsc_raw::PCSetType(self.pc_p, cstring.as_ptr()) };
+        let cstring = petsc_raw::PCTYPE_TABLE[pc_type as usize];
+        let ierr = unsafe { petsc_raw::PCSetType(self.pc_p, cstring.as_ptr() as *const _) };
         Petsc::check_error(self.world, ierr)
     }
     

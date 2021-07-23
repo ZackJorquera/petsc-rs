@@ -28,3 +28,4 @@ proc-macro2 = "1.0"
 build-probe-mpi = "*"
 semver = "1.0"
 build-probe-petsc = { path = "../build-probe-petsc"}
+regex = "1.5"

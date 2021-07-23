@@ -236,9 +236,8 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// Builds a DM, for a particular DM implementation.
     pub fn set_type(&mut self, dm_type: DMType) -> Result<()> {
         // This could be use the macro probably 
-        let option_str = petsc_raw::DMTYPE_TABLE[dm_type as usize];
-        let cstring = CString::new(option_str).expect("`CString::new` failed");
-        let ierr = unsafe { petsc_raw::DMSetType(self.dm_p, cstring.as_ptr()) };
+        let option_cstr = petsc_raw::DMTYPE_TABLE[dm_type as usize];
+        let ierr = unsafe { petsc_raw::DMSetType(self.dm_p, option_cstr.as_ptr() as *const _) };
         Petsc::check_error(self.world, ierr)
     }
 
@@ -387,7 +386,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// than 3 than the unneeded values are ignored.
     /// * `upper`       - The upper right corner, or `None` for `(1, 1, 1)`. Note, if `dim` is less
     /// than 3 than the unneeded values are ignored.
-    /// * `periodicity` - The boundary type for the X,Y,Z direction, or `None` for [`DM_BOUNDARY_NONE`](DMBoundaryType::DM_BOUNDARY_NONE)
+    /// * `periodicity` - The boundary type for the X,Y,Z direction, or `None` for [`DM_BOUNDARY_NONE`](petsc_raw::DMBoundaryType::DM_BOUNDARY_NONE)
     /// for all directions. Note, if `dim` is less than 3 than the unneeded values are ignored.
     /// * `interpolate` - Flag to create intermediate mesh pieces (edges, faces)
     pub fn plex_create_box_mesh(world: &'a UserCommunicator, dim: PetscInt, simplex: bool,
@@ -943,7 +942,8 @@ impl<'a, 'tl> DM<'a, 'tl> {
 
     /// adds a DM vector to a DMComposite 
     pub fn composite_add_dm(&mut self, dm: DM<'a, 'tl>) -> Result<()> {
-        let is_dm_comp = self.type_compare(petsc_raw::DMTYPE_TABLE[DMType::DMCOMPOSITE as usize])?;
+        let type_cstr_dmcomp = unsafe { CStr::from_ptr(petsc_raw::DMTYPE_TABLE[DMType::DMCOMPOSITE as usize].as_ptr() as *const _) };
+        let is_dm_comp = self.type_compare(type_cstr_dmcomp.to_str().unwrap())?;
         if is_dm_comp {
             let ierr = unsafe { petsc_raw::DMCompositeAddDM(self.dm_p, dm.dm_p) };
             Petsc::check_error(dm.world, ierr)?;
@@ -1084,7 +1084,8 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// This is a WIP, i want to use this instead of doing `if let Some(c) = self.composite_dms.as_ref()`
     /// everywhere.
     fn try_get_composite_dms(&self) -> Result<Option<&Vec<Self>>> {
-        let is_dm_comp = self.type_compare(petsc_raw::DMTYPE_TABLE[DMType::DMCOMPOSITE as usize])?;
+        let type_cstr = unsafe { CStr::from_ptr(petsc_raw::DMTYPE_TABLE[DMType::DMCOMPOSITE as usize].as_ptr() as *const _) };
+        let is_dm_comp = self.type_compare(type_cstr.to_str().unwrap())?;
         if is_dm_comp {
             Ok(self.composite_dms.as_ref())
         } else {
@@ -1126,7 +1127,9 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// Right now this is only implemented for DM Composite, for any other type this wont
     /// do anything.
     pub(crate) unsafe fn set_inner_values(dm: &mut Self) -> petsc_raw::PetscErrorCode {
-        if dm.type_compare(petsc_raw::DMTYPE_TABLE[DMType::DMCOMPOSITE as usize]).unwrap() {
+        let type_cstr_dmcomp = CStr::from_ptr(petsc_raw::DMTYPE_TABLE[DMType::DMCOMPOSITE as usize].as_ptr() as *const _);
+        let type_cstr_dmda = CStr::from_ptr(petsc_raw::DMTYPE_TABLE[DMType::DMDA as usize].as_ptr() as *const _);
+        if dm.type_compare(type_cstr_dmcomp.to_str().unwrap()).unwrap() {
             let len = dm.composite_get_num_dms_petsc().unwrap();
             let mut dms_p = vec![std::ptr::null_mut(); len as usize]; // TODO: use MaybeUninit if we can
             let ierr = petsc_raw::DMCompositeGetEntriesArray(dm.dm_p, dms_p.as_mut_ptr());
@@ -1145,7 +1148,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
                 this_dm
             }).collect::<Vec<_>>());
             0
-        } else if dm.type_compare(petsc_raw::DMTYPE_TABLE[DMType::DMDA as usize]).unwrap() {
+        } else if dm.type_compare(type_cstr_dmda.to_str().unwrap()).unwrap() {
             0
         } else {
             todo!()
@@ -1648,11 +1651,11 @@ impl<'a, 'tl> DM<'a, 'tl> {
         let name_cs = CString::new(name).expect("`CString::new` failed");
 
         let bctype = match bctype {
-            bct @ (DMBoundaryConditionType::DM_BC_ESSENTIAL
+            DMBoundaryConditionType::DM_BC_ESSENTIAL
                 | DMBoundaryConditionType::DM_BC_NATURAL
-                | DMBoundaryConditionType::DM_BC_NATURAL_RIEMANN)
+                | DMBoundaryConditionType::DM_BC_NATURAL_RIEMANN
                 => return Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_USER_INPUT,
-                    format!("DM::add_boundary_field does not support non field boundary conditions. You gave {:?}.", bct)),
+                    format!("DM::add_boundary_field does not support non field boundary conditions. You gave {:?}.", bctype)),
             bct @ _ => bct 
         };
     
@@ -2163,10 +2166,12 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// Unsafe clone
     // TODO: 
     pub unsafe fn clone_unchecked(&self) -> Result<DM<'a, 'tl>> {
-        Ok(if self.type_compare(petsc_raw::DMTYPE_TABLE[DMType::DMCOMPOSITE as usize])? {
+        let type_cstr_dmcomp = CStr::from_ptr(petsc_raw::DMTYPE_TABLE[DMType::DMCOMPOSITE as usize].as_ptr() as *const _);
+        let type_cstr_dmplex = CStr::from_ptr(petsc_raw::DMTYPE_TABLE[DMType::DMPLEX as usize].as_ptr() as *const _);
+        Ok(if self.type_compare(type_cstr_dmcomp.to_str().unwrap())? {
             let c = self.try_get_composite_dms()?.unwrap();
             DM::composite_create(self.world, c.iter().cloned())?
-        } else if self.type_compare(petsc_raw::DMTYPE_TABLE[DMType::DMPLEX as usize])? {
+        } else if self.type_compare(type_cstr_dmplex.to_str().unwrap())? {
             let mut dm2_p = MaybeUninit::uninit();
             let ierr = petsc_raw::DMClone(self.dm_p, dm2_p.as_mut_ptr());
             Petsc::check_error(self.world, ierr)?;
@@ -2289,9 +2294,9 @@ impl<'a, 'tl> DS<'a, 'tl> {
     /// # Outputs (in order)
     ///
     /// * `wf` - The PetscWeakForm holding the pointwise functions
-    /// * `type` - The type of condition, e.g. [`DM_BC_ESSENTIAL`](DMBoundaryConditionType::DM_BC_ESSENTIAL)/
-    /// [`DM_BC_ESSENTIAL_FIELD`](DMBoundaryConditionType::DM_BC_ESSENTIAL_FIELD) (Dirichlet), or
-    /// [`DM_BC_NATURAL`](DMBoundaryConditionType::DM_BC_NATURAL) (Neumann).
+    /// * `type` - The type of condition, e.g. [`DM_BC_ESSENTIAL`](petsc_raw::DMBoundaryConditionType::DM_BC_ESSENTIAL)/
+    /// [`DM_BC_ESSENTIAL_FIELD`](petsc_raw::DMBoundaryConditionType::DM_BC_ESSENTIAL_FIELD) (Dirichlet), or
+    /// [`DM_BC_NATURAL`](petsc_raw::DMBoundaryConditionType::DM_BC_NATURAL) (Neumann).
     /// * `name` - The BC name
     /// * `label` - The label defining constrained points
     /// * `values` -  An array of ids for constrained points 
@@ -2335,9 +2340,9 @@ impl<'a, 'tl> DS<'a, 'tl> {
     ///
     /// # Outputs (in order)
     ///
-    /// * `type` - The type of condition, e.g. [`DM_BC_ESSENTIAL`](DMBoundaryConditionType::DM_BC_ESSENTIAL)/
-    /// [`DM_BC_ESSENTIAL_FIELD`](DMBoundaryConditionType::DM_BC_ESSENTIAL_FIELD) (Dirichlet), or
-    /// [`DM_BC_NATURAL`](DMBoundaryConditionType::DM_BC_NATURAL) (Neumann).
+    /// * `type` - The type of condition, e.g. [`DM_BC_ESSENTIAL`](petsc_raw::DMBoundaryConditionType::DM_BC_ESSENTIAL)/
+    /// [`DM_BC_ESSENTIAL_FIELD`](petsc_raw::DMBoundaryConditionType::DM_BC_ESSENTIAL_FIELD) (Dirichlet), or
+    /// [`DM_BC_NATURAL`](petsc_raw::DMBoundaryConditionType::DM_BC_NATURAL) (Neumann).
     /// * `name` - The BC name
     /// * `labelname` - The label defining constrained points
     /// * `field` - The field to constrain
