@@ -14,7 +14,7 @@
 
 use core::slice;
 use std::mem::{MaybeUninit, ManuallyDrop};
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::rc::Rc;
 use crate::{
     Petsc,
@@ -72,9 +72,8 @@ impl<'a> DM<'a> {
     /// Builds a DM, for a particular DM implementation.
     pub fn set_type(&mut self, dm_type: DMType) -> Result<()> {
         // This could be use the macro probably 
-        let option_str = petsc_raw::DMTYPE_TABLE[dm_type as usize];
-        let cstring = CString::new(option_str).expect("`CString::new` failed");
-        let ierr = unsafe { petsc_raw::DMSetType(self.dm_p, cstring.as_ptr()) };
+        let option_cstr = petsc_raw::DMTYPE_TABLE[dm_type as usize];
+        let ierr = unsafe { petsc_raw::DMSetType(self.dm_p, option_cstr.as_ptr() as *const _) };
         Petsc::check_error(self.world, ierr)
     }
 
@@ -838,7 +837,8 @@ impl<'a> DM<'a> {
     /// This is a WIP, i want to use this instead of doing `if let Some(c) = self.composite_dms.as_ref()`
     /// everywhere.
     fn try_get_composite_dms(&self) -> Result<Option<&Vec<DM<'a>>>> {
-        let is_dm_comp = self.type_compare(petsc_raw::DMTYPE_TABLE[DMType::DMCOMPOSITE as usize])?;
+        let type_cstr = unsafe { CStr::from_ptr(petsc_raw::DMTYPE_TABLE[DMType::DMCOMPOSITE as usize].as_ptr() as *const _) };
+        let is_dm_comp = self.type_compare(type_cstr.to_str().unwrap())?;
         if is_dm_comp {
             Ok(self.composite_dms.as_ref())
         } else {
@@ -855,7 +855,8 @@ impl<'a> DM<'a> {
     /// Right now this is only implemented for DM Composite, for any other type this wont
     /// do anything.
     pub(crate) unsafe fn set_inner_values(dm: &mut DM<'a>) -> petsc_raw::PetscErrorCode {
-        if dm.type_compare(petsc_raw::DMTYPE_TABLE[DMType::DMCOMPOSITE as usize]).unwrap() {
+        let type_cstr = CStr::from_ptr(petsc_raw::DMTYPE_TABLE[DMType::DMCOMPOSITE as usize].as_ptr() as *const _);
+        if dm.type_compare(type_cstr.to_str().unwrap()).unwrap() {
             let len = dm.composite_get_num_dms_petsc().unwrap();
             let mut dms_p = vec![std::ptr::null_mut(); len as usize]; // TODO: use MaybeUninit if we can
             let ierr = petsc_raw::DMCompositeGetEntriesArray(dm.dm_p, dms_p.as_mut_ptr());
@@ -886,7 +887,8 @@ impl<'a> Clone for DM<'a> {
         // (rust (and the caller) thinks/expects it is a deep clone)
         // TODO: Also what should we do for DM composite type, i get an error when DMClone calls
         // `DMGetDimension` and then `DMSetDimension` (the dim is -1).
-        if self.type_compare(petsc_raw::DMTYPE_TABLE[DMType::DMCOMPOSITE as usize]).unwrap() {
+        let type_cstr = unsafe { CStr::from_ptr(petsc_raw::DMTYPE_TABLE[DMType::DMCOMPOSITE as usize].as_ptr() as *const _) };
+        if self.type_compare(type_cstr.to_str().unwrap()).unwrap() {
             let c = self.try_get_composite_dms().unwrap().unwrap();
             DM::composite_create(self.world, c.iter().cloned()).unwrap()
         } else {
