@@ -23,3 +23,4 @@ ndarray = "0.15"
 [build-dependencies]
 semver = "1.0"
 build-probe-petsc = { path = "./build-probe-petsc"}
+ndarray = { version = "0.15", features = ["approx"] }

@@ -399,12 +399,12 @@ impl<'a, 'tl> DM<'a, 'tl> {
         let faces = faces.into().map(|faces| [faces.0, faces.1, faces.2]);
         let lower = lower.into().map(|lower| [lower.0, lower.1, lower.2]);
         let upper = upper.into().map(|upper| [upper.0, upper.1, upper.2]);
-        let periodicity = periodicity.into().map(|periodicity| [periodicity.0, periodicity.1, periodicity.2]);
+        let periodicity = periodicity.into().map(|periodicity| vec![periodicity.0, periodicity.1, periodicity.2]);
 
         let mut dm_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMPlexCreateBoxMesh(world.as_raw(), dim, simplex.into(),
-            faces.map_or(std::ptr::null(), |f| f.as_ptr()), lower.map_or(std::ptr::null(), |l| l.as_ptr()),
-            upper.map_or(std::ptr::null(), |u| u.as_ptr()), periodicity.map_or(std::ptr::null(), |p| p.as_ptr()),
+            faces.as_ref().map_or(std::ptr::null(), |f| f.as_ptr()), lower.as_ref().map_or(std::ptr::null(), |l| l.as_ptr()),
+            upper.as_ref().map_or(std::ptr::null(), |u| u.as_ptr()), periodicity.as_ref().map_or(std::ptr::null(), |p| p.as_ptr()),
             interpolate.into(), dm_p.as_mut_ptr()) };
         Petsc::check_error(world, ierr)?;
 
@@ -1129,6 +1129,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     pub(crate) unsafe fn set_inner_values(dm: &mut Self) -> petsc_raw::PetscErrorCode {
         let type_cstr_dmcomp = CStr::from_ptr(petsc_raw::DMTYPE_TABLE[DMType::DMCOMPOSITE as usize].as_ptr() as *const _);
         let type_cstr_dmda = CStr::from_ptr(petsc_raw::DMTYPE_TABLE[DMType::DMDA as usize].as_ptr() as *const _);
+        let type_cstr_dmplex = CStr::from_ptr(petsc_raw::DMTYPE_TABLE[DMType::DMPLEX as usize].as_ptr() as *const _);
         if dm.type_compare(type_cstr_dmcomp.to_str().unwrap()).unwrap() {
             let len = dm.composite_get_num_dms_petsc().unwrap();
             let mut dms_p = vec![std::ptr::null_mut(); len as usize]; // TODO: use MaybeUninit if we can
@@ -1150,6 +1151,8 @@ impl<'a, 'tl> DM<'a, 'tl> {
             0
         } else if dm.type_compare(type_cstr_dmda.to_str().unwrap()).unwrap() {
             0
+        } else if dm.type_compare(type_cstr_dmplex.to_str().unwrap()).unwrap() {
+            0 // TODO: should we do stuff here
         } else {
             todo!()
         }
@@ -1185,6 +1188,9 @@ impl<'a, 'tl> DM<'a, 'tl> {
         }
         Ok(label)
     }
+
+    // TODO: im not sure how well I covered all the cases. The c code can be found in the file
+    // `src/dm/impls/plex/plexproject.c` specifically the function `DMProjectPoint_Private`
 
     /// Add an essential boundary condition to the model. (WIP Wrapper function)
     ///
@@ -1407,18 +1413,29 @@ impl<'a, 'tl> DM<'a, 'tl> {
                 .map_or_else(|err| err.kind as i32, |_| 0)
         }
 
-        let bc_func_essential_trampoline_fn_ptr: Option<unsafe extern "C" fn()> = Some(unsafe { 
-            *(&bc_func_essential_trampoline as *const _ as *const _) });
+        // When it comes to function pointers, casting in NOT your friend. It causes the pointers 
+        // to be curropted. You MUST be VERY explicit with the types. All in all, the following
+        // two declarations will get the function pointers in options correctly (I think). Once
+        // we have them, we can them manipulate them how we see fit.
+        let bc_func_essential_trampoline_fn_ptr: ::std::option::Option<
+            unsafe extern "C" fn(arg1: PetscInt, arg2: PetscReal, arg3: *const PetscReal, arg4: PetscInt,
+                arg5: *mut PetscScalar, arg6: *mut ::std::os::raw::c_void, ) -> petsc_raw::PetscErrorCode, >
+            = Some(bc_func_essential_trampoline);
 
-        let bc_func_t_essential_trampoline_fn_ptr: Option<unsafe extern "C" fn()> = if bc_user_func_t_is_some {
-            Some(unsafe { 
-                *(&bc_func_t_essential_trampoline as *const _ as *const _) })
-        } else { None };
+        let mut bc_func_t_essential_trampoline_fn_ptr: ::std::option::Option<
+            unsafe extern "C" fn(arg1: PetscInt, arg2: PetscReal, arg3: *const PetscReal, arg4: PetscInt,
+                arg5: *mut PetscScalar, arg6: *mut ::std::os::raw::c_void, ) -> petsc_raw::PetscErrorCode, >
+            = Some(bc_func_t_essential_trampoline);
+
+        if !bc_user_func_t_is_some {
+            bc_func_t_essential_trampoline_fn_ptr = None;
+        }
 
         let ierr = add_boundary_wrapper(
             self.dm_p, DMBoundaryConditionType::DM_BC_ESSENTIAL,
             name_cs.as_ptr(), comps.len() as PetscInt, comps.as_ptr(),
-            field, bc_func_essential_trampoline_fn_ptr, bc_func_t_essential_trampoline_fn_ptr, 
+            field, unsafe { std::mem::transmute(bc_func_essential_trampoline_fn_ptr) },
+            unsafe { std::mem::transmute(bc_func_t_essential_trampoline_fn_ptr) }, 
             unsafe { std::mem::transmute(trampoline_data.as_ref()) }
         );
         Petsc::check_error(self.world, ierr)?;
@@ -1432,6 +1449,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         Ok(())
     }
 
+    // TODO: should these take closure inputs?
     /// Add a natural boundary condition to the model. (WIP Wrapper function)
     ///
     /// In the C API you would call `DMAddBoundary` with the type being `DM_BC_NATURAL`.
@@ -1503,6 +1521,8 @@ impl<'a, 'tl> DM<'a, 'tl> {
 
     // TODO: make bc_user_func_t not be an option, do what we did for add_boundary_essential and
     // add_boundary_essential_with_dt
+
+    // TODO: the we we do function pointers does not work, look at how we did then for `add_boundary_essential`
 
     /// Add a essential or natural field boundary condition to the model. (WIP Wrapper function)
     ///
@@ -1839,6 +1859,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         }
     }
 
+    // TODO: maybe make the `dyn FnMut(...)` into a typedef so that the caller can use it more easily
     /// This projects the given function into the function space provided, putting the coefficients in a local vector.
     ///
     /// # Parameters
@@ -1853,60 +1874,86 @@ impl<'a, 'tl> DM<'a, 'tl> {
     ///     * `nf` - The number of field components
     ///     * `u` *(output)* - The output field values
     ///
-    // TODO: get this example working
-    // /// # Example
-    // ///
-    // /// ```
-    // /// # use petsc_rs::prelude::*;
-    // /// # use mpi::traits::*;
-    // /// # use std::slice;
-    // /// # use ndarray::{Dimension, array, s};
-    // /// # fn main() -> petsc_rs::Result<()> {
-    // /// # let petsc = Petsc::init_no_args()?;
-    // /// // note, cargo wont run tests with mpi so this will always be run with
-    // /// // a single processor, but this example will also work in a multiprocessor
-    // /// // comm world.
-    // ///
-    // /// // Note, right now this example only works when `PetscScalar` is `PetscReal`.
-    // /// // It will fail to compile if `PetscScalar` is `PetscComplex`.
-    // /// let mut dm = DM::plex_create(petsc.world())?;
-    // /// dm.set_name("Mesh")?;
-    // /// dm.set_from_options()?;
-    // /// # dm.view_with(None)?;
-    // ///
-    // /// let dim = dm.get_dimension()?;
-    // /// let simplex = dm.plex_is_simplex()?;
-    // /// let mut fe = Field::create_default(dm.world(), dim, 1, simplex, None, None)?;
-    // /// dm.add_field(None, fe)?;
-    // /// # dm.view_with(None)?;
-    // ///
-    // /// dm.create_ds()?;
-    // /// let _ = dm.get_coordinate_dm()?;
-    // /// # dm.view_with(None)?;
-    // /// # dm.get_coordinate_dm()?.view_with(None)?;
-    // ///
-    // /// let label = dm.get_label("boundary")?.unwrap();
-    // /// dm.add_boundary_natural("wall", &label, slice::from_ref(&1), 0, &[])?;
-    // ///
-    // /// let mut local = dm.create_local_vector()?;
-    // ///
-    // /// // Rust has trouble knowing we want Box<dyn _> (and not Box<_>) without the explicate type signature.
-    // /// // Thus we need to define `funcs` outside of the `project_function_local` function call.
-    // /// let funcs: [Box<dyn FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> petsc_rs::Result<()>>; 1]
-    // ///     = [Box::new(|dim, time, x, nc, u| {
-    // ///         # println!("dim: {}, time: {}, x: {:?}, nc: {}, u: {:?}", dim, time, x, nc, u);
-    // ///         u[0] = x[0]*x[0] + x[1]*x[1];
-    // ///         Ok(())
-    // ///     })];
-    // /// dm.project_function_local(0.0, InsertMode::INSERT_ALL_VALUES, &mut local, funcs)?;
-    // ///
-    // /// panic!();
-    // ///
-    // /// # Ok(())
-    // /// # }
-    // /// ```
-    // TODO: maybe make the `dyn FnMut(...)` into a typedef so that the caller can use it more easily
-    pub fn project_function_local<'sl>(&'sl mut self, time: PetscReal, mode: InsertMode, local: &mut Vector,
+    /// # Example
+    ///
+    /// ```
+    /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
+    /// # use std::slice;
+    /// # use ndarray::{Dimension, array, s};
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// # let petsc = Petsc::init_no_args()?;
+    /// // note, this example will only work in a uniprocessor comm world.
+    ///
+    /// // Note, right now this example only works when `PetscScalar` is `PetscReal`.
+    /// // It will fail to compile if `PetscScalar` is `PetscComplex`.
+    ///
+    ///
+    /// // The Simplicial cells created by `plex_create_box_mesh` have the following
+    /// // layout, where the `*`s are the points that will be used in the closure
+    /// // given to `project_function_local`.
+    /// // 6-┍ - - - - - - - - - - - ┓
+    /// //   | \         | \         |
+    /// //   |   \   *   |   \   *   |
+    /// //   |     \     |     \     |
+    /// //   |   *   \   |   *   \   |
+    /// //   |         \ |         \ |
+    /// // 3-┣ - - - - - ╁ - - - - - |
+    /// //   | \         | \         |
+    /// // 2-|   \   *   |   \   *   |
+    /// //   |     \     |     \     |
+    /// // 1-|   *   \   |   *   \   |
+    /// //   |         \ |         \ |
+    /// // 0-└ - - - - - ┷ - - - - - ┘
+    /// //   |   |   |   |           |
+    /// //   0   1   2   3           6
+    /// let mut dm = DM::plex_create_box_mesh(petsc.world(), 2, true, (2,2,0), None, (6.0,6.0,0.0), None, true)?;
+    /// dm.set_name("Mesh")?;
+    /// dm.set_from_options()?;
+    /// # dm.view_with(None)?;
+    ///
+    /// let dim = dm.get_dimension()?;
+    /// let simplex = dm.plex_is_simplex()?;
+    /// let mut fe1 = Field::create_default(dm.world(), dim, 1, simplex, None, None)?;
+    /// let mut fe2 = Field::create_default(dm.world(), dim, 1, simplex, None, None)?;
+    /// dm.add_field(None, fe1)?;
+    /// dm.add_field(None, fe2)?;
+    /// # dm.view_with(None)?;
+    ///
+    /// dm.create_ds()?;
+    /// let _ = dm.get_coordinate_dm()?;
+    /// # dm.view_with(None)?;
+    /// # dm.get_coordinate_dm()?.view_with(None)?;
+    ///
+    /// let label = dm.get_label("marker")?.unwrap();
+    /// dm.add_boundary_natural("wall", &label, slice::from_ref(&1), 0, &[])?;
+    ///
+    /// let mut local = dm.create_local_vector()?;
+    ///
+    /// // Rust has trouble knowing we want Box<dyn _> (and not Box<_>) without the explicate type signature.
+    /// // Thus we need to define `funcs` outside of the `project_function_local` function call.
+    /// let funcs: [Box<dyn FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> petsc_rs::Result<()>>; 2]
+    ///     = [Box::new(|dim, time, x, nc, u| {
+    ///         u[0] = x[0]*x[0] + x[1]*x[1];
+    ///         # println!("fe1: dim: {}, time: {}, x: {:?}, nc: {}, u: {:?}", dim, time, x, nc, u);
+    ///         Ok(())
+    ///     }),
+    ///     Box::new(|dim, time, x, nc, u| {
+    ///         u[0] = x[0]*x[0] - x[1]*x[1];
+    ///         # println!("fe2: dim: {}, time: {}, x: {:?}, nc: {}, u: {:?}", dim, time, x, nc, u);
+    ///         Ok(())
+    ///     })];
+    /// dm.project_function_local(0.0, InsertMode::INSERT_ALL_VALUES, &mut local, funcs)?;
+    /// # petsc_println_all!(petsc.world(), "[Process {}] {:.5}", petsc.world().rank(), *local.view()?)?;
+    ///
+    /// # // TODO: give explanation on why the points are used and when
+    /// assert!(local.view()?.slice(s![..]).abs_diff_eq(
+    ///     &array![2.0, 0.0, 17.0, -15.0, 8.0, 0.0, 29.0, 21.0,
+    ///         17.0, 15.0, 50.0, 0.0, 32.0, 0.0, 29.0, -21.0], 1e-15));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn project_function_local<'sl>(&mut self, time: PetscReal, mode: InsertMode, local: &mut Vector,
         user_funcs: impl IntoIterator<Item = Box<dyn FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'sl>>)
         -> Result<()>
     {
@@ -1943,12 +1990,19 @@ impl<'a, 'tl> DM<'a, 'tl> {
                 .map_or_else(|err| err.kind as i32, |_| 0)
         }
 
-        let mut trampoline_funcs = (0..nf).map(|_| Some(dm_project_function_local_trampoline)).collect::<Vec<_>>();
+        // When it comes to function pointers casting in NOT your friend. It causes the pointers 
+        // to be curropted. You MUST be VERY explicit with the types. All in all, the following
+        // will get the function pointers in options correctly (I think). Once we have them, we can 
+        // then manipulate them how we see fit.
+        let mut trampoline_funcs: Vec<::std::option::Option<
+            unsafe extern "C" fn(arg1: PetscInt, arg2: PetscReal, arg3: *const PetscReal, arg4: PetscInt,
+                arg5: *mut PetscScalar, arg6: *mut ::std::os::raw::c_void,) -> petsc_raw::PetscErrorCode, >>
+            = vec![Some(dm_project_function_local_trampoline); nf];
         let mut trampoline_data_refs = trampoline_datas.iter().map(|td| unsafe { std::mem::transmute(td.as_ref()) }).collect::<Vec<_>>();
 
         // TODO: will DMProjectFunctionLocal call the closure? 
         let ierr = unsafe { petsc_raw::DMProjectFunctionLocal(
-            self.dm_p, time, trampoline_funcs.as_mut_ptr() as *mut _, // TODO: why do we need the `as *mut _`
+            self.dm_p, time, trampoline_funcs.as_mut_ptr(),
             trampoline_data_refs.as_mut_ptr(),
             mode, local.vec_p) };
         Petsc::check_error(self.world, ierr)?;
@@ -1956,57 +2010,18 @@ impl<'a, 'tl> DM<'a, 'tl> {
         Ok(())
     }
 
-    // TODO: should we have this if it just calls project_function_local under the hood? Should we just call
-    // project_function_local
     /// This projects the given function into the function space provided, putting the coefficients in a vector.
-    pub fn project_function<'sl>(&'sl mut self, time: PetscReal, mode: InsertMode, global: &mut Vector,
+    ///
+    /// Under the hood uses [`DM::project_function_local()`] and [`DM::local_to_global()`].
+    pub fn project_function<'sl>(&mut self, time: PetscReal, mode: InsertMode, global: &mut Vector<'a>,
         user_funcs: impl IntoIterator<Item = Box<dyn FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'sl>>)
         -> Result<()>
     {
-        let nf = self.get_num_fields()? as usize;
-        if let Some(fields) = self.fields.as_ref() {
-            if fields.len() != nf {
-                // This should never happen if user uses the rust api to add fields
-                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_COR,
-                    "Number of fields in C strutc and rust struct do not match.")?;
-            }
-        } else {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
-                "No fields have been set.")?;
-        }
-
-        let trampoline_datas = user_funcs.into_iter().map(|closure_anchor| Box::pin(DMProjectFunctionTrampolineData { 
-            user_f: closure_anchor })).collect::<Vec<_>>();
-
-        if trampoline_datas.len() != nf {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_USER_INPUT,
-                format!("Expected {} functions in `user_funcs`, but there were {}.", nf, trampoline_datas.len()))?;
-        }
-
-        unsafe extern "C" fn dm_project_function_trampoline(dim: PetscInt, time: PetscReal, x: *const PetscReal,
-            nf: PetscInt, u: *mut PetscScalar, ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
-        {
-            let trampoline_data: Pin<&mut DMProjectFunctionTrampolineData> = std::mem::transmute(ctx);
-
-            // TODO: is dim/nc the correct len?
-            let x_slice = slice::from_raw_parts(x, dim as usize);
-            let u_slice = slice::from_raw_parts_mut(u, nf as usize);
-            
-            (trampoline_data.get_unchecked_mut().user_f)(dim, time, x_slice, nf, u_slice)
-                .map_or_else(|err| err.kind as i32, |_| 0)
-        }
-
-        let mut trampoline_funcs = (0..nf).map(|_| Some(dm_project_function_trampoline)).collect::<Vec<_>>();
-        let mut trampoline_data_refs = trampoline_datas.iter().map(|td| unsafe { std::mem::transmute(td.as_ref()) }).collect::<Vec<_>>();
-
-        // TODO: will DMProjectFunction call the closure? 
-        let ierr = unsafe { petsc_raw::DMProjectFunction(
-            self.dm_p, time, trampoline_funcs.as_mut_ptr() as *mut _, // TODO: why do we need the `as *mut _`
-            trampoline_data_refs.as_mut_ptr(),
-            mode, global.vec_p) };
-        Petsc::check_error(self.world, ierr)?;
-
-        Ok(())
+        // TODO: should we use get_local_vector, that would have problems with using two mutable refrences
+        // Be we know that its not a problem in this case
+        let mut local = self.create_local_vector()?;
+        self.project_function_local(time, mode, &mut local, user_funcs)?;
+        self.local_to_global(&local, mode, global)
     }
 
     /// Gets the DM that prescribes coordinate layout and scatters between global and local coordinates 

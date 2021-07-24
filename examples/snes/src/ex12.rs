@@ -585,7 +585,7 @@ fn main() -> petsc_rs::Result<()> {
     let exact_funcs: [Box<dyn FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> petsc_rs::Result<()>>; 1]
         = [Box::new(exact_func)];
     if opt.field_bc { todo!(); }
-    else            { dm.project_function(0.0, InsertMode::INSERT_BC_VALUES, &mut u, exact_funcs)?; }
+    else            { dm.project_function(0.0, InsertMode::INSERT_ALL_VALUES, &mut u, exact_funcs)?; }
 
     if opt.show_initial {
         let mut local = dm.get_local_vector()?;
@@ -599,7 +599,7 @@ fn main() -> petsc_rs::Result<()> {
     snes.set_dm(dm)?;
     snes.set_from_options()?;
 
-    // TODO: do we want to do: DMPlexSetSNESLocalFEM
+    snes.dm_plex_local_fem()?;
     if let Some(a_mat) = A {
         snes.set_jacobian(a_mat, J, |_, _, _, _| { Ok (()) })?;
     } else {
@@ -879,8 +879,8 @@ unsafe extern "C" fn f0_xytrig_u(_dim: PetscInt, _nf: PetscInt, _nf_aux: PetscIn
 */
 fn nu_2d(_dim: PetscInt, _time: PetscReal, x: &[PetscReal], _nc: PetscInt, u: &mut [PetscScalar]) -> petsc_rs::Result<()>
 {
-  u[0] = x[0] + x[1];
-  Ok(())
+    u[0] = x[0] + x[1];
+    Ok(())
 }
 
 fn checkerboard_coeff(dim: PetscInt, _time: PetscReal, x: &[PetscReal], _nc: PetscInt, u: &mut [PetscScalar], ctx: (&Opt, &Option<Vec<PetscInt>>)) -> petsc_rs::Result<()>
@@ -1047,8 +1047,8 @@ unsafe extern "C" fn g3_analytic_nonlinear_uu(dim: PetscInt, _nf: PetscInt, _nf_
 */
 fn quadratic_u_3d(_dim: PetscInt, _time: PetscReal, x: &[PetscReal], _nc: PetscInt, u: &mut [PetscScalar]) -> petsc_rs::Result<()>
 {
-  u[0] = 2.0*(x[0]*x[0] + x[1]*x[1] + x[2]*x[2])/3.0;
-  Ok(())
+    u[0] = 2.0*(x[0]*x[0] + x[1]*x[1] + x[2]*x[2])/3.0;
+    Ok(())
 }
 
 fn quadratic_u_field_3d(_dim: PetscInt, _nf: PetscInt, _nf_aux: PetscInt,

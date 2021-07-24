@@ -1059,6 +1059,15 @@ impl<'a, 'tl> SNES<'a, 'tl> {
             Ok(self.dm.as_mut().unwrap())
         }
     }
+
+    // TODO: should this be here or in DM
+    /// Use DMPlex's internal FEM routines to compute SNES boundary values, residual, and Jacobian.
+    pub fn dm_plex_local_fem(&mut self) -> Result<()> {
+        let dm = self.get_dm_mut()?;
+        let ierr = unsafe { petsc_raw::DMPlexSetSNESLocalFEM(dm.dm_p,
+            std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut()) };
+        Petsc::check_error(self.world, ierr)
+    }
 }
 
 // macro impls

@@ -6,7 +6,7 @@ PETSc is intended for use in large-scale application projects, many ongoing comp
 
 ## Usage
 
-To use `petsc-rs` from a Rust package, the following Cargo.toml can put in your `Cargo.toml`.
+To use `petsc-rs` from a Rust package, the following can be put in your `Cargo.toml`.
 ```toml
 [dependencies]
 petsc-rs = { git = "https://github.com/ZackJorquera/petsc-rs/", branch = "main" }
@@ -32,8 +32,8 @@ If you want to use a PETSc with non-standard precisions for floats or integers, 
 ```toml
 [dependencies.petsc-rs]
 git = "https://github.com/ZackJorquera/petsc-rs/"
-branch = "main"
-default-features = false
+branch = "main"  # for complex use "complex-scalar" branch
+default-features = false  # note, default turns on "petsc-real-f64" and "petsc-int-i32"
 features = ["petsc-real-f32", "petsc-int-i64"]
 ```
 
