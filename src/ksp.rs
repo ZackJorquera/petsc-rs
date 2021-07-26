@@ -215,9 +215,9 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     }
 
     /// Solves linear system.
-    pub fn solve(&self, b: Option<&Vector>, x: &mut Vector) -> Result<()>
+    pub fn solve<'vl, 'val: 'vl>(&self, b: impl Into<Option<&'vl Vector<'val>>>, x: &mut Vector) -> Result<()>
     {
-        let ierr = unsafe { petsc_raw::KSPSolve(self.ksp_p, b.map_or(std::ptr::null_mut(), |v| v.vec_p), x.vec_p) };
+        let ierr = unsafe { petsc_raw::KSPSolve(self.ksp_p, b.into().map_or(std::ptr::null_mut(), |v| v.vec_p), x.vec_p) };
         Petsc::check_error(self.world, ierr)
     }
 

@@ -49,7 +49,7 @@ pub struct DM<'a, 'tl> {
 
     composite_dms: Option<Vec<DM<'a, 'tl>>>,
 
-    coord_dm: Option<Box<DM<'a, 'tl>>>,
+    coord_dm: Option<Rc<DM<'a, 'tl>>>,
     coarse_dm: Option<Box<DM<'a, 'tl>>>,
 
     fields: Option<Vec<(Option<DMLabel<'a>>, Field<'a, 'tl>)>>,
@@ -1511,22 +1511,13 @@ impl<'a, 'tl> DM<'a, 'tl> {
         Petsc::check_error(self.world, ierr)
     }
 
-    // TODO: im having a hard time finding documentation of any of this so im going to hold of on
-    // implementing this any furthur. Also, it looks like the documentation is different from the
-    // examples (which makes things iteresting). For now im going to follow whats in the examples.
-    // Regardless, that means none of this code is at all safe or even correct (same goes for all
-    // `add_boundary` code, but more so for `add_boundary_field`). I also dont know where the source
-    // code calls the functions. A good place to look might be at the commit that changed this method
-    // on the C side. They must have also touched the internals.
-
-    // TODO: make bc_user_func_t not be an option, do what we did for add_boundary_essential and
-    // add_boundary_essential_with_dt
-
-    // TODO: the we we do function pointers does not work, look at how we did then for `add_boundary_essential`
-
+    // TODO: should these be unsafe functions
     /// Add a essential or natural field boundary condition to the model. (WIP Wrapper function)
     ///
     /// In the C API you would call `DMAddBoundary` with the `bctype` being `DM_BC_*_FIELD`.
+    ///
+    /// Note, the functions `bc_user_func` and `bc_user_func` can not be closures. And they
+    /// Will take pointers instead of slices. 
     ///
     /// This API is for PETSc `v3.16-dev.0`
     ///
@@ -1562,18 +1553,17 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// * `nc` - number of constant parameters
     /// * `consts` - constant parameters
     /// * `bcval` *(output)* - output values at the current point
-    #[cfg(cfg_false)] // #[cfg(any(petsc_version_3_16_dev, doc))]
-    pub fn add_boundary_field<F1, F2>(&mut self, bctype: DMBoundaryConditionType, name: &str, label: &DMLabel, values: &[PetscInt],
-        field: PetscInt, comps: &[PetscInt], bc_user_func: F1, bc_user_func_t: impl Into<Option<F2>>) -> Result<PetscInt>
-    where
-        F1: FnMut(PetscInt, PetscInt, PetscInt,
-            &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
-            &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
-            PetscReal, &[PetscReal], PetscInt, &[PetscScalar], &mut [PetscScalar]) -> Result<()> + 'tl,
-        F2: FnMut(PetscInt, PetscInt, PetscInt,
-            &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
-            &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
-            PetscReal, &[PetscReal], PetscInt, &[PetscScalar], &mut [PetscScalar]) -> Result<()> + 'tl,
+    #[cfg(any(petsc_version_3_16_dev, doc))]
+    pub fn add_boundary_field_raw(&mut self, bctype: DMBoundaryConditionType, name: &str, label: &DMLabel, values: &[PetscInt],
+        field: PetscInt, comps: &[PetscInt],
+        bc_user_func: impl Into<Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>>,
+        bc_user_func_t: impl Into<Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>>) -> Result<PetscInt>
     {
         let mut bd = MaybeUninit::uninit();
 
@@ -1584,11 +1574,14 @@ impl<'a, 'tl> DM<'a, 'tl> {
             fn1, fn2, ctx, bd.as_mut_ptr()) }
         };
 
-        self.add_boundary_field_shared(bctype, name, field, comps, bc_user_func, bc_user_func_t, raw_fn_wrapper)?;
+        let bc_user_func = bc_user_func.into();
+        let bc_user_func_t = bc_user_func_t.into();
+
+        self.add_boundary_field_raw_shared(bctype, name, field, comps, bc_user_func, bc_user_func_t, raw_fn_wrapper)?;
 
         Ok(unsafe { bd.assume_init() })
     }
-    
+
     /// Add a essential or natural field boundary condition to the model. (WIP Wrapper function)
     ///
     /// In the C API you would call `DMAddBoundary` with the `bctype` being `DM_BC_*_FIELD`.
@@ -1627,20 +1620,22 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// * `nc` - number of constant parameters
     /// * `consts` - constant parameters
     /// * `bcval` *(output)* - output values at the current point
-    #[cfg(cfg_false)] // #[cfg(any(petsc_version_3_15, doc))]
-    pub fn add_boundary_field<F1, F2>(&mut self, bctype: DMBoundaryConditionType, name: &str, labelname: &str, field: PetscInt,
-        comps: &[PetscInt], ids: &[PetscInt], bc_user_func: F1, bc_user_func_t: impl Into<Option<F2>>) -> Result<()>
-    where
-        F1: FnMut(PetscInt, PetscInt, PetscInt,
-            &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
-            &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
-            PetscReal, &[PetscReal], PetscInt, &[PetscScalar], &mut [PetscScalar]) -> Result<()> + 'tl,
-        F2: FnMut(PetscInt, PetscInt, PetscInt,
-            &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
-            &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
-            PetscReal, &[PetscReal], PetscInt, &[PetscScalar], &mut [PetscScalar]) -> Result<()> + 'tl,
+    #[cfg(any(petsc_version_3_15, doc))]
+    pub fn add_boundary_field_raw(&mut self, bctype: DMBoundaryConditionType, name: &str, labelname: &str, field: PetscInt,
+        comps: &[PetscInt], ids: &[PetscInt],
+        bc_user_func: impl Into<Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>>,
+        bc_user_func_t: impl Into<Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>>) -> Result<()>
     {
         let labelname_cs = CString::new(labelname).expect("`CString::new` failed");
+
+        let bc_user_func = bc_user_func.into();
+        let bc_user_func_t = bc_user_func_t.into();
 
         let raw_fn_wrapper = |dm_p, bctype, name, nc, comps, field, fn1, fn2, ctx| {
             unsafe { petsc_raw::DMAddBoundary(
@@ -1648,22 +1643,22 @@ impl<'a, 'tl> DM<'a, 'tl> {
             fn1, fn2, ids.len() as PetscInt, ids.as_ptr(), ctx) }
         };
         
-        self.add_boundary_field_shared(bctype, name, field, comps, bc_user_func, bc_user_func_t, raw_fn_wrapper)
+        self.add_boundary_field_raw_shared(bctype, name, field, comps, bc_user_func, bc_user_func_t, raw_fn_wrapper)
     }
     
-    /// Does all the heavy lifting for `add_boundary_field` independent of the version of `DMAddBoundary`
-    #[cfg(cfg_false)]
-    fn add_boundary_field_shared<F1, F2, F3>(&mut self, bctype: DMBoundaryConditionType, name: &str, field: PetscInt,
-        comps: &[PetscInt], bc_user_func: F1, bc_user_func_t: impl Into<Option<F2>>, add_boundary_wrapper: F3) -> Result<()>
+    /// Does all the heavy lifting for `add_boundary_field_raw` independent of the version of `DMAddBoundary`
+    fn add_boundary_field_raw_shared<F3>(&mut self, bctype: DMBoundaryConditionType, name: &str, field: PetscInt,
+        comps: &[PetscInt],
+        bc_user_func: Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>,
+        bc_user_func_t: Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>,
+        add_boundary_wrapper: F3) -> Result<()>
     where
-        F1: FnMut(PetscInt, PetscInt, PetscInt,
-            &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
-            &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
-            PetscReal, &[PetscReal], PetscInt, &[PetscScalar], &mut [PetscScalar]) -> Result<()> + 'tl,
-        F2: FnMut(PetscInt, PetscInt, PetscInt,
-            &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
-            &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
-            PetscReal, &[PetscReal], PetscInt, &[PetscScalar], &mut [PetscScalar]) -> Result<()> + 'tl,
         F3: FnOnce(*mut petsc_raw::_p_DM, DMBoundaryConditionType, *const ::std::os::raw::c_char, PetscInt,
             *const PetscInt, PetscInt, Option<unsafe extern "C" fn()>, Option<unsafe extern "C" fn()>,
             *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode,
@@ -1679,105 +1674,13 @@ impl<'a, 'tl> DM<'a, 'tl> {
             bct @ _ => bct 
         };
     
-        let bc_user_func_t = bc_user_func_t.into();
-        let bc_user_func_t_is_some = bc_user_func_t.is_some();
-        let closure_anchor1 = Box::new(bc_user_func);
-        let closure_anchor2 = bc_user_func_t
-            .map(|bc_user_func_t| -> Box<BCFieldFuncDyn<'tl>>
-                { Box::new(bc_user_func_t) });
-    
-        let trampoline_data = Box::pin(DMBoundaryFieldTrampolineData { 
-            user_f1: closure_anchor1, user_f2: closure_anchor2 });
-    
-        // TODO: It is unclear from looking at the docs and the examples if this method takes a ctx value
-        // if it doesn't then we will probably have to somehow grab them from the DM struct (or really
-        // the _n_DSBoundary stuct in c). With out a ctx this will not work.
-        unsafe extern "C" fn bc_func_field_trampoline(dim: PetscInt, nf: PetscInt, nf_aux: PetscInt,
-            u_off: *const PetscInt, u_off_x: *const PetscInt, u: *const PetscScalar, u_t: *const PetscScalar, u_x: *const PetscScalar,
-            a_off: *const PetscInt, a_off_x: *const PetscInt, a: *const PetscScalar, a_t: *const PetscScalar, a_x: *const PetscScalar,
-            time: PetscReal, x: *const PetscReal, nc: PetscInt, consts: *const PetscScalar, bcval: *mut PetscScalar, ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
-        {
-            let trampoline_data: Pin<&mut DMBoundaryFieldTrampolineData> = std::mem::transmute(ctx);
-    
-            // TODO: what is the correct len for these array (im just guessing)?
-            let u_off_slice = slice::from_raw_parts(u_off, dim as usize);
-            let u_off_x_slice = slice::from_raw_parts(u_off_x, dim as usize);
-            let u_slice = slice::from_raw_parts(u, dim as usize);
-            let u_t_slice = slice::from_raw_parts(u_t, dim as usize);
-            let u_x_slice = slice::from_raw_parts(u_x, dim as usize);
-            
-            let a_off_slice = slice::from_raw_parts(a_off, dim as usize);
-            let a_off_x_slice = slice::from_raw_parts(a_off_x, dim as usize);
-            let a_slice = slice::from_raw_parts(a, dim as usize);
-            let a_t_slice = slice::from_raw_parts(a_t, dim as usize);
-            let a_x_slice = slice::from_raw_parts(a_x, dim as usize);
-
-            let x_slice = slice::from_raw_parts(x, dim as usize);
-
-            let consts_slice = slice::from_raw_parts(consts, dim as usize);
-            
-            let bcval_slice = slice::from_raw_parts_mut(bcval, nf as usize);
-    
-            (trampoline_data.get_unchecked_mut().user_f1)(dim, nf, nf_aux,
-                u_off_slice, u_off_x_slice, u_slice, u_t_slice, u_x_slice,
-                a_off_slice, a_off_x_slice, a_slice, a_t_slice, a_x_slice,
-                time, x_slice, nc, consts_slice, bcval_slice)
-                .map_or_else(|err| err.kind as i32, |_| 0)
-        }
-
-        unsafe extern "C" fn bc_func_t_field_trampoline(dim: PetscInt, nf: PetscInt, nf_aux: PetscInt,
-            u_off: *const PetscInt, u_off_x: *const PetscInt, u: *const PetscScalar, u_t: *const PetscScalar, u_x: *const PetscScalar,
-            a_off: *const PetscInt, a_off_x: *const PetscInt, a: *const PetscScalar, a_t: *const PetscScalar, a_x: *const PetscScalar,
-            time: PetscReal, x: *const PetscReal, nc: PetscInt, consts: *const PetscScalar, bcval: *mut PetscScalar, ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
-        {
-            let trampoline_data: Pin<&mut DMBoundaryFieldTrampolineData> = std::mem::transmute(ctx);
-    
-            // TODO: what is the correct len for these array (im just guessing)?
-            let u_off_slice = slice::from_raw_parts(u_off, dim as usize);
-            let u_off_x_slice = slice::from_raw_parts(u_off_x, dim as usize);
-            let u_slice = slice::from_raw_parts(u, dim as usize);
-            let u_t_slice = slice::from_raw_parts(u_t, dim as usize);
-            let u_x_slice = slice::from_raw_parts(u_x, dim as usize);
-            
-            let a_off_slice = slice::from_raw_parts(a_off, dim as usize);
-            let a_off_x_slice = slice::from_raw_parts(a_off_x, dim as usize);
-            let a_slice = slice::from_raw_parts(a, dim as usize);
-            let a_t_slice = slice::from_raw_parts(a_t, dim as usize);
-            let a_x_slice = slice::from_raw_parts(a_x, dim as usize);
-
-            let x_slice = slice::from_raw_parts(x, dim as usize);
-
-            let consts_slice = slice::from_raw_parts(consts, dim as usize);
-            
-            let bcval_slice = slice::from_raw_parts_mut(bcval, nf as usize);
-    
-            (trampoline_data.get_unchecked_mut().user_f2.as_mut().unwrap())(dim, nf, nf_aux,
-                u_off_slice, u_off_x_slice, u_slice, u_t_slice, u_x_slice,
-                a_off_slice, a_off_x_slice, a_slice, a_t_slice, a_x_slice,
-                time, x_slice, nc, consts_slice, bcval_slice)
-                .map_or_else(|err| err.kind as i32, |_| 0)
-        }
-    
-        let bc_func_field_trampoline_fn_ptr: Option<unsafe extern "C" fn()> = Some(unsafe { 
-            *(&bc_func_field_trampoline as *const _ as *const _) });
-    
-        let bc_func_t_field_trampoline_fn_ptr: Option<unsafe extern "C" fn()> = if bc_user_func_t_is_some {
-            Some(unsafe { 
-                *(&bc_func_t_field_trampoline as *const _ as *const _) })
-        } else { None };
-    
         let ierr = add_boundary_wrapper(
             self.dm_p, bctype, name_cs.as_ptr(), comps.len() as PetscInt, comps.as_ptr(),
-            field, bc_func_field_trampoline_fn_ptr, bc_func_t_field_trampoline_fn_ptr, 
-            unsafe { std::mem::transmute(trampoline_data.as_ref()) }
+            field, unsafe { std::mem::transmute(bc_user_func) },
+            unsafe { std::mem::transmute(bc_user_func_t) }, 
+            std::ptr::null_mut()
         );
         Petsc::check_error(self.world, ierr)?;
-    
-        if let Some(ref mut boundary_trampoline_data_vec) = self.boundary_trampoline_data {
-            boundary_trampoline_data_vec.push(DMBoundaryTrampolineData::BCField(trampoline_data));
-        } else {
-            self.boundary_trampoline_data = Some(vec![DMBoundaryTrampolineData::BCField(trampoline_data)]);
-        }
     
         Ok(())
     }
@@ -2017,50 +1920,217 @@ impl<'a, 'tl> DM<'a, 'tl> {
         user_funcs: impl IntoIterator<Item = Box<dyn FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'sl>>)
         -> Result<()>
     {
-        // TODO: should we use get_local_vector, that would have problems with using two mutable refrences
-        // Be we know that its not a problem in this case
-        let mut local = self.create_local_vector()?;
+        // This should be safe
+        let dm2 = ManuallyDrop::new(DM::new(self.world, self.as_raw()));
+        let mut local = dm2.get_local_vector()?;
         self.project_function_local(time, mode, &mut local, user_funcs)?;
         self.local_to_global(&local, mode, global)
     }
 
+    // TODO: should these be unsafe
+    /// This projects the given function of the input fields into the function space provided,
+    /// putting the coefficients in a local vector.
+    pub fn project_field_local_raw<'vl>(&mut self, time: PetscReal, localu: impl Into<Option<&'vl Vector<'a>>>, mode: InsertMode, localx: &mut Vector,
+        user_funcs: impl IntoIterator<Item = Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>>)
+        -> Result<()>
+    where
+        'a: 'vl,
+    {
+        let nf = self.get_num_fields()? as usize;
+        if let Some(fields) = self.fields.as_ref() {
+            if fields.len() != nf {
+                // This should never happen if user uses the rust api to add fields
+                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_COR,
+                    "Number of fields in C strutc and rust struct do not match.")?;
+            }
+        } else {
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+                "No fields have been set.")?;
+        }
+
+        let mut fn_ptrs = user_funcs.into_iter().collect::<Vec<_>>();
+
+        if fn_ptrs.len() != nf {
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_USER_INPUT,
+                format!("Expected {} functions in `user_funcs`, but there were {}.", nf, fn_ptrs.len()))?;
+        }
+
+        let mut localu_owned;
+        let localu = if let Some(localu) = localu.into() {
+            localu
+        } else {
+            localu_owned = Vector { vec_p: localx.vec_p, world: localx.world };
+            unsafe { localu_owned.reference()?; }
+            &localu_owned
+        };
+
+        // TODO: will DMProjectFunctionLocal call the closure? 
+        let ierr = unsafe { petsc_raw::DMProjectFieldLocal(
+            self.dm_p, time, localu.vec_p, fn_ptrs.as_mut_ptr(),
+            mode, localx.vec_p) };
+        Petsc::check_error(self.world, ierr)?;
+
+        Ok(())
+    }
+
+    /// This projects the given function of the input fields into the function space provided,
+    /// putting the coefficients in a global vector.
+    pub fn project_field_raw<'vl>(&mut self, time: PetscReal, u: impl Into<Option<&'vl Vector<'a>>>, mode: InsertMode, x: &mut Vector,
+        user_funcs: impl IntoIterator<Item = Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>>)
+        -> Result<()>
+    where
+        'a: 'vl,
+    {
+        let nf = self.get_num_fields()? as usize;
+        if let Some(fields) = self.fields.as_ref() {
+            if fields.len() != nf {
+                // This should never happen if user uses the rust api to add fields
+                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_COR,
+                    "Number of fields in C strutc and rust struct do not match.")?;
+            }
+        } else {
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+                "No fields have been set.")?;
+        }
+
+        let mut fn_ptrs = user_funcs.into_iter().collect::<Vec<_>>();
+
+        if fn_ptrs.len() != nf {
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_USER_INPUT,
+                format!("Expected {} functions in `user_funcs`, but there were {}.", nf, fn_ptrs.len()))?;
+        }
+
+        let mut u_owned;
+        let u = if let Some(u) = u.into() {
+            u
+        } else {
+            u_owned = Vector { vec_p: x.vec_p, world: x.world };
+            unsafe { u_owned.reference()?; }
+            &u_owned
+        };
+
+        // TODO: will DMProjectFunctionLocal call the closure? 
+        let ierr = unsafe { petsc_raw::DMProjectField(
+            self.dm_p, time, u.vec_p, fn_ptrs.as_mut_ptr(),
+            mode, x.vec_p) };
+        Petsc::check_error(self.world, ierr)?;
+
+        Ok(())
+    }
+
+    /// This function computes the L_2 difference between the gradient of a function u and
+    /// an FEM interpolant solution grad `u_h`.
+    ///
+    /// # Parameters 
+    ///
+    /// * `time` - the time
+    /// * `u_h` - The coefficient vector, a global vector
+    /// * `user_funcs` - The functions to evaluate for each field component
+    /// * *output* - The diff ||u - u_h||_2
+    pub fn compute_l2_diff<'sl>(&mut self, time: PetscReal, u_h: &Vector,
+        user_funcs: impl IntoIterator<Item = Box<dyn FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'sl>>)
+        -> Result<PetscReal>
+    {
+        let mut diff = MaybeUninit::uninit();
+
+        let nf = self.get_num_fields()? as usize;
+        if let Some(fields) = self.fields.as_ref() {
+            if fields.len() != nf {
+                // This should never happen if user uses the rust api to add fields
+                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_COR,
+                    "Number of fields in C strutc and rust struct do not match.")?;
+            }
+        } else {
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+                "No fields have been set.")?;
+        }
+
+        let trampoline_datas = user_funcs.into_iter().map(|closure_anchor| Box::pin(DMProjectFunctionTrampolineData { 
+            user_f: closure_anchor })).collect::<Vec<_>>();
+
+        if trampoline_datas.len() != nf {
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_USER_INPUT,
+                format!("Expected {} functions in `user_funcs`, but there were {}.", nf, trampoline_datas.len()))?;
+        }
+
+        unsafe extern "C" fn dm_compute_ls_diff_trampoline(dim: PetscInt, time: PetscReal, x: *const PetscReal,
+            nf: PetscInt, u: *mut PetscScalar, ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
+        {
+            let trampoline_data: Pin<&mut DMProjectFunctionTrampolineData> = std::mem::transmute(ctx);
+
+            // TODO: is dim/nc the correct len?
+            let x_slice = slice::from_raw_parts(x, dim as usize);
+            let u_slice = slice::from_raw_parts_mut(u, nf as usize);
+            
+            (trampoline_data.get_unchecked_mut().user_f)(dim, time, x_slice, nf, u_slice)
+                .map_or_else(|err| err.kind as i32, |_| 0)
+        }
+
+        // When it comes to function pointers casting in NOT your friend. It causes the pointers 
+        // to be curropted. You MUST be VERY explicit with the types. All in all, the following
+        // will get the function pointers in options correctly (I think). Once we have them, we can 
+        // then manipulate them how we see fit.
+        let mut trampoline_funcs: Vec<::std::option::Option<
+            unsafe extern "C" fn(arg1: PetscInt, arg2: PetscReal, arg3: *const PetscReal, arg4: PetscInt,
+                arg5: *mut PetscScalar, arg6: *mut ::std::os::raw::c_void,) -> petsc_raw::PetscErrorCode, >>
+            = vec![Some(dm_compute_ls_diff_trampoline); nf];
+        let mut trampoline_data_refs = trampoline_datas.iter().map(|td| unsafe { std::mem::transmute(td.as_ref()) }).collect::<Vec<_>>();
+
+        // TODO: will DMProjectFunctionLocal call the closure? 
+        let ierr = unsafe { petsc_raw::DMComputeL2Diff(
+            self.dm_p, time, trampoline_funcs.as_mut_ptr(),
+            trampoline_data_refs.as_mut_ptr(),
+            u_h.vec_p, diff.as_mut_ptr()) };
+        Petsc::check_error(self.world, ierr)?;
+
+        Ok(unsafe { diff.assume_init() })
+    }
+
+
     /// Gets the DM that prescribes coordinate layout and scatters between global and local coordinates 
-    pub fn get_coordinate_dm<'sl>(&'sl mut self) -> Result<&'sl DM<'a, 'tl>> {
+    pub fn get_coordinate_dm<'sl>(&'sl mut self) -> Result<Rc<DM<'a, 'tl>>> {
         if self.coord_dm.is_some() {
-            Ok(self.coord_dm.as_ref().unwrap().as_ref())
+            Ok(self.coord_dm.as_ref().unwrap().clone())
         } else {
             let mut dm2_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::DMGetCoordinateDM(self.dm_p, dm2_p.as_mut_ptr()) };
             Petsc::check_error(self.world, ierr)?;
 
-            self.coord_dm = Some(Box::new(DM::new(self.world, unsafe { dm2_p.assume_init() })));
-            unsafe { self.coord_dm.as_mut().unwrap().reference()?; }
+            let mut coord_dm = DM::new(self.world, unsafe { dm2_p.assume_init() });
+            unsafe { coord_dm.reference()?; }
+            self.coord_dm = Some(Rc::new(coord_dm));
 
-            Ok(self.coord_dm.as_ref().unwrap().as_ref())
+            Ok(self.coord_dm.as_ref().unwrap().clone())
         }
     }
 
-    /// Gets the DM that prescribes coordinate layout and scatters between global and local coordinates 
-    pub fn get_coordinate_dm_mut<'sl>(&'sl mut self) -> Result<&'sl mut DM<'a, 'tl>> {
-        if self.coord_dm.is_some() {
-            Ok(self.coord_dm.as_mut().unwrap().as_mut())
-        } else {
-            let mut dm2_p = MaybeUninit::uninit();
-            let ierr = unsafe { petsc_raw::DMGetCoordinateDM(self.dm_p, dm2_p.as_mut_ptr()) };
-            Petsc::check_error(self.world, ierr)?;
-
-            self.coord_dm = Some(Box::new(DM::new(self.world, unsafe { dm2_p.assume_init() })));
-            unsafe { self.coord_dm.as_mut().unwrap().reference()?; }
-
-            Ok(self.coord_dm.as_mut().unwrap().as_mut())
-        }
-    }
+    // /// Gets the DM that prescribes coordinate layout and scatters between global and local coordinates 
+    // pub fn get_coordinate_dm_mut<'sl>(&'sl mut self) -> Result<&'sl mut DM<'a, 'tl>> {
+    //     if self.coord_dm.is_some() {
+    //         Ok(self.coord_dm.as_mut().unwrap().as_mut())
+    //     } else {
+    //         let mut dm2_p = MaybeUninit::uninit();
+    //         let ierr = unsafe { petsc_raw::DMGetCoordinateDM(self.dm_p, dm2_p.as_mut_ptr()) };
+    //         Petsc::check_error(self.world, ierr)?;
+    //
+    //         self.coord_dm = Some(Box::new(DM::new(self.world, unsafe { dm2_p.assume_init() })));
+    //         unsafe { self.coord_dm.as_mut().unwrap().reference()?; }
+    //
+    //         Ok(self.coord_dm.as_mut().unwrap().as_mut())
+    //     }
+    // }
 
     /// Sets the DM that prescribes coordinate layout and scatters between global and local coordinates 
-    pub fn set_coordinate_dm(&mut self, coord_dm: DM<'a, 'tl>) -> Result<()> {
+    pub fn set_coordinate_dm(&mut self, coord_dm: Rc<DM<'a, 'tl>>) -> Result<()> {
         let ierr = unsafe { petsc_raw::DMSetCoordinateDM(self.dm_p, coord_dm.dm_p) };
         Petsc::check_error(self.world, ierr)?;
-        self.coord_dm = Some(Box::new(coord_dm));
+        self.coord_dm = Some(coord_dm);
         Ok(())
     }
 
@@ -2152,31 +2222,31 @@ impl<'a, 'tl> DM<'a, 'tl> {
         }
     }
 
-    /// Clones and return a `BorrowDM` that depends on the life time of self
-    pub fn clone_shallow(&self) -> Result<BorrowDM<'a, 'tl, '_>> {
-        // The goal here is to make sure that the the dm we are cloning from lives longer that the new_dm
-        // This insures that the closures are valid. We can do this by using `BorrowDM`.
-
-        let mut new_dm = unsafe { self.clone_unchecked()? };
-
-        // We want to make sure you can't clone the new dm, i.e. 
-        // you have to use clone_shallow again
-        if self.boundary_trampoline_data.is_some() {
-            new_dm.boundary_trampoline_data = Some(vec![]);
-        }
-
-        Ok(BorrowDM { owned_dm: new_dm, _phantom: PhantomData })
-    }
-
-    /// Clones everything but the closures, which can't be cloned.
-    pub fn clone_without_closures(&self) -> Result<DM<'a, 'tl>> {
-        // The goal here is to make sure that the the dm we are cloning from lives longer that the new_dm
-        // This insures that the closures are valid. We can do this by using `BorrowDM`.
-
-        let new_dm = unsafe { self.clone_unchecked()? };
-
-        Ok(new_dm)
-    }
+    // /// Clones and return a `BorrowDM` that depends on the life time of self
+    // pub fn clone_shallow(&self) -> Result<BorrowDM<'a, 'tl, '_>> {
+    //     // The goal here is to make sure that the the dm we are cloning from lives longer that the new_dm
+    //     // This insures that the closures are valid. We can do this by using `BorrowDM`.
+    //
+    //     let mut new_dm = unsafe { self.clone_unchecked()? };
+    //
+    //     // We want to make sure you can't clone the new dm, i.e. 
+    //     // you have to use clone_shallow again
+    //     if self.boundary_trampoline_data.is_some() {
+    //         new_dm.boundary_trampoline_data = Some(vec![]);
+    //     }
+    //
+    //     Ok(BorrowDM { owned_dm: new_dm, _phantom: PhantomData })
+    // }
+    //
+    // /// Clones everything but the closures, which can't be cloned.
+    // pub fn clone_without_closures(&self) -> Result<DM<'a, 'tl>> {
+    //     // The goal here is to make sure that the the dm we are cloning from lives longer that the new_dm
+    //     // This insures that the closures are valid. We can do this by using `BorrowDM`.
+    //
+    //     let new_dm = unsafe { self.clone_unchecked()? };
+    //
+    //     Ok(new_dm)
+    // }
 
     /// Unsafe clone
     // TODO: 
@@ -2206,6 +2276,30 @@ impl<'a, 'tl> DM<'a, 'tl> {
             DM::new(self.world, dm2_p.assume_init())
         })
     }
+
+    /// Iterates over self and recursive calls to [`DM::get_coarse_dm_mut()`] until we get a `None`
+    /// from [`DM::get_coarse_dm_mut()`], running `f` on the dm each time.
+    ///
+    /// After running `f`, it copies the discrete system from `self` to the coarse dm using [`DM::copy_disc_from()`].
+    pub fn plex_for_each_coarse_dm<F>(&mut self, mut f: F) -> Result<()>
+    where
+        F: FnMut(&mut DM) -> Result<()>
+    {
+        let dm = ManuallyDrop::new(DM::new(self.world, self.dm_p));
+        let mut cdm = self;
+        loop {
+            f(cdm)?;
+            if cdm.dm_p != dm.dm_p {
+                cdm.copy_disc_from(&dm)?;
+            }
+            if let Some(this_cdm) = cdm.get_coarse_dm_mut()? {
+                cdm = this_cdm;
+            } else {
+                break;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl<'a> Field<'a, '_> {
@@ -2230,7 +2324,7 @@ impl<'a> Field<'a, '_> {
         let cstring = prefix.into().map(|p| CString::new(p).expect("`CString::new` failed"));
         let mut fe_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::PetscFECreateDefault(world.as_raw(), dim, nc, is_simplex.into(),
-            cstring.map_or(std::ptr::null(), |p| p.as_ptr()), qorder.into().unwrap_or(petsc_raw::PETSC_DETERMINE),
+            cstring.as_ref().map_or(std::ptr::null(), |p| p.as_ptr()), qorder.into().unwrap_or(petsc_raw::PETSC_DETERMINE),
             fe_p.as_mut_ptr()) };
         Petsc::check_error(world, ierr)?;
 

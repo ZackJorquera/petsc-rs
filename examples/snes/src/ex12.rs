@@ -65,10 +65,10 @@ impl FromStr for RunType {
     type Err = Error;
     fn from_str(input: &str) -> Result<RunType, Error> {
         match input.to_uppercase().as_str() {
-            "RUN_FULL" => Ok(RunType::RUN_FULL),
-            "RUN_EXACT" => Ok(RunType::RUN_EXACT),
-            "RUN_TEST" => Ok(RunType::RUN_TEST),
-            "RUN_PERF" => Ok(RunType::RUN_PERF),
+            "FULL" => Ok(RunType::RUN_FULL),
+            "EXACT" => Ok(RunType::RUN_EXACT),
+            "TEST" => Ok(RunType::RUN_TEST),
+            "PERF" => Ok(RunType::RUN_PERF),
             _ => Err(Error::new(ErrorKind::InvalidInput, format!("{}, is not valid", input)))
         }
     }
@@ -77,10 +77,10 @@ impl FromStr for RunType {
 impl Display for RunType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            RunType::RUN_FULL => write!(f, "run_full"),
-            RunType::RUN_EXACT => write!(f, "run_exact"),
-            RunType::RUN_TEST => write!(f, "run_test"),
-            _ => write!(f, "run_perf"),
+            RunType::RUN_FULL => write!(f, "full"),
+            RunType::RUN_EXACT => write!(f, "exact"),
+            RunType::RUN_TEST => write!(f, "test"),
+            _ => write!(f, "perf"),
         }
     }
 }
@@ -93,14 +93,14 @@ impl FromStr for CoeffType {
     type Err = Error;
     fn from_str(input: &str) -> Result<CoeffType, Error> {
         match input.to_uppercase().as_str() {
-            "COEFF_NONE" => Ok(CoeffType::COEFF_NONE),
-            "COEFF_ANALYTIC" => Ok(CoeffType::COEFF_ANALYTIC),
-            "COEFF_FIELD" => Ok(CoeffType::COEFF_FIELD),
-            "COEFF_NONLINEAR" => Ok(CoeffType::COEFF_NONLINEAR),
-            "COEFF_CIRCLE" => Ok(CoeffType::COEFF_CIRCLE),
-            "COEFF_CROSS" => Ok(CoeffType::COEFF_CROSS),
-            "COEFF_CHECKERBOARD_0" => Ok(CoeffType::COEFF_CHECKERBOARD_0),
-            "COEFF_CHECKERBOARD_1" => Ok(CoeffType::COEFF_CHECKERBOARD_1),
+            "NONE" => Ok(CoeffType::COEFF_NONE),
+            "ANALYTIC" => Ok(CoeffType::COEFF_ANALYTIC),
+            "FIELD" => Ok(CoeffType::COEFF_FIELD),
+            "NONLINEAR" => Ok(CoeffType::COEFF_NONLINEAR),
+            "CIRCLE" => Ok(CoeffType::COEFF_CIRCLE),
+            "CROSS" => Ok(CoeffType::COEFF_CROSS),
+            "CHECKERBOARD_0" => Ok(CoeffType::COEFF_CHECKERBOARD_0),
+            "CHECKERBOARD_1" => Ok(CoeffType::COEFF_CHECKERBOARD_1),
             _ => Err(Error::new(ErrorKind::InvalidInput, format!("{}, is not valid", input)))
         }
     }
@@ -109,14 +109,14 @@ impl FromStr for CoeffType {
 impl Display for CoeffType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            CoeffType::COEFF_NONE => write!(f, "COEFF_NONE"),
-            CoeffType::COEFF_ANALYTIC => write!(f, "COEFF_ANALYTIC"),
-            CoeffType::COEFF_FIELD => write!(f, "COEFF_FIELD"),
-            CoeffType::COEFF_NONLINEAR => write!(f, "COEFF_NONLINEAR"),
-            CoeffType::COEFF_CIRCLE => write!(f, "COEFF_CIRCLE"),
-            CoeffType::COEFF_CROSS => write!(f, "COEFF_CROSS"),
-            CoeffType::COEFF_CHECKERBOARD_0 => write!(f, "COEFF_CHECKERBOARD_0"),
-            CoeffType::COEFF_CHECKERBOARD_1 => write!(f, "COEFF_CHECKERBOARD_1"),
+            CoeffType::COEFF_NONE => write!(f, "NONE"),
+            CoeffType::COEFF_ANALYTIC => write!(f, "ANALYTIC"),
+            CoeffType::COEFF_FIELD => write!(f, "FIELD"),
+            CoeffType::COEFF_NONLINEAR => write!(f, "NONLINEAR"),
+            CoeffType::COEFF_CIRCLE => write!(f, "CIRCLE"),
+            CoeffType::COEFF_CROSS => write!(f, "CROSS"),
+            CoeffType::COEFF_CHECKERBOARD_0 => write!(f, "CHECKERBOARD_0"),
+            CoeffType::COEFF_CHECKERBOARD_1 => write!(f, "CHECKERBOARD_1"),
         }
     }
 }
@@ -222,7 +222,7 @@ fn create_mesh<'a, 'b>(world: &'a UserCommunicator, opt: &Opt) -> petsc_rs::Resu
         let dim = dm.get_dimension()?;
         let n = opt.div.pow(dim as u32);
         let mut rng = StdRng::seed_from_u64(1973);
-        Some((0..n).map(|_| 1 + rng.gen_range(0..opt.k)).collect())
+        Some((0..n).map(|_| rng.gen_range(1..=opt.k)).collect())
     } else {
         None
     };
@@ -275,7 +275,13 @@ fn petsc_ds_set_jacobian(ds: &mut DS, g3: unsafe extern "C" fn(PetscInt, PetscIn
     }
 }
 
-fn setup_problem(dm: &mut DM, opt: &Opt) -> petsc_rs::Result<fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> petsc_rs::Result<()>> {
+fn setup_problem(dm: &mut DM, opt: &Opt) -> petsc_rs::Result<(
+    fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> petsc_rs::Result<()>,
+    Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+        *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+        *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+        PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>)>
+{
     let dim = dm.get_dimension()? as usize;
     let periodicity = {
         if let Some((_, _, p)) = dm.get_periodicity()? {
@@ -335,6 +341,10 @@ fn setup_problem(dm: &mut DM, opt: &Opt) -> petsc_rs::Result<fn(PetscInt, PetscR
     } // drop ds
 
     let exact_func: fn (PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> petsc_rs::Result<()>;
+    let mut exact_field: Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+        *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+        *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+        PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)> = None;
 
     let id = 1;
     match dim {
@@ -352,7 +362,7 @@ fn setup_problem(dm: &mut DM, opt: &Opt) -> petsc_rs::Result<fn(PetscInt, PetscR
                         }
                     } else {
                         exact_func = quadratic_u_2d;
-                        // exact_field = quadratic_u_field_2d;
+                        exact_field = Some(quadratic_u_field_2d);
                     }
                 }
             }
@@ -366,6 +376,7 @@ fn setup_problem(dm: &mut DM, opt: &Opt) -> petsc_rs::Result<fn(PetscInt, PetscR
         },
         3 => {
             exact_func = quadratic_u_3d;
+            exact_field = Some(quadratic_u_field_3d);
 
             if opt.bc_type == BCType::NEUMANN {
                 let label = dm.get_label("boundary")?.unwrap();
@@ -388,7 +399,8 @@ fn setup_problem(dm: &mut DM, opt: &Opt) -> petsc_rs::Result<fn(PetscInt, PetscR
 
     if opt.bc_type == BCType::DIRICHLET {
         if let Some(label) = dm.get_label("marker")? {
-            if opt.field_bc { Petsc::set_error(dm.world(), PetscErrorKind::PETSC_ERR_ARG_WRONG, "`field_bd` can't be true")?; }
+            if opt.field_bc { dm.add_boundary_field_raw(DMBoundaryConditionType::DM_BC_ESSENTIAL_FIELD, "wall",
+                &label, slice::from_ref(&id), 0, &[], exact_field, None)?; }
             let _ = dm.add_boundary_essential("wall", &label, slice::from_ref(&id), 0, &[], exact_func.clone())?;
         } else {
             todo!();
@@ -396,10 +408,16 @@ fn setup_problem(dm: &mut DM, opt: &Opt) -> petsc_rs::Result<fn(PetscInt, PetscR
 
     }
 
-    Ok(exact_func)
+    Ok((exact_func, exact_field))
 }
 
-fn setup_discretization(dm: &mut DM, opt: &Opt, kgrid: &Option<Vec<i32>>) -> petsc_rs::Result<fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> petsc_rs::Result<()>> {
+fn setup_discretization(dm: &mut DM, opt: &Opt, kgrid: &Option<Vec<i32>>) -> petsc_rs::Result<(
+    fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> petsc_rs::Result<()>,
+    Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+        *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+        *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+        PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>)>
+{
     let dim = dm.get_dimension()?;
     // DMConvert(dm, DMPLEX, &plex);
     // DMPlexIsSimplex(plex, &simplex);
@@ -426,27 +444,19 @@ fn setup_discretization(dm: &mut DM, opt: &Opt, kgrid: &Option<Vec<i32>>) -> pet
     dm.add_field(None, fe)?;
     dm.create_ds()?;
     
-    let exact_func = setup_problem(dm, opt)?;
+    let exact_func_field = setup_problem(dm, opt)?;
 
-    let _dm_cloned = dm.clone_without_closures()?;
-    let mut cdm = dm;
-    loop {
+    dm.plex_for_each_coarse_dm(|cdm| -> petsc_rs::Result<()> {
         setup_aux_dm(cdm, &fe_aux, opt, kgrid)?;
         if opt.bc_type == BCType::DIRICHLET {
             if !cdm.has_label("marker")? {
                 create_bc_label(cdm, "marker", opt)?;
             }
         }
-        // TODO: why does this remove the features?
-        //cdm.copy_disc_from(&dm_cloned)?;
-        if let Some(this_cdm) = cdm.get_coarse_dm_mut()? {
-            cdm = this_cdm;
-        } else {
-            break;
-        }
-    }
+        Ok(())
+    })?;
 
-    Ok(exact_func)
+    Ok(exact_func_field)
 }
 
 fn create_bc_label(dm: &mut DM, labelname: &str, _opt: &Opt) -> petsc_rs::Result<()> {
@@ -459,7 +469,7 @@ fn create_bc_label(dm: &mut DM, labelname: &str, _opt: &Opt) -> petsc_rs::Result
 fn setup_aux_dm(dm: &mut DM, fe_aux: &Option<Field>, opt: &Opt, kgrid: &Option<Vec<i32>>) -> petsc_rs::Result<()> {
     let dim = dm.get_dimension()?;
     let simplex = dm.plex_is_simplex()?;
-    let coord_dm = dm.get_coordinate_dm()?.clone();
+    let coord_dm = dm.get_coordinate_dm()?;
     if let Some(fe_aux) = fe_aux {
         // clone the fe_aux
         let this_fe_aux = if opt.variable_coefficient == CoeffType::COEFF_FIELD || opt.variable_coefficient == CoeffType::COEFF_CHECKERBOARD_1 {
@@ -505,7 +515,6 @@ fn setup_material<'a>(dm_aux: &mut DM<'a, '_>, opt: &Opt, kgrid: &Option<Vec<i32
             }
         })];
     dm_aux.project_function_local(0.0, InsertMode::INSERT_ALL_VALUES, &mut nu, funcs)?;
-    //dm.set_auxiliary_vec(None, 0, nu)?;
 
     Ok(nu)
 }
@@ -521,7 +530,6 @@ fn setup_bc<'a>(dm_aux: &mut DM<'a, '_>, _opt: &Opt) -> petsc_rs::Result<Vector<
             }
         })];
     dm_aux.project_function_local(0.0, InsertMode::INSERT_ALL_VALUES, &mut uexact, funcs)?;
-    //dm.set_auxiliary_vec(None, 0, uexact)?;
 
     Ok(uexact)
 }
@@ -539,8 +547,9 @@ fn main() -> petsc_rs::Result<()> {
     }
 
     let (mut dm, kgrid) = create_mesh(petsc.world(), &opt)?;
+    dm.view_with(None)?;
 
-    let exact_func = setup_discretization(&mut dm, &opt, &kgrid)?;
+    let (exact_func, exact_field) = setup_discretization(&mut dm, &opt, &kgrid)?;
 
     let mut u = dm.create_global_vector()?;
     u.set_name("potential")?;
@@ -548,6 +557,10 @@ fn main() -> petsc_rs::Result<()> {
     #[allow(non_snake_case)]
     let J = dm.create_matrix()?;
 
+    #[allow(non_snake_case)]
+    let mut A2;
+    #[allow(non_snake_case)]
+    let mut J2 = None;
     #[allow(non_snake_case)]
     let mut A = if opt.jacobian_mf {
         let (mg, ng) = J.get_global_size()?;
@@ -561,18 +574,20 @@ fn main() -> petsc_rs::Result<()> {
         let mut u_loc = dm.create_local_vector()?;
         let exact_funcs: [Box<dyn FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> petsc_rs::Result<()>>; 1]
             = [Box::new(exact_func)];
-        if opt.field_bc { todo!(); }
+        if opt.field_bc { dm.project_field_local_raw(0.0, None, InsertMode::INSERT_BC_VALUES, &mut u_loc, [exact_field])?; }
         else            { dm.project_function_local(0.0, InsertMode::INSERT_BC_VALUES, &mut u_loc, exact_funcs)?; }
 
         // MatShellSetContext(A, &userJ);
         // todo!();
-
+        A2 = A.clone();
+        J2 = Some(J.clone());
         Some(A)
     } else {
+        A2 = J.clone();
         None
     };
 
-    let _nullspace = if opt.bc_type == BCType::DIRICHLET {
+    let nullspace = if opt.bc_type == BCType::DIRICHLET {
         let ns = Rc::new(NullSpace::create(dm.world(), true, vec![])?);
         if let Some(a_mat) = A.as_mut() {
             a_mat.set_nullspace(ns.clone())?;
@@ -584,15 +599,15 @@ fn main() -> petsc_rs::Result<()> {
 
     let exact_funcs: [Box<dyn FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> petsc_rs::Result<()>>; 1]
         = [Box::new(exact_func)];
-    if opt.field_bc { todo!(); }
+    if opt.field_bc { dm.project_field_raw(0.0, None, InsertMode::INSERT_ALL_VALUES, &mut u, [exact_field])?; }
     else            { dm.project_function(0.0, InsertMode::INSERT_ALL_VALUES, &mut u, exact_funcs)?; }
 
     if opt.show_initial {
         let mut local = dm.get_local_vector()?;
         dm.global_to_local(&u, InsertMode::INSERT_VALUES, &mut local)?;
         petsc_println!(petsc.world(), "Local Function:")?;
-        petsc_println_all!(petsc.world(), "[process {}]\n{:.5}", petsc.world().rank(), *u.view()?)?;
-        u.view_with(None)?;
+        petsc_println_all!(petsc.world(), "[process {}]\n{:.5}", petsc.world().rank(), *local.view()?)?;
+        local.view_with(None)?;
     }
 
     let mut snes = SNES::create(petsc.world())?;
@@ -626,8 +641,71 @@ fn main() -> petsc_rs::Result<()> {
             petsc_println_all!(petsc.world(), "[process {}]\n{:.5}", petsc.world().rank(), *u.view()?)?;
             u.view_with(None)?;
         }
+    } else if opt.run_type == RunType::RUN_PERF {
+        let mut r = snes.get_dm()?.create_global_vector()?;
+        snes.compute_function(&u, &mut r)?;
+        r.chop(1.0e-10)?;
+        let norm = r.norm(NormType::NORM_2)?;
+        petsc_println!(petsc.world(), "Initial Residual:\n L_2 Residual: {:.5}", norm)?;
     } else {
-        todo!();
+        let tol = 1.0e-11;
+        let mut r = snes.get_dm()?.create_global_vector()?;
+        let exact_funcs: [Box<dyn FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> petsc_rs::Result<()>>; 1]
+        = [Box::new(exact_func)];
+        if !opt.quiet { 
+            petsc_println!(petsc.world(), "Initial Guess:")?;
+            u.view_with(None)?;
+        }
+        let error = snes.get_dm_mut()?.compute_l2_diff(0.0, &u, exact_funcs)?;
+        if error < tol { petsc_println!(petsc.world(), "L_2 Error: < {:.1e}", tol)?; }
+        else           { petsc_println!(petsc.world(), "L_2 Error: {:.5e}", error)?; }
+        
+        snes.compute_function(&u, &mut r)?;
+        
+        r.chop(1.0e-10)?;
+        if !opt.quiet { 
+            petsc_println!(petsc.world(), "Initial Residual:\n")?;
+            r.view_with(None)?;
+        }
+        let norm = r.norm(NormType::NORM_2)?;
+        petsc_println!(petsc.world(), "L_2 Residual: {:.5}", norm)?;
+
+        {
+            snes.compute_jacobian(&u, &mut A2, None)?;
+            let mut b = u.clone();
+            r.set_all(0.0)?;
+            snes.compute_function(&r, &mut b)?;
+            A2.mult(&u, &mut r)?;
+            r.axpy(1.0, &b)?;
+            petsc_println!(petsc.world(), "Au - b = Au + F(0)")?;
+            r.chop(1.0e-10)?;
+            if !opt.quiet { r.view_with(None)?; }
+            let norm = r.norm(NormType::NORM_2)?;
+            petsc_println!(petsc.world(), "Linear L_2 Residual: {:.5}", norm)?;
+
+            if opt.check_ksp {
+                if let Some(ns) = nullspace {
+                    ns.remove_from(&mut u)?;
+                }
+
+                let (a_mat, j_mat) = if let Some(mut j_mat) = J2 {
+                    snes.compute_jacobian(&u, &mut A2, &mut j_mat)?;
+                    (Rc::new(A2), Rc::new(j_mat))
+                } else {
+                    snes.compute_jacobian(&u, &mut A2, None)?;
+                    let a = Rc::new(A2);
+                    (a.clone(), a)
+                };
+
+                a_mat.mult(&u, &mut b)?;
+                let ksp = snes.get_ksp_mut()?;
+                ksp.set_operators(a_mat, j_mat)?;
+                ksp.solve(&b, &mut r)?;
+                r.axpy(-1.0, &u)?;
+                let res = r.norm(NormType::NORM_2)?;
+                petsc_println!(petsc.world(), "KSP Error: {}", res)?;
+            }
+        }
     }
 
     // TODO:
@@ -1051,18 +1129,18 @@ fn quadratic_u_3d(_dim: PetscInt, _time: PetscReal, x: &[PetscReal], _nc: PetscI
     Ok(())
 }
 
-fn quadratic_u_field_3d(_dim: PetscInt, _nf: PetscInt, _nf_aux: PetscInt,
-    _u_off: &[PetscInt], _u_off_x: &[PetscInt], _u: &[PetscScalar], _u_t: &[PetscScalar], _u_x: &[PetscScalar],
-    _a_off: &[PetscInt], _a_off_x: &[PetscInt], a: &[PetscScalar], _a_t: &[PetscScalar], _a_x: &[PetscScalar],
-    _t: PetscReal, _x: &[PetscReal], _nc: PetscInt, _consts: &[PetscScalar], uexact: &mut [PetscScalar])
+unsafe extern "C" fn quadratic_u_field_3d(_dim: PetscInt, _nf: PetscInt, _nf_aux: PetscInt,
+    _u_off: *const PetscInt, _u_off_x: *const PetscInt, _u: *const PetscScalar, _u_t: *const PetscScalar, _u_x: *const PetscScalar,
+    _a_off: *const PetscInt, _a_off_x: *const PetscInt, a: *const PetscScalar, _a_t: *const PetscScalar, _a_x: *const PetscScalar,
+    _t: PetscReal, _x: *const PetscReal, _nc: PetscInt, _consts: *const PetscScalar, uexact: *mut PetscScalar)
 {
-    uexact[0] = a[0];
+    *uexact = *a;
 }
 
-fn bd_integral_2d(_dim: PetscInt, _nf: PetscInt, _nf_aux: PetscInt,
-    _u_off: &[PetscInt], _u_off_x: &[PetscInt], u: &[PetscScalar], _u_t: &[PetscScalar], _u_x: &[PetscScalar],
-    _a_off: &[PetscInt], _a_off_x: &[PetscInt], _a: &[PetscScalar], _a_t: &[PetscScalar], _a_x: &[PetscScalar],
-    _t: PetscReal, _x: &[PetscReal], _n: &[PetscReal], _nc: PetscInt, _consts: &[PetscScalar], uint: &mut [PetscScalar])
+unsafe extern "C" fn bd_integral_2d(_dim: PetscInt, _nf: PetscInt, _nf_aux: PetscInt,
+    _u_off: *const PetscInt, _u_off_x: *const PetscInt, u: *const PetscScalar, _u_t: *const PetscScalar, _u_x: *const PetscScalar,
+    _a_off: *const PetscInt, _a_off_x: *const PetscInt, _a: *const PetscScalar, _a_t: *const PetscScalar, _a_x: *const PetscScalar,
+    _t: PetscReal, _x: *const PetscReal, _nc: PetscInt, _consts: *const PetscScalar, uint: *mut PetscScalar)
 {
-    uint[0] = u[0];
+    *uint = *u;
 }

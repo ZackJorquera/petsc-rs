@@ -480,7 +480,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
             mat1_p: *mut petsc_raw::_p_Mat, mat2_p: *mut petsc_raw::_p_Mat, ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
         {
             // This assert should always be true based on how we constructed this wrapper
-            assert_eq!(mat1_p, mat2_p);
+            assert!(mat1_p == mat2_p || mat2_p == 0 as *mut _);
 
             // SAFETY: read `snes_function_trampoline` safety
             let trampoline_data: Pin<&mut SNESJacobianSingleTrampolineData> = std::mem::transmute(ctx);
@@ -925,9 +925,10 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     /// The user should initialize the vector, `x`, with the initial guess for the nonlinear solve prior
     /// to calling [`SNES::solve()`]. In particular, to employ an initial guess of zero, the user should
     /// explicitly set this vector to zero by calling [`Vector::set_all()`].
-    pub fn solve(&self, b: Option<&Vector>, x: &mut Vector) -> Result<()>
+    // TODO: should this take mut self
+    pub fn solve<'vl, 'val: 'vl>(&self, b: impl Into<Option<&'vl Vector<'val>>>, x: &mut Vector) -> Result<()>
     {
-        let ierr = unsafe { petsc_raw::SNESSolve(self.snes_p, b.map_or(std::ptr::null_mut(), |v| v.vec_p), x.vec_p) };
+        let ierr = unsafe { petsc_raw::SNESSolve(self.snes_p, b.into().map_or(std::ptr::null_mut(), |v| v.vec_p), x.vec_p) };
         Petsc::check_error(self.world, ierr)
     }
 
@@ -1066,6 +1067,44 @@ impl<'a, 'tl> SNES<'a, 'tl> {
         let dm = self.get_dm_mut()?;
         let ierr = unsafe { petsc_raw::DMPlexSetSNESLocalFEM(dm.dm_p,
             std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut()) };
+        Petsc::check_error(self.world, ierr)
+    }
+
+    /// Returns the vector where the function is stored (i.e. the residual) or creates one
+    /// if one hasn't been created.
+    ///
+    /// This is the vector `r` set with [`SNES::set_function()`].
+    // TODO: is this a good api, i mean set_function takes in a mut ref not an Rc or ownership
+    pub fn get_residual(&self) -> Result<Rc<Vector<'a>>> {
+        let mut vec_p = MaybeUninit::uninit();
+        let ierr = unsafe { petsc_raw::SNESGetFunction(self.snes_p, vec_p.as_mut_ptr(),
+            std::ptr::null_mut(), std::ptr::null_mut()) };
+        Petsc::check_error(self.world, ierr)?;
+
+        let mut vec = Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } };
+        unsafe { vec.reference()?; }
+        let r = Rc::new(vec);
+
+        Ok(r)
+    }
+
+    /// Calls the function that has been set with [`SNES::set_function()`].
+    ///
+    /// Note, this method is typically used within nonlinear solvers implementations,
+    /// so users would not generally call this routine themselves.
+    pub fn compute_function(&mut self, x: &Vector, y: &mut Vector) -> Result<()> {
+        let ierr = unsafe { petsc_raw::SNESComputeFunction(self.snes_p, x.vec_p, y.vec_p) };
+        Petsc::check_error(self.world, ierr)
+    }
+
+    /// Computes the Jacobian matrices that has been set with [`SNES::set_jacobian()`]
+    /// or [`SNES::set_jacobian_single_mat()`].
+    ///
+    /// Note, this method is typically used within nonlinear solvers implementations,
+    /// so users would not generally call this routine themselves.
+    pub fn compute_jacobian<'ml, 'mal: 'ml>(&mut self, x: &Vector, a_mat: &mut Mat, p_mat: impl Into<Option<&'ml mut Mat<'mal>>>) -> Result<()> {
+        let ierr = unsafe { petsc_raw::SNESComputeJacobian(self.snes_p, x.vec_p, a_mat.mat_p,
+            p_mat.into().map_or(a_mat.mat_p, |p| p.mat_p)) };
         Petsc::check_error(self.world, ierr)
     }
 }
