@@ -3,7 +3,7 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/Mat/index.html>
 
-use std::{marker::PhantomData, ops::{Deref, DerefMut}};
+use std::{ffi::CString, marker::PhantomData, ops::{Deref, DerefMut}};
 use std::mem::{MaybeUninit, ManuallyDrop};
 use std::rc::Rc;
 use crate::{
@@ -90,6 +90,7 @@ pub use petsc_raw::MatAssemblyType;
 pub use petsc_raw::MatOption;
 pub use petsc_raw::MatDuplicateOption;
 pub use petsc_raw::MatStencil;
+pub use petsc_raw::MatTypeEnum as MatType;
 use petsc_raw::MatReuse;
 
 impl<'a> Mat<'a> {
@@ -671,6 +672,22 @@ impl<'a> Mat<'a> {
                     let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap ?
                 })),
         ))
+    }
+
+    
+
+    /// Builds [`Mat`] for a particular type
+    pub fn set_type_str(&mut self, mat_type: &str) -> Result<()> {
+        let cstring = CString::new(mat_type).expect("`CString::new` failed");
+        let ierr = unsafe { petsc_raw::MatSetType(self.mat_p, cstring.as_ptr()) };
+        Petsc::check_error(self.world, ierr)
+    }
+
+    /// Builds [`Mat`] for a particular type
+    pub fn set_type(&mut self, mat_type: MatType) -> Result<()> {
+        let option_cstr = petsc_raw::MATTYPE_TABLE[mat_type as usize];
+        let ierr = unsafe { petsc_raw::MatSetType(self.mat_p, option_cstr.as_ptr() as *const _) };
+        Petsc::check_error(self.world, ierr)
     }
 }
 

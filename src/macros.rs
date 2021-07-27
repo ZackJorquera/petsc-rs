@@ -38,7 +38,8 @@
 /// }
 /// ```
 /// Note, for the macro to work, the type must implement `crate::PetscAsRaw` and `crate::PetscObject`.
-/// This can be done with the [`impl_petsc_object_traits!`] macro.
+/// This can be done with the [`impl_petsc_object_traits!`] macro. Once a wrapper type implements
+/// [`PetscAsRaw`](crate::PetscAsRaw), so does `Option<T>` where the `None` case because null ptr.
 ///
 /// We can then using the macro in the following way to create the function 
 /// `pub fn set_ab_ret_cd(&mut self, a: i32, b: f64) -> crate::Result<(f64, i32)>`
@@ -98,15 +99,41 @@
 /// It most likely will be the same type that the raw function wants, but only must
 /// shares the same memory layout as the type used by the raw Petsc function, as a
 /// pointer cast is done automatically.
+///
+/// If you want the function to consume an input, you can use `consume .<member_name>` in
+/// the following way. Note, this requires `member_name` to be a member of the struct type,
+/// and it must be an [`Option`].
+/// ```ignore
+/// pub struct KSP<'a> {
+///     world: &'a UserCommunicator,
+///     ksp_p: petsc_raw::KSP,
+///     owned_dm: Option<DM<'a>>,
+/// }
+///
+/// impl KSP<'_> {
+///     wrap_simple_petsc_member_funcs! {
+///         KSPSetDM, pub set_dm, input DM, dm .as_raw consume .owned_dm,
+/// //                                            ^      ^         ^
+/// //                     Note, `as_raw` is only ┘      |         |
+/// //                     used with raw function      Add `consume .<member_name>`
+///             takes mut, #[doc = "doc-string"];
+///     }
+/// }
+/// ```
+/// Note this will drop the member value before it sets it.
+///
+/// # Real Examples
+///
+/// Almost every file in `src/` uses this macro at the bottom of the file.
 macro_rules! wrap_simple_petsc_member_funcs {
     {$(
         $raw_func:ident, $vis_par:vis $new_func:ident,
-        $(input $param_type:ty, $param_name:ident $(.$as_raw_fn:ident)? ,)*
+        $(input $param_type:ty, $param_name:ident $(.$as_raw_fn:ident)? $(consume .$member:ident)? ,)*
         $(output $ret_type:ty, $tmp_ident:ident $(.$into_fn:ident from $raw_ret_type:ty)? ,)*
-        $(takes $mut_tag:tt,)? $(is $is_unsafe:ident,)? #[$doc:meta];
+        $(takes $mut_tag:tt,)? $(is $is_unsafe:ident,)? $( #[$att:meta] )+;
     )*} => {
 $(
-    #[$doc]
+    $( #[$att] )+
     #[allow(unused_parens)]
     $vis_par $($is_unsafe)? fn $new_func(& $($mut_tag)? self, $( $param_name: $param_type ),*)
         -> crate::Result<($( $ret_type ),*)>
@@ -122,6 +149,11 @@ $(
         )};
         Petsc::check_error(self.world(), ierr)?;
 
+        $($( 
+            let _ = self.$member.take();
+            self.$member = Some($param_name);
+        )?)*
+
         #[allow(unused_unsafe)]
         crate::Result::Ok(unsafe { ( $( $tmp_ident.assume_init() $(.$into_fn())? ),* ) })
     }
@@ -135,10 +167,10 @@ $(
 /// These can be repeated multiple times to define multiple like methods.
 macro_rules! wrap_prealloc_petsc_member_funcs {
     {$(
-        $raw_func:ident, $new_func:ident, $(block $arg1:ident,)? $(nz $arg2:ident, $arg3:ident,)+ #[$doc:meta];
+        $raw_func:ident, $new_func:ident, $(block $arg1:ident,)? $(nz $arg2:ident, $arg3:ident,)+ $( #[$att:meta] )+;
     )*} => {
 $(
-    #[$doc]
+    $( #[$att] )+
     pub fn $new_func(&mut self, $($arg1: PetscInt,)? $($arg2: PetscInt, $arg3: ::std::option::Option<&[PetscInt]>),+) -> crate::Result<()> {
         let ierr = unsafe { crate::petsc_raw::$raw_func(
             self.as_raw(), 

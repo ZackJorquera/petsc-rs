@@ -40,7 +40,7 @@ pub struct KSP<'a, 'tl> {
     // default `KSPDestroy` accounts for references.
     pc: Option<PC<'a, 'tl>>,
 
-    dm: Option<DM<'a>>,
+    dm: Option<DM<'a, 'tl>>,
 
     compute_operators_trampoline_data: Option<Pin<Box<KSPComputeOperatorsTrampolineData<'a, 'tl>>>>,
     compute_rhs_trampoline_data: Option<Pin<Box<KSPComputeRHSTrampolineData<'a, 'tl>>>>,
@@ -96,22 +96,6 @@ impl<'a, 'tl> KSP<'a, 'tl> {
         // `ksp->setupstage` so idk.
         self.get_pc_mut()?.set_operators(a_mat, p_mat)
     }
-
-    /// Sets the [preconditioner](crate::pc)([`PC`]) to be used to calculate the application of
-    /// the preconditioner on a vector.
-    ///
-    /// if you change the PC by calling set again, then the original will be dropped.
-    pub fn set_pc(&mut self, pc: PC<'a, 'tl>) -> Result<()>
-    {
-        
-        let ierr = unsafe { petsc_raw::KSPSetPC(self.ksp_p, pc.pc_p) };
-        Petsc::check_error(self.world, ierr)?;
-
-        let _ = self.pc.take();
-        self.pc = Some(pc);
-
-        Ok(())
-    }
     
     /// Returns a [`Option`] of a reference to the [`PC`] context set.
     ///
@@ -163,23 +147,6 @@ impl<'a, 'tl> KSP<'a, 'tl> {
         }
     }
 
-    /// Sets the [DM](DM) that may be used by some [preconditioners](crate::pc).
-    ///
-    /// If this is used then the KSP will attempt to use the DM to create the matrix and use the routine
-    /// set with [`DMKSPSetComputeOperators()`](#) or [`KSP::set_compute_operators()`]. Use
-    /// [`KSP::set_dm_active(false)`] to instead use the matrix you've provided with [`KSP::set_operators()`].
-    pub fn set_dm(&mut self, dm: DM<'a>) -> Result<()>
-    {
-        
-        let ierr = unsafe { petsc_raw::KSPSetDM(self.ksp_p, dm.dm_p) };
-        Petsc::check_error(self.world, ierr)?;
-
-        let _ = self.dm.take();
-        self.dm = Some(dm);
-
-        Ok(())
-    }
-
     /// Returns an [`Option`] to a reference to the [DM](DM).
     ///
     /// If you want PETSc to set the [`DM`] you must call [`KSP::get_dm()`]
@@ -188,12 +155,12 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     ///
     /// Note, this does not return a [`Result`](crate::Result) because it can never
     /// fail, instead it will return `None`.
-    pub fn try_get_dm<'b>(&'b self) -> Option<&'b DM<'a>> {
+    pub fn try_get_dm<'b>(&'b self) -> Option<&'b DM<'a, 'tl>> {
         self.dm.as_ref()
     }
 
     /// Returns a reference to the [DM](DM) that may be used by some [preconditioners](crate::pc).
-    pub fn get_dm<'b>(&'b mut self) -> Result<&'b DM<'a>>
+    pub fn get_dm<'b>(&'b mut self) -> Result<&'b DM<'a, 'tl>>
     {
         if self.dm.is_some() {
             Ok(self.dm.as_ref().unwrap())
@@ -210,7 +177,7 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     }
 
     /// Returns a mutable reference to the [DM](DM) that may be used by some [preconditioners](crate::pc).
-    pub fn get_dm_mut<'b>(&'b mut self) -> Result<&'b mut DM<'a>>
+    pub fn get_dm_mut<'b>(&'b mut self) -> Result<&'b mut DM<'a, 'tl>>
     {
         if self.dm.is_some() {
             Ok(self.dm.as_mut().unwrap())
@@ -248,9 +215,9 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     }
 
     /// Solves linear system.
-    pub fn solve(&self, b: Option<&Vector>, x: &mut Vector) -> Result<()>
+    pub fn solve<'vl, 'val: 'vl>(&self, b: impl Into<Option<&'vl Vector<'val>>>, x: &mut Vector) -> Result<()>
     {
-        let ierr = unsafe { petsc_raw::KSPSolve(self.ksp_p, b.map_or(std::ptr::null_mut(), |v| v.vec_p), x.vec_p) };
+        let ierr = unsafe { petsc_raw::KSPSolve(self.ksp_p, b.into().map_or(std::ptr::null_mut(), |v| v.vec_p), x.vec_p) };
         Petsc::check_error(self.world, ierr)
     }
 
@@ -434,11 +401,16 @@ impl<'a, 'tl> KSP<'a, 'tl> {
 }
 
 // macro impls
-impl<'a> KSP<'a, '_> {
+impl<'a, 'tl> KSP<'a, 'tl> {
     wrap_simple_petsc_member_funcs! {
         KSPSetFromOptions, pub set_from_options, takes mut, #[doc = "Sets KSP options from the options database. This routine must be called before KSPSetUp() if the user is to be allowed to set the Krylov type."];
         KSPSetUp, pub set_up, takes mut, #[doc = "Sets up the internal data structures for the later use of an iterative solver. . This will be automatically called with [`KSP::solve()`]."];
         KSPGetIterationNumber, pub get_iteration_number, output PetscInt, iter_num, #[doc = "Gets the current iteration number; if the KSPSolve() is complete, returns the number of iterations used."];
+        KSPSetDM, pub set_dm, input DM<'a, 'tl>, dm .as_raw consume .dm, takes mut, #[doc = "Sets the [DM](DM) that may be used by some [preconditioners](crate::pc).\n\n\
+            If this is used then the KSP will attempt to use the DM to create the matrix and use the routine set with [`DMKSPSetComputeOperators()`](#) or [`KSP::set_compute_operators()`]. Use\
+            [`KSP::set_dm_active(false)`] to instead use the matrix you've provided with [`KSP::set_operators()`]."];
+        KSPSetPC, pub set_pc, input PC<'a, 'tl>, pc .as_raw consume .pc, takes mut, #[doc = "Sets the [preconditioner](crate::pc)([`PC`]) to be used to calculate the application of the preconditioner on a vector.\n\n\
+            If you change the PC by calling set again, then the original will be dropped."];
     }
 }
 

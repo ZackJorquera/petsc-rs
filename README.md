@@ -6,7 +6,7 @@ PETSc is intended for use in large-scale application projects, many ongoing comp
 
 ## Usage
 
-To use `petsc-rs` from a Rust package, the following Cargo.toml can put in your `Cargo.toml`.
+To use `petsc-rs` from a Rust package, the following can be put in your `Cargo.toml`.
 ```toml
 [dependencies]
 petsc-rs = { git = "https://github.com/ZackJorquera/petsc-rs/", branch = "main" }
@@ -16,7 +16,7 @@ Note, `petsc-rs` is supported for rust 1.52 and above. However, some of the exam
 
 In order for `petsc-rs` to work correctly, you need to [download PETSc](https://petsc.org/release/download/) (version 3.15 or above, using the main branch is recommended). Then you need to [configure and install PETSc](https://petsc.org/release/install/). I haven't tested all the different ways to install PETSc, but the following works for `petsc-rs`. Note, it is required that you install an MPI library globally and not have PETSc install it for you. This is needed by the [rsmpi](https://github.com/rsmpi/rsmpi) crate (look at its [requirements](https://github.com/rsmpi/rsmpi#requirements) for more information). Im using `openmpi` 3.1.3, which gives me `mpicc` and `mpicxx`.
 ```text
-./configure --with-cc=mpicc --with-cxx=mpicxx --download-f2cblaslapack --with-fc=0
+./configure --with-cc=mpicc --with-cxx=mpicxx --download-f2cblaslapack --download-triangle --with-fc=0
 make all check
 ```
 
@@ -32,14 +32,14 @@ If you want to use a PETSc with non-standard precisions for floats or integers, 
 ```toml
 [dependencies.petsc-rs]
 git = "https://github.com/ZackJorquera/petsc-rs/"
-branch = "main"
-default-features = false
+branch = "main"  # for complex numbers use the "complex-scalar" branch
+default-features = false  # note, default turns on "petsc-real-f64" and "petsc-int-i32"
 features = ["petsc-real-f32", "petsc-int-i64"]
 ```
 
-Note, you will have to build PETSc with the same settings that you wish to use for `petsc-rs`. When building, the petsc-sys package will validate that the PETSc install matches the requested feature flags.
+Note, you will have to build PETSc with the same settings that you wish to use for `petsc-rs`. When building, the `petsc-sys` package will validate that the PETSc install matches the requested feature flags.
 
-If you want to have a release build you will have to set the `PETSC_ARCH_RELEASE` environment variable with the directory in `PETSC_DIR` where the release build is. Then when compile with release mode, the PETSc release build will be used. 
+If you want to have a release build you will have to set the `PETSC_ARCH_RELEASE` environment variable with the directory in `PETSC_DIR` where the release build is. Then when compiling with release mode, the PETSc release build will be used.
 
 ### Features
 
@@ -56,6 +56,17 @@ be the complex type, `PetscComplex`. If disabled then the scalar type is the rea
 You must be using the `complex-scalar` branch to enable this feature.
 - **`petsc-int-i32`** *(enabled by default)* — Sets the integer type, `PetscInt`, to be `i32`.
 - **`petsc-int-i64`** — Sets the integer type, `PetscInt`, to be `i64`.
+
+### Using `petsc-sys`
+
+If you wish to use raw bindings from `petsc-sys` in the same crate that you are using `petsc-rs` you can import the `petsc-sys` crate with the following line in your `Cargo.toml`. An example of using both `petsc-rs` and `petsc-sys` can be found in [`examples/snes/src/ex12.rs`](https://github.com/ZackJorquera/petsc-rs/blob/main/examples/snes/src/ex12.rs).
+
+```toml
+[dependencies]
+petsc-sys = { git = "https://github.com/ZackJorquera/petsc-rs/", branch = "main", default-features = false }
+```
+
+Note, `petsc-sys` has the same type related feature flags which `petsc-rs` will enable/disable. However, to avoid conflicts you should use `default-features = false` when importing `petsc-sys`.
 
 ## Running PETSc Programs
 
