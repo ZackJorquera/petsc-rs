@@ -68,6 +68,8 @@
 //!
 //! - [`petsc-rs` github page](https://github.com/ZackJorquera/petsc-rs)
 
+// useful doc page: https://petsc.org/release/docs/manualpages/singleindex.html
+
 use std::ops::Deref;
 use std::os::raw::{c_char, c_int};
 use std::vec;

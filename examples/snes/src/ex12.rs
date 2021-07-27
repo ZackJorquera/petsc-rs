@@ -1,15 +1,14 @@
-//! Concepts: SNES^basic parallel example
-//! Concepts: SNES^setting a user-defined monitoring routine
+//! Concepts: SNES^Poisson Problem in 2d and 3d
+//! Concepts: SNES^Using a parallel unstructured mesh (DMPLEX)
 //! Processors: n
 //!
 //! To run:
 //! ```text
-//! $ cargo build --bin snes-ex3
-//! $ mpiexec -n 1 target/debug/snes-ex3
-//! $ mpiexec -n 2 target/debug/snes-ex3
+//! $ cargo build --bin snes-ex12
+//! $ mpiexec -n 1 target/debug/snes-ex12
+//! $ mpiexec -n 1 target/debug/snes-ex12 -run_type test -variable_coefficient field -petscspace_degree 1 -show_initial -show_solution -dm_plex_print_fem 1 -show_opts
+//! $ mpiexec -n 1 target/debug/snes-ex12 -show_initial -show_solution -show_opts -field_bc -variable_coefficient coeff_checkerboard_0 -rand -k 2
 //! ```
-
-#![allow(dead_code)]
 
 static HELP_MSG: &str = "Poisson Problem in 2d and 3d with simplicial finite elements.\n\
     We solve the Poisson problem in a rectangular\n\
@@ -127,14 +126,7 @@ impl Default for CoeffType {
 
 #[derive(Debug)]
 struct Opt {
-    // debug: PetscInt,
     run_type: RunType,
-    // dim: PetscInt,
-    // periodicity: (DMBoundaryType, DMBoundaryType, DMBoundaryType),
-    // cells: (PetscInt, PetscInt, PetscInt),
-    // file_name: Option<String>,
-    // interpolate: bool,
-    // refinement_limit: PetscReal,
     bc_type: BCType,
     variable_coefficient: CoeffType,
     field_bc: bool,
@@ -142,8 +134,6 @@ struct Opt {
     show_initial: bool,
     show_solution: bool,
     restart: bool,
-    // view_hierarchy: bool,
-    // simplex: bool,
     quiet: bool,
     nonz_init: bool,
     bd_integral: bool,
@@ -153,28 +143,15 @@ struct Opt {
     rand: bool,
     dm_view: bool,
     guess_vec_view: bool,
+    vec_view: bool,
+    coeff_view: bool,
     show_opts: bool,
 }
 
 impl PetscOpt for Opt {
     fn from_petsc(petsc: &Petsc) -> petsc_rs::Result<Self> {
-        Ok(Opt { 
-            // debug: petsc.options_try_get_int("-debug")?.unwrap_or(0),
+        Ok(Opt {
             run_type: petsc.options_try_get_from_string("-run_type")?.unwrap_or(RunType::RUN_FULL),
-            // dim: petsc.options_try_get_int("-dim")?.unwrap_or(2),
-            // periodicity: (
-            //     petsc.options_try_get_from_string("-x_periodicity")?.unwrap_or(DMBoundaryType::DM_BOUNDARY_NONE),
-            //     petsc.options_try_get_from_string("-y_periodicity")?.unwrap_or(DMBoundaryType::DM_BOUNDARY_NONE),
-            //     petsc.options_try_get_from_string("-z_periodicity")?.unwrap_or(DMBoundaryType::DM_BOUNDARY_NONE)
-            // ),
-            // cells: (
-            //     petsc.options_try_get_int("-cell0")?.unwrap_or(2),
-            //     petsc.options_try_get_int("-cell1")?.unwrap_or(2),
-            //     petsc.options_try_get_int("-cell2")?.unwrap_or(2),
-            // ),
-            // file_name: petsc.options_try_get_string("-file_name")?,
-            // interpolate: petsc.options_try_get_bool("-interpolate")?.unwrap_or(true),
-            // refinement_limit: petsc.options_try_get_real("-refinement_limit")?.unwrap_or(0.0),
             bc_type: petsc.options_try_get_from_string("-bc_type")?.unwrap_or(BCType::DIRICHLET),
             variable_coefficient: petsc.options_try_get_from_string("-variable_coefficient")?.unwrap_or(CoeffType::COEFF_NONE),
             field_bc: petsc.options_try_get_bool("-field_bc")?.unwrap_or(false),
@@ -182,8 +159,6 @@ impl PetscOpt for Opt {
             show_initial: petsc.options_try_get_bool("-show_initial")?.unwrap_or(false),
             show_solution: petsc.options_try_get_bool("-show_solution")?.unwrap_or(false),
             restart: petsc.options_try_get_bool("-restart")?.unwrap_or(false),
-            // view_hierarchy: petsc.options_try_get_bool("-view_hierarchy")?.unwrap_or(false),
-            // simplex: petsc.options_try_get_bool("-simplex")?.unwrap_or(true),
             quiet: petsc.options_try_get_bool("-quiet")?.unwrap_or(false),
             nonz_init: petsc.options_try_get_bool("-nonz_init")?.unwrap_or(false),
             bd_integral: petsc.options_try_get_bool("-bd_integral")?.unwrap_or(false),
@@ -193,22 +168,14 @@ impl PetscOpt for Opt {
             rand: petsc.options_try_get_bool("-rand")?.unwrap_or(false),
             dm_view: petsc.options_try_get_bool("-dm_view")?.unwrap_or(false),
             guess_vec_view: petsc.options_try_get_bool("-guess_vec_view")?.unwrap_or(false),
+            vec_view: petsc.options_try_get_bool("-vec_view")?.unwrap_or(false),
+            coeff_view: petsc.options_try_get_bool("-coeff_view")?.unwrap_or(false),
             show_opts: petsc.options_try_get_bool("-show_opts")?.unwrap_or(false),
         })
     }
 }
 
 fn create_mesh<'a, 'b>(world: &'a UserCommunicator, opt: &Opt) -> petsc_rs::Result<(DM<'a, 'b>, Option<Vec<PetscInt>>)> {
-    // let dm = if let Some(filename) = opt.file_name {
-    //     let mut dm = DM::plex_create_from_file(world, &filename, opt.interpolate)?;
-    //     dm.plex_set_refinement_uniform(false)?;
-    //     dm
-    // } else {
-    //     let mut dm = DM::plex_create_box_mesh(world, opt.dim, opt.simplex, opt.cells, None, None, opt.periodicity, opt.interpolate)?;
-    //     dm.set_name("Mesh")?;
-    //     dm
-    // };
-
     let mut dm = DM::plex_create(world)?;
     dm.set_name("Mesh")?;
     dm.set_from_options()?;
@@ -708,30 +675,26 @@ fn main() -> petsc_rs::Result<()> {
         }
     }
 
-    // TODO:
-    /*
-    ierr = VecViewFromOptions(u, NULL, "-vec_view");CHKERRQ(ierr);
-    {
-        Vec nu;
-
-        ierr = DMGetAuxiliaryVec(dm, NULL, 0, &nu);CHKERRQ(ierr);
-        if (nu) {ierr = VecViewFromOptions(nu, NULL, "-coeff_view");CHKERRQ(ierr);}
+    if opt.vec_view {
+        u.view_with(None)?;
+    }
+    if opt.coeff_view {
+        if let Some(nu) = snes.get_dm()?.get_auxiliary_vec(None, 0)? {
+            nu.view_with(None)?
+        }
     }
 
-    if (user.bdIntegral) {
-        DMLabel   label;
-        PetscInt  id = 1;
-        PetscScalar bdInt = 0.0;
-        PetscReal   exact = 3.3333333333;
+    if opt.bd_integral {
+        let exact = 10.0/3.0;
+        let dm = snes.get_dm_mut()?;
+        let l = dm.get_label("marker")?;
 
-        ierr = DMGetLabel(dm, "marker", &label);CHKERRQ(ierr);
-        ierr = DMPlexComputeBdIntegral(dm, u, label, 1, &id, bd_integral_2d, &bdInt, NULL);CHKERRQ(ierr);
-        ierr = PetscPrintf(PETSC_COMM_WORLD, "Solution boundary integral: %.4g\n", (double) PetscAbsScalar(bdInt));CHKERRQ(ierr);
-        if (PetscAbsReal(PetscAbsScalar(bdInt) - exact) > PETSC_SQRT_MACHINE_EPSILON) SETERRQ2(PETSC_COMM_WORLD, PETSC_ERR_PLIB, "Invalid boundary integral %g != %g", (double) PetscAbsScalar(bdInt), (double)exact);
+        let bd_int = dm.plex_compute_bd_integral_raw(&u, l.as_ref(), slice::from_ref(&1), bd_integral_2d)?;
+        petsc_println!(petsc.world(), "Solution boundary integral: {:.4}", bd_int.abs())?;
+        if (bd_int.abs() - exact).abs() > PetscReal::EPSILON.sqrt() {
+            Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_PLIB, format!("Invalid boundary integral {} != {}", bd_int.abs(), exact))?;
+        }
     }
-    */
-
-
 
     Ok(())
 }
@@ -1140,7 +1103,7 @@ unsafe extern "C" fn quadratic_u_field_3d(_dim: PetscInt, _nf: PetscInt, _nf_aux
 unsafe extern "C" fn bd_integral_2d(_dim: PetscInt, _nf: PetscInt, _nf_aux: PetscInt,
     _u_off: *const PetscInt, _u_off_x: *const PetscInt, u: *const PetscScalar, _u_t: *const PetscScalar, _u_x: *const PetscScalar,
     _a_off: *const PetscInt, _a_off_x: *const PetscInt, _a: *const PetscScalar, _a_t: *const PetscScalar, _a_x: *const PetscScalar,
-    _t: PetscReal, _x: *const PetscReal, _nc: PetscInt, _consts: *const PetscScalar, uint: *mut PetscScalar)
+    _t: PetscReal, _x: *const PetscReal, _n: *const PetscReal, _nc: PetscInt, _consts: *const PetscScalar, uint: *mut PetscScalar)
 {
     *uint = *u;
 }

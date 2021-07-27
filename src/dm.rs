@@ -2092,6 +2092,35 @@ impl<'a, 'tl> DM<'a, 'tl> {
         Ok(unsafe { diff.assume_init() })
     }
 
+    /// Form the integral over the specified boundary from the global input X using pointwise
+    /// functions specified by the user.
+    ///
+    /// # Parameters
+    ///
+    /// * `x`       - Global input [`Vector`]
+    /// * `label`   - The boundary [`DMLabel`]
+    /// * `vals`    - The label values to use, or `None` for all values
+    /// * `func`    - The function to integrate along the boundary
+    pub fn plex_compute_bd_integral_raw<'vll, 'll, 'lal: 'll>(&mut self, x: &Vector, label: impl Into<Option<&'ll DMLabel<'lal>>>,
+        vals: impl Into<Option<&'vll [PetscInt]>>, func: unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            PetscReal, *const PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)) -> Result<PetscReal>
+    {
+        let mut integral = MaybeUninit::uninit();
+
+        let fn_ptr = Some(func);
+        let vals: Option<&[PetscInt]> = vals.into();
+
+        let ierr = unsafe { petsc_raw::DMPlexComputeBdIntegral(
+            self.dm_p, x.vec_p, label.into().as_raw(), 
+            vals.as_ref().map_or(petsc_raw::PETSC_DETERMINE, |&vl| vl.len() as PetscInt),
+            vals.as_ref().map_or(std::ptr::null(), |&vl| vl.as_ptr()),
+            fn_ptr, integral.as_mut_ptr(), std::ptr::null_mut()) };
+        Petsc::check_error(self.world, ierr)?;
+
+        Ok(unsafe { integral.assume_init() })
+    }
 
     /// Gets the DM that prescribes coordinate layout and scatters between global and local coordinates 
     pub fn get_coordinate_dm<'sl>(&'sl mut self) -> Result<Rc<DM<'a, 'tl>>> {
@@ -2222,28 +2251,30 @@ impl<'a, 'tl> DM<'a, 'tl> {
         }
     }
 
-    // /// Clones and return a `BorrowDM` that depends on the life time of self
-    // pub fn clone_shallow(&self) -> Result<BorrowDM<'a, 'tl, '_>> {
-    //     // The goal here is to make sure that the the dm we are cloning from lives longer that the new_dm
-    //     // This insures that the closures are valid. We can do this by using `BorrowDM`.
-    //
-    //     let mut new_dm = unsafe { self.clone_unchecked()? };
-    //
-    //     // We want to make sure you can't clone the new dm, i.e. 
-    //     // you have to use clone_shallow again
-    //     if self.boundary_trampoline_data.is_some() {
-    //         new_dm.boundary_trampoline_data = Some(vec![]);
-    //     }
-    //
-    //     Ok(BorrowDM { owned_dm: new_dm, _phantom: PhantomData })
-    // }
-    //
+    /// Clones and return a `BorrowDM` that depends on the life time of self
+    pub fn clone_shallow(&self) -> Result<BorrowDM<'a, 'tl, '_>> {
+        // The goal here is to make sure that the the dm we are cloning from lives longer that the new_dm
+        // This insures that the closures are valid. We can do this by using `BorrowDM`.
+    
+        let mut new_dm = unsafe { self.clone_unchecked()? };
+    
+        // We want to make sure you can't clone the new dm, i.e. 
+        // you have to use clone_shallow again
+        if self.boundary_trampoline_data.is_some() {
+            new_dm.boundary_trampoline_data = Some(vec![]);
+        }
+    
+        Ok(BorrowDM { owned_dm: new_dm, _phantom: PhantomData })
+    }
+    
     // /// Clones everything but the closures, which can't be cloned.
     // pub fn clone_without_closures(&self) -> Result<DM<'a, 'tl>> {
     //     // The goal here is to make sure that the the dm we are cloning from lives longer that the new_dm
     //     // This insures that the closures are valid. We can do this by using `BorrowDM`.
     //
     //     let new_dm = unsafe { self.clone_unchecked()? };
+    //
+    //     // remove func pointers from c struct.
     //
     //     Ok(new_dm)
     // }
@@ -2299,6 +2330,25 @@ impl<'a, 'tl> DM<'a, 'tl> {
             }
         }
         Ok(())
+    }
+
+    /// Get the auxiliary vector for region specified by the given label and value (indicating the region).
+    ///
+    /// Note: If no auxiliary vector is found for this (label, value), `(label: None, value: 0)` is checked
+    /// as well.
+    pub fn get_auxiliary_vec<'ll, 'lal: 'll>(&self, label: impl Into<Option<&'ll DMLabel<'lal>>>, value: PetscInt) -> Result<Option<Rc<Vector<'a>>>> {
+        let mut vec_p = MaybeUninit::uninit();
+        let ierr = unsafe { petsc_raw::DMGetAuxiliaryVec(self.dm_p, label.into().as_raw(), value,
+            vec_p.as_mut_ptr()) };
+        Petsc::check_error(self.world, ierr)?;
+
+        let vec_p_nn = NonNull::new(unsafe { vec_p.assume_init() } );
+        let mut vec = vec_p_nn.map(|nn_vec_p| Vector { world: self.world, vec_p: nn_vec_p.as_ptr() });
+        if let Some(v) = vec.as_mut() {
+            unsafe { v.reference()? };
+        }
+
+        Ok(vec.map(|aux| Rc::new(aux)))
     }
 }
 
