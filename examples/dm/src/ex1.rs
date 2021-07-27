@@ -72,9 +72,9 @@ struct Opt {
 }
 
 impl PetscOpt for Opt {
-    fn from_petsc(petsc: &Petsc) -> petsc_rs::Result<Self> {
-        let star_stencil = petsc.options_try_get_bool("-star_stencil")?.unwrap_or(false);
-        let view_global = petsc.options_try_get_bool("-view_global")?.unwrap_or(false);
+    fn from_petsc_opt_builder(pob: &mut PetscOptBuilder) -> petsc_rs::Result<Self> {
+        let star_stencil = pob.options_bool("-star_stencil", "", "dm-ex1", false)?;
+        let view_global = pob.options_bool("-view_global", "", "dm-ex1", false)?;
         Ok(Opt { star_stencil, view_global })
     }
 }
@@ -87,7 +87,7 @@ fn main() -> petsc_rs::Result<()> {
         .help_msg(HELP_MSG)
         .init()?;
 
-    let Opt { star_stencil, view_global } = Opt::from_petsc(&petsc)?;
+    let Opt { star_stencil, view_global } = petsc.options_get()?;
     
     let viewer = petsc.viewer_create_ascii_stdout()?;
 

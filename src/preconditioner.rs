@@ -155,7 +155,7 @@ impl<'a, 'tl> PC<'a, 'tl> {
 
             let mut mat = Mat { world: self.world, mat_p: unsafe { p_mat_p.assume_init() } };
             unsafe { mat.reference()?; }
-            Rc::new(Mat { world: self.world, mat_p: unsafe { p_mat_p.assume_init() } })
+            Rc::new(mat)
         };
 
         Ok((a_mat, p_mat))

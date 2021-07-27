@@ -38,10 +38,10 @@ struct Opt {
 }
 
 impl PetscOpt for Opt {
-    fn from_petsc(petsc: &Petsc) -> petsc_rs::Result<Self> {
-        let m = petsc.options_try_get_int("-m")?.unwrap_or(8);
-        let n = petsc.options_try_get_int("-n")?.unwrap_or(7);
-        let view_exact_sol = petsc.options_try_get_bool("-view_exact_sol")?.unwrap_or(false);
+    fn from_petsc_opt_builder(pob: &mut PetscOptBuilder) -> petsc_rs::Result<Self> {
+        let m = pob.options_int("-m", "", "ksp-ex2", 8)?;
+        let n = pob.options_int("-n", "", "ksp-ex2", 7)?;
+        let view_exact_sol = pob.options_bool("-view_exact_sol", "", "ksp-ex2", false)?;
         Ok(Opt { m, n, view_exact_sol })
     }
 }
@@ -58,7 +58,7 @@ fn main() -> petsc_rs::Result<()> {
     // or init with no options
     // let petsc = Petsc::init_no_args()?;
 
-    let Opt {m, n, view_exact_sol} = Opt::from_petsc(&petsc)?;
+    let Opt {m, n, view_exact_sol} = petsc.options_get()?;
 
     petsc_println!(petsc.world(), "Hello parallel world of {} processes!", petsc.world().size() )?;
 

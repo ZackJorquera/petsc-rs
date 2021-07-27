@@ -68,7 +68,9 @@
 //!
 //! - [`petsc-rs` github page](https://github.com/ZackJorquera/petsc-rs)
 
-use std::ops::Deref;
+use std::fmt::Display;
+use std::marker::PhantomData;
+use std::ops::{Deref, Bound, RangeBounds};
 use std::os::raw::{c_char, c_int};
 use std::vec;
 
@@ -115,6 +117,7 @@ pub mod prelude {
         PetscAsRaw,
         PetscAsRawMut,
         PetscObject,
+        PetscOptBuilder,
         petsc_println,
         petsc_println_all,
         vector::{Vector, VecOption, },
@@ -376,6 +379,160 @@ impl PetscBuilder
     {
         self.file = Some(file.to_string());
         self
+    }
+}
+
+/// Struct that facilitates setting command line arguments.
+///
+/// Wraps a set of queries on the options database that are related and should be displayed
+/// on the same window of a GUI that allows the user to set the options interactively.
+///
+/// This replaces [`PetscOptionsBegin`](https://petsc.org/release/docs/manualpages/Sys/PetscOptionsBegin.html)
+/// and [`PetscOptionsEnd`](https://petsc.org/release/docs/manualpages/Sys/PetscOptionsEnd.html) from the C API.
+pub struct PetscOptBuilder<'pl, 'pool, 'strlt> {
+    petsc: &'pl Petsc,
+    petsc_opt_obj: &'pool mut MaybeUninit<petsc_sys::PetscOptionItems>,
+    _str_phantom: PhantomData<&'strlt CStr> // There are string held in the petsc_opt_obj
+}
+
+impl<'pl, 'pool, 'strlt> PetscOptBuilder<'pl, 'pool, 'strlt> {
+    fn new(petsc: &'pl Petsc, petsc_opt_obj: &'pool mut MaybeUninit<petsc_sys::PetscOptionItems>,
+        prefix_cs: Option<&'strlt CStr>, mess_cs: &'strlt CStr, sec_cs: Option<&'strlt CStr>) -> Result<Self>
+    {
+        let ierr = unsafe { petsc_sys::PetscOptionsBegin_Private(
+            petsc_opt_obj.as_mut_ptr(), petsc.world().as_raw(),
+            prefix_cs.map_or(std::ptr::null() , |cs| cs.as_ptr()),
+            mess_cs.as_ptr(),
+            sec_cs.map_or(std::ptr::null() , |cs| cs.as_ptr())) };
+        Petsc::check_error(petsc.world(), ierr)?;
+        Ok(Self { petsc, petsc_opt_obj, _str_phantom: PhantomData })
+    }
+
+    /// Gets the integer value for a particular option in the database (over a range).
+    pub fn options_int_range(&mut self, opt: &str, text: &str, man: &str, default: PetscInt, range: impl RangeBounds<PetscInt>) -> Result<PetscInt> {
+        let opt_cs = CString::new(opt).expect("`CString::new` failed");
+        let text_cs = CString::new(text).expect("`CString::new` failed");
+        let man_cs = CString::new(man).expect("`CString::new` failed");
+        let mut opt_val = MaybeUninit::uninit();
+        let mut set = MaybeUninit::uninit();
+        let lb = match range.start_bound() {
+            Bound::Unbounded => PetscInt::MIN,
+            Bound::Included(&lb) => lb,
+            Bound::Excluded(&lb) => lb + 1,
+        };
+        let ub = match range.end_bound() {
+            Bound::Unbounded => PetscInt::MAX,
+            Bound::Included(&ub) => ub,
+            Bound::Excluded(&ub) => ub - 1,
+        };
+        let ierr = unsafe { 
+            petsc_raw::PetscOptionsInt_Private(self.petsc_opt_obj.as_mut_ptr(), opt_cs.as_ptr(),
+            text_cs.as_ptr(), man_cs.as_ptr(), default, opt_val.as_mut_ptr(), set.as_mut_ptr(),
+            lb, ub) };
+        Petsc::check_error(self.petsc.world(), ierr)?;
+
+        Ok(if unsafe { set.assume_init().into() } { unsafe { opt_val.assume_init() } } 
+            else { default } )
+    }
+
+    /// Gets the integer value for a particular option in the database.
+    pub fn options_int(&mut self, opt: &str, text: &str, man: &str, default: PetscInt) -> Result<PetscInt> {
+        let opt_cs = CString::new(opt).expect("`CString::new` failed");
+        let text_cs = CString::new(text).expect("`CString::new` failed");
+        let man_cs = CString::new(man).expect("`CString::new` failed");
+        let mut opt_val = MaybeUninit::uninit();
+        let mut set = MaybeUninit::uninit();
+        let ierr = unsafe { 
+            petsc_raw::PetscOptionsInt_Private(self.petsc_opt_obj.as_mut_ptr(), opt_cs.as_ptr(),
+            text_cs.as_ptr(), man_cs.as_ptr(), default, opt_val.as_mut_ptr(), set.as_mut_ptr(),
+            PetscInt::MIN, PetscInt::MAX) };
+        Petsc::check_error(self.petsc.world(), ierr)?;
+
+        Ok(if unsafe { set.assume_init().into() } { unsafe { opt_val.assume_init() } } 
+            else { default } )
+    }
+
+    /// Gets the Logical (true or false) value for a particular option in the database.
+    ///
+    /// Note, TRUE, true, YES, yes, no string, and 1 all translate to `true`.
+    /// FALSE, false, NO, no, and 0 all translate to `false`
+    pub fn options_bool(&mut self, opt: &str, text: &str, man: &str, default: bool) -> Result<bool> {
+        let opt_cs = CString::new(opt).expect("`CString::new` failed");
+        let text_cs = CString::new(text).expect("`CString::new` failed");
+        let man_cs = CString::new(man).expect("`CString::new` failed");
+        let mut opt_val = MaybeUninit::uninit();
+        let mut set = MaybeUninit::uninit();
+        let ierr = unsafe { 
+            petsc_raw::PetscOptionsBool_Private(self.petsc_opt_obj.as_mut_ptr(), opt_cs.as_ptr(),
+            text_cs.as_ptr(), man_cs.as_ptr(), default.into(), opt_val.as_mut_ptr(), set.as_mut_ptr()) };
+        Petsc::check_error(self.petsc.world(), ierr)?;
+
+        Ok(if unsafe { set.assume_init().into() } { unsafe { opt_val.assume_init().into() } } 
+            else { default } )
+    }
+
+    /// Gets the floating point value for a particular option in the database..
+    pub fn options_real(&mut self, opt: &str, text: &str, man: &str, default: PetscReal) -> Result<PetscReal> {
+        let opt_cs = CString::new(opt).expect("`CString::new` failed");
+        let text_cs = CString::new(text).expect("`CString::new` failed");
+        let man_cs = CString::new(man).expect("`CString::new` failed");
+        let mut opt_val = MaybeUninit::uninit();
+        let mut set = MaybeUninit::uninit();
+        let ierr = unsafe { 
+            petsc_raw::PetscOptionsReal_Private(self.petsc_opt_obj.as_mut_ptr(), opt_cs.as_ptr(),
+            text_cs.as_ptr(), man_cs.as_ptr(), default, opt_val.as_mut_ptr(), set.as_mut_ptr()) };
+        Petsc::check_error(self.petsc.world(), ierr)?;
+
+        Ok(if unsafe { set.assume_init().into() } { unsafe { opt_val.assume_init() } } 
+            else { default } )
+    }
+
+    /// Gets the string value for a particular option in the database.
+    ///
+    /// Gets, at most, 127 characters.
+    pub fn options_string(&mut self, opt: &str, text: &str, man: &str, default: &str) -> Result<String> {
+        let opt_cs = CString::new(opt).expect("`CString::new` failed");
+        let text_cs = CString::new(text).expect("`CString::new` failed");
+        let man_cs = CString::new(man).expect("`CString::new` failed");
+        let default_cs = CString::new(default).expect("`CString::new` failed");
+        const BUF_LEN: usize = 128;
+        let mut buf = [0 as u8; BUF_LEN];
+        let mut set = MaybeUninit::uninit();
+        let ierr = unsafe { 
+            petsc_raw::PetscOptionsString_Private(self.petsc_opt_obj.as_mut_ptr(), opt_cs.as_ptr(),
+            text_cs.as_ptr(), man_cs.as_ptr(), default_cs.as_ptr(), buf.as_mut_ptr() as *mut _,
+            BUF_LEN as u64, set.as_mut_ptr()) };
+        Petsc::check_error(self.petsc.world(), ierr)?;
+
+        Ok(if unsafe { set.assume_init().into() } {
+            let nul_term = buf.iter().position(|&v| v == 0).unwrap();
+            let c_str: &CStr = CStr::from_bytes_with_nul(&buf[..nul_term+1]).unwrap();
+            let str_slice: &str = c_str.to_str().unwrap();
+            let string: String = str_slice.to_owned();
+            string
+        } else {
+            default.to_owned()
+        })
+    }
+
+    /// Gets an option in the database (as a string), then converts to type `E`.
+    ///
+    /// Note, If the [`from_str`](std::str::FromStr::from_str()) fails, then
+    /// [`default()`](Default::default()) is used.
+    pub fn options_from_string<E>(&mut self, opt: &str, text: &str, man: &str, default: E) -> Result<E>
+    where
+        E: Default + std::str::FromStr + Display,
+    {
+        let as_str = self.options_string(opt, text, man, &default.to_string())?;
+        // TODO: or should we error instead of default
+        Ok(E::from_str(as_str.as_str()).unwrap_or(E::default()))
+    }
+}
+
+impl Drop for PetscOptBuilder<'_, '_, '_> {
+    fn drop(&mut self) {
+        let ierr = unsafe { petsc_raw::PetscOptionsEnd_Private(self.petsc_opt_obj.as_mut_ptr()) };
+        let _ = Petsc::check_error( self.petsc.world(), ierr); // TODO: should I unwrap or what idk?
     }
 }
 
@@ -676,9 +833,40 @@ impl Petsc {
 
     /// Gets multiple values from the options database.
     ///
-    /// Uses [`PetscOpt::from_petsc()`].
-    pub fn options_try_get<T: PetscOpt>(&self) -> Result<T> {
-        PetscOpt::from_petsc(self)
+    /// Uses [`PetscOpt::from_petsc_opt_builder()`].
+    ///
+    /// Is the same as [`Petsc::options_build()`] but with all option arguments being `None` and
+    /// `title` being `"Program Option"`.
+    pub fn options_get<T: PetscOpt>(&self) -> Result<T> {
+        let title_cs = CString::new("Program Option").expect("`CString::new` failed");
+        let mut petsc_opt_obj = MaybeUninit::<petsc_sys::PetscOptionItems>::zeroed();
+        unsafe { &mut *petsc_opt_obj.as_mut_ptr() }.count = 1;
+        let mut pob = PetscOptBuilder::new(self, &mut petsc_opt_obj, None, &title_cs, None)?;
+        PetscOpt::from_petsc_opt_builder(&mut pob)
+    }
+
+    /// Creates a [`PetscOptBuilder`] to facilitates setting command line arguments.
+    pub fn options_build<'strlt1, 'strlt2, T: PetscOpt>(&self, prefix: impl Into<Option<&'strlt1 str>>,
+        title: &str, man_section: impl Into<Option<&'strlt2 str>>) -> Result<T>
+    {
+        let prefix_cs = prefix.into().map(|prefix| CString::new(prefix).expect("`CString::new` failed"));
+        let prefix_csr = prefix_cs.as_ref().map(|cs| cs.deref());
+        let title_cs = CString::new(title).expect("`CString::new` failed");
+        let sec_cs = man_section.into().map(|man_section| CString::new(man_section).expect("`CString::new` failed"));
+        let sec_csr = sec_cs.as_ref().map(|cs| cs.deref());
+
+        let mut petsc_opt_obj = MaybeUninit::<petsc_sys::PetscOptionItems>::zeroed();
+
+        for c in if unsafe { petsc_sys::PetscOptionsPublish }.into() {-1} else {1} .. 1 {
+            unsafe { &mut *petsc_opt_obj.as_mut_ptr() }.count = c;
+            let mut pob = PetscOptBuilder::new(self, &mut petsc_opt_obj, prefix_csr, &title_cs, sec_csr)?;
+
+            let _ = T::from_petsc_opt_builder(&mut pob)?;
+        }
+
+        unsafe { &mut *petsc_opt_obj.as_mut_ptr() }.count = 1;
+        let mut pob = PetscOptBuilder::new(self, &mut petsc_opt_obj, prefix_csr, &title_cs, sec_csr)?;
+        PetscOpt::from_petsc_opt_builder(&mut pob)
     }
 
     /// Creates an empty vector object.
@@ -844,10 +1032,10 @@ pub(crate) trait PetscObjectPrivate<'a, PT>: PetscObject<'a, PT> {
 /// }
 /// 
 /// impl PetscOpt for Opt {
-///     fn from_petsc(petsc: &Petsc) -> petsc_rs::Result<Self> {
-///         let m = petsc.options_try_get_int("-m")?.unwrap_or(8);
-///         let n = petsc.options_try_get_int("-n")?.unwrap_or(7);
-///         let view_exact_sol = petsc.options_try_get_bool("-view_exact_sol")?.unwrap_or(false);
+///     fn from_petsc_opt_builder(pob: &mut PetscOptBuilder) -> petsc_rs::Result<Self> {
+///         let m = pob.options_int("-m", "The size `m`", "doc-test", 8)?;
+///         let n = pob.options_int("-n", "The size `n`", "doc-test", 7)?;
+///         let view_exact_sol = pob.options_bool("-view_exact_sol", "Output the solution for verification", "doc-test", false)?;
 ///         Ok(Opt { m, n, view_exact_sol })
 ///     }
 /// }
@@ -857,7 +1045,7 @@ pub(crate) trait PetscObjectPrivate<'a, PT>: PetscObject<'a, PT> {
 ///     .args(std::env::args())
 ///     .init()?;
 ///
-/// let Opt { m, n, view_exact_sol } = Opt::from_petsc(&petsc)?;
+/// let Opt { m, n, view_exact_sol } = petsc.options_get()?;
 /// # Ok(())
 /// # }
 /// ```
@@ -865,8 +1053,8 @@ pub trait PetscOpt
 where
     Self: Sized
 {
-    /// Builds the struct from a [`Petsc`] object.
-    fn from_petsc(petsc: &Petsc) -> Result<Self>;
+    /// Builds the struct from a [`PetscOptBuilder`] object.
+    fn from_petsc_opt_builder(petsc: &mut PetscOptBuilder) -> Result<Self>;
 }
 
 // We want to expose the complex type using the num-complex Complex type

@@ -38,11 +38,11 @@ struct Opt {
 }
 
 impl PetscOpt for Opt {
-    fn from_petsc(petsc: &Petsc) -> petsc_rs::Result<Self> {
-        let m = petsc.options_try_get_int("-m")?.unwrap_or(8);
-        let n = petsc.options_try_get_int("-n")?.unwrap_or(7);
-        let view_stuff = petsc.options_try_get_bool("-view_stuff")?.unwrap_or(false);
-        let num_elems = petsc.options_try_get_int("-k")?.unwrap_or(10);
+    fn from_petsc_opt_builder(pob: &mut PetscOptBuilder) -> petsc_rs::Result<Self> {
+        let m = pob.options_int("-m", "", "sw-ex1", 8)?;
+        let n = pob.options_int("-n", "", "sw-ex1", 7)?;
+        let view_stuff = pob.options_bool("-view_stuff", "", "sw-ex1", false)?;
+        let num_elems = pob.options_int("-k", "", "sw-ex1", 10)?;
         Ok(Opt { m, n, view_stuff, num_elems })
     }
 }
@@ -69,7 +69,7 @@ fn main() -> petsc_rs::Result<()> {
         .help_msg(HELP_MSG)
         .init()?;
 
-    let Opt { m, n, view_stuff, num_elems } = Opt::from_petsc(&petsc)?;
+    let Opt { m, n, view_stuff, num_elems } = petsc.options_get()?;
 
     // or init with no options
     // let petsc = Petsc::init_no_args()?;

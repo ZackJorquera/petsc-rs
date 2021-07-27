@@ -33,9 +33,9 @@ struct Opt {
 }
 
 impl PetscOpt for Opt {
-    fn from_petsc(petsc: &Petsc) -> petsc_rs::Result<Self> {
-        let k = petsc.options_try_get_int("-k")?.unwrap_or(1);
-        let e = petsc.options_try_get_real("-e")?.unwrap_or(0.99);
+    fn from_petsc_opt_builder(pob: &mut PetscOptBuilder) -> petsc_rs::Result<Self> {
+        let k = pob.options_int("-k", "", "ksp-ex25", 1)?;
+        let e = pob.options_real("-e", "", "ksp-ex25", 0.99)?;
         Ok(Opt { k, e })
     }
 }
@@ -46,7 +46,7 @@ fn main() -> petsc_rs::Result<()> {
         .help_msg(HELP_MSG)
         .init()?;
         
-    let Opt {k, e} = Opt::from_petsc(&petsc)?;
+    let Opt {k, e} = petsc.options_get()?;
 
     petsc_println!(petsc.world(), "(petsc_println!) Hello parallel world of {} processes!", petsc.world().size() )?;
 

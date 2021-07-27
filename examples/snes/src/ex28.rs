@@ -40,9 +40,9 @@ struct Opt {
 }
 
 impl PetscOpt for Opt {
-    fn from_petsc(petsc: &Petsc) -> petsc_rs::Result<Self> {
-        let problem_type = petsc.options_try_get_int("-problem_type")?.unwrap_or(0);
-        let pass_dm = petsc.options_try_get_bool("-pass_dm")?.unwrap_or(false);
+    fn from_petsc_opt_builder(pob: &mut PetscOptBuilder) -> petsc_rs::Result<Self> {
+        let problem_type = pob.options_int("-problem_type", "", "snes-ex28", 0)?;
+        let pass_dm = pob.options_bool("-pass_dm", "", "snes-ex28", false)?;
         Ok(Opt { problem_type, pass_dm })
     }
 }
@@ -53,7 +53,7 @@ fn main() -> petsc_rs::Result<()> {
         .help_msg(HELP_MSG)
         .init()?;
     
-    let Opt { problem_type, pass_dm } = Opt::from_petsc(&petsc)?;
+    let Opt { problem_type, pass_dm } = petsc.options_get()?;
 
     let mut dau = DM::da_create_1d(petsc.world(), DMBoundaryType::DM_BOUNDARY_NONE, 10, 1, 1, None)?;
     // DMSetOptionsPrefix(dau,"u_");

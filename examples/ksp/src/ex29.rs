@@ -72,12 +72,12 @@ struct Opt {
 }
 
 impl PetscOpt for Opt {
-    fn from_petsc(petsc: &Petsc) -> petsc_rs::Result<Self> {
-        let rho = petsc.options_try_get_real("-rho")?.unwrap_or(1.0);
-        let nu = petsc.options_try_get_real("-nu")?.unwrap_or(0.1);
-        let bc_type = petsc.options_try_get_from_string("-bc_type")?.unwrap_or(BCType::DIRICHLET);
-        let test_solver = petsc.options_try_get_bool("-test_solver")?.unwrap_or(false);
-        let check_matis = petsc.options_try_get_bool("-check_matis")?.unwrap_or(false);
+    fn from_petsc_opt_builder(pob: &mut PetscOptBuilder) -> petsc_rs::Result<Self> {
+        let rho = pob.options_real("-rho", "", "ksp-ex29", 1.0)?;
+        let nu = pob.options_real("-nu", "", "ksp-ex29", 0.1)?;
+        let bc_type = pob.options_from_string("-bc_type", "", "ksp-ex29", BCType::DIRICHLET)?;
+        let test_solver = pob.options_bool("-test_solver", "", "ksp-ex29", false)?;
+        let check_matis = pob.options_bool("-check_matis", "", "ksp-ex29", false)?;
         Ok(Opt { rho, nu, bc_type, test_solver, check_matis })
     }
 }
@@ -88,7 +88,7 @@ fn main() -> petsc_rs::Result<()> {
         .help_msg(HELP_MSG)
         .init()?;
 
-    let Opt { rho, nu, bc_type, test_solver: _test_solver, check_matis } = Opt::from_petsc(&petsc)?;
+    let Opt { rho, nu, bc_type, test_solver: _test_solver, check_matis } = petsc.options_get()?;
 
     petsc_println!(petsc.world(), "(petsc_println!) Hello parallel world of {} processes!", petsc.world().size() )?;
 

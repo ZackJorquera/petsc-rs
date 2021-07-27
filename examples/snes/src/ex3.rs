@@ -24,14 +24,14 @@ struct Opt {
 }
 
 impl PetscOpt for Opt {
-    fn from_petsc(petsc: &Petsc) -> petsc_rs::Result<Self> {
-        let n = petsc.options_try_get_int("-n")?.unwrap_or(5);
-        let test_jacobian_domain_error = petsc.options_try_get_bool("-test_jacobian_domain_error")?.unwrap_or(false);
-        let view_initial = petsc.options_try_get_bool("-view_initial")?.unwrap_or(false);
-        let user_precond = petsc.options_try_get_bool("-user_precond")?.unwrap_or(false);
-        let post_check_iterates = petsc.options_try_get_bool("-post_check_iterates")?.unwrap_or(false);
-        let pre_check_iterates = petsc.options_try_get_bool("-pre_check_iterates")?.unwrap_or(false);
-        let check_tol = petsc.options_try_get_real("-check_tol")?.unwrap_or(1.0);
+    fn from_petsc_opt_builder(pob: &mut PetscOptBuilder) -> petsc_rs::Result<Self> {
+        let n = pob.options_int("-n", "", "snes-ex3", 5)?;
+        let test_jacobian_domain_error = pob.options_bool("-test_jacobian_domain_error", "", "snes-ex3", false)?;
+        let view_initial = pob.options_bool("-view_initial", "", "snes-ex3", false)?;
+        let user_precond = pob.options_bool("-user_precond", "", "snes-ex3", false)?;
+        let post_check_iterates = pob.options_bool("-post_check_iterates", "", "snes-ex3", false)?;
+        let pre_check_iterates = pob.options_bool("-pre_check_iterates", "", "snes-ex3", false)?;
+        let check_tol = pob.options_real("-check_tol", "", "snes-ex3", 1.0)?;
         Ok(Opt { n, test_jacobian_domain_error, view_initial, user_precond, post_check_iterates,
             pre_check_iterates, check_tol })
     }
@@ -44,7 +44,7 @@ fn main() -> petsc_rs::Result<()> {
         .init()?;
     
     let Opt { n, test_jacobian_domain_error, view_initial, user_precond, post_check_iterates,
-            pre_check_iterates, check_tol } = Opt::from_petsc(&petsc)?;
+            pre_check_iterates, check_tol } = petsc.options_get()?;
 
     let h = 1.0/(PetscScalar::from(n as PetscReal) - 1.0);
 
