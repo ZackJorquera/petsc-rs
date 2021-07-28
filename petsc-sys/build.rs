@@ -92,6 +92,14 @@ fn create_type_enum_and_table(name: Ident, items: Vec<ItemConst>) -> proc_macro2
             )*
         ];
 
+        impl ::std::fmt::Display for #enum_ident {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+                let type_cstr = unsafe {
+                    ::std::ffi::CStr::from_ptr(#table_ident[*self as usize].as_ptr() as *const _) };
+                write!(f, "{}", type_cstr.to_str().unwrap())
+            }
+        }
+
         #[test]
         fn #fn_ident() {
             #(

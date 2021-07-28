@@ -275,7 +275,7 @@ fn main() -> petsc_rs::Result<()> {
                 form_jac_u(&petsc, (mx_u, xm_u, xs_u, xs_k, gxs_u), (&dms[0], &dms[1]), &u_loc, &k_loc,
                     &mut *jac.get_local_sub_matrix_mut(is[0].clone(), is[0].clone())?)?;
 
-                if !jac.type_compare("nest")? {
+                if !jac.type_compare(MatType::MATNEST)? {
                     form_jac_uk(&petsc, (mx_u, xm_u, xs_u, xs_k, gxs_u, gxs_k), (&dms[0], &dms[1]), &u_loc, &k_loc,
                         &mut *jac.get_local_sub_matrix_mut(is[0].clone(), is[1].clone())?)?;
 

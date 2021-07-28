@@ -286,7 +286,7 @@ impl PetscBuilder
 
         // We only need to drop the following 3 objects to clean up (and also argc)
         let cstr_args_owned = self.args.as_ref().map_or(vec![], |args| 
-            args.iter().map(|arg| CString::new(arg.to_string()).expect("CString::new failed"))
+            args.iter().map(|arg| CString::new(arg.deref()).expect("CString::new failed"))
                 .collect::<Vec<CString>>());
         let mut c_args_owned = cstr_args_owned.iter().map(|arg| arg.as_ptr() as *mut _)
             .collect::<Vec<*mut c_char>>();
@@ -296,11 +296,11 @@ impl PetscBuilder
         let c_args_p = self.args.as_ref().map_or(std::ptr::null_mut(), |_| &mut *c_args_boxed as *mut _);
 
         // Note, the file string does not need to outlive the `Petsc` type
-        let file_cstring = self.file.map(|ref f| CString::new(f.to_string()).ok()).flatten();
+        let file_cstring = self.file.map(|ref f| CString::new(f.deref()).ok()).flatten();
         let file_c_str = file_cstring.as_ref().map_or_else(|| std::ptr::null(), |v| v.as_ptr());
 
         // We dont have to leak the file string
-        let help_cstring = self.help_msg.map(|ref h| CString::new(h.to_string()).ok()).flatten();
+        let help_cstring = self.help_msg.map(|ref h| CString::new(h.deref()).ok()).flatten();
         let help_c_str = help_cstring.as_ref().map_or_else(|| std::ptr::null(), |v| v.as_ptr());
 
         let drop_world_first;
@@ -751,8 +751,8 @@ impl Petsc {
     }
 
     /// Gets the integer value for a particular option in the database.
-    pub fn options_try_get_int<T: ToString>(&self, name: T) -> Result<Option<PetscInt>> {
-        let name_cs = CString::new(name.to_string()).expect("`CString::new` failed");
+    pub fn options_try_get_int(&self, name: &str) -> Result<Option<PetscInt>> {
+        let name_cs = CString::new(name).expect("`CString::new` failed");
         let mut opt_val = MaybeUninit::uninit();
         let mut set = MaybeUninit::uninit();
         let ierr = unsafe { 
@@ -768,8 +768,8 @@ impl Petsc {
     ///
     /// Note, TRUE, true, YES, yes, no string, and 1 all translate to `true`.
     /// FALSE, false, NO, no, and 0 all translate to `false`
-    pub fn options_try_get_bool<T: ToString>(&self, name: T) -> Result<Option<bool>> {
-        let name_cs = CString::new(name.to_string()).expect("`CString::new` failed");
+    pub fn options_try_get_bool(&self, name: &str) -> Result<Option<bool>> {
+        let name_cs = CString::new(name).expect("`CString::new` failed");
         let mut opt_val = MaybeUninit::uninit();
         let mut set = MaybeUninit::uninit();
         let ierr = unsafe { 
@@ -782,8 +782,8 @@ impl Petsc {
     }
 
     /// Gets the floating point value for a particular option in the database..
-    pub fn options_try_get_real<T: ToString>(&self, name: T) -> Result<Option<PetscReal>> {
-        let name_cs = CString::new(name.to_string()).expect("`CString::new` failed");
+    pub fn options_try_get_real(&self, name: &str) -> Result<Option<PetscReal>> {
+        let name_cs = CString::new(name).expect("`CString::new` failed");
         let mut opt_val = MaybeUninit::uninit();
         let mut set = MaybeUninit::uninit();
         let ierr = unsafe { 
@@ -798,8 +798,8 @@ impl Petsc {
     /// Gets the string value for a particular option in the database.
     ///
     /// Gets, at most, 127 characters.
-    pub fn options_try_get_string<T: ToString>(&self, name: T) -> Result<Option<String>> {
-        let name_cs = CString::new(name.to_string()).expect("`CString::new` failed");
+    pub fn options_try_get_string(&self, name: &str) -> Result<Option<String>> {
+        let name_cs = CString::new(name).expect("`CString::new` failed");
         // TODO: is this big enough
         const BUF_LEN: usize = 128;
         let mut buf = [0 as u8; BUF_LEN];
@@ -824,7 +824,7 @@ impl Petsc {
     ///
     /// Note, If the [`from_str`](std::str::FromStr::from_str()) fails, then
     /// [`default()`](Default::default()) is used.
-    pub fn options_try_get_from_string<T: ToString, E>(&self, name: T) -> Result<Option<E>>
+    pub fn options_try_get_from_string<E>(&self, name: &str) -> Result<Option<E>>
     where
         E: Default + std::str::FromStr,
     {
@@ -995,8 +995,8 @@ pub trait PetscObject<'a, PT>: PetscAsRaw<Raw = *mut PT> {
     fn world(&self) -> &'a UserCommunicator;
 
     /// Sets a string name associated with a PETSc object.
-    fn set_name<T: ::std::string::ToString>(&mut self, name: T) -> crate::Result<()> {
-        let name_cs = ::std::ffi::CString::new(name.to_string()).expect("`CString::new` failed");
+    fn set_name(&mut self, name: &str) -> crate::Result<()> {
+        let name_cs = ::std::ffi::CString::new(name).expect("`CString::new` failed");
         
         let ierr = unsafe { crate::petsc_raw::PetscObjectSetName(self.as_raw() as *mut crate::petsc_raw::_p_PetscObject, name_cs.as_ptr()) };
         Petsc::check_error(self.world(), ierr)
@@ -1014,8 +1014,8 @@ pub trait PetscObject<'a, PT>: PetscAsRaw<Raw = *mut PT> {
     }
 
     /// Determines whether a PETSc object is of a particular type (given as a string). 
-    fn type_compare<T: ToString>(&self, type_name: T) -> Result<bool> {
-        let type_name_cs = ::std::ffi::CString::new(type_name.to_string()).expect("`CString::new` failed");
+    fn type_compare_str(&self, type_name: &str) -> Result<bool> {
+        let type_name_cs = ::std::ffi::CString::new(type_name).expect("`CString::new` failed");
         let mut tmp = ::std::mem::MaybeUninit::<crate::petsc_raw::PetscBool>::uninit();
 
         let ierr = unsafe { crate::petsc_raw::PetscObjectTypeCompare(
@@ -1028,8 +1028,8 @@ pub trait PetscObject<'a, PT>: PetscAsRaw<Raw = *mut PT> {
     }
 
     /// Sets the prefix used for searching for all options of PetscObjectType in the database. 
-    fn set_options_prefix<T: ::std::string::ToString>(&mut self, prefix: T) -> crate::Result<()> {
-        let name_cs = ::std::ffi::CString::new(prefix.to_string()).expect("`CString::new` failed");
+    fn set_options_prefix(&mut self, prefix: &str) -> crate::Result<()> {
+        let name_cs = ::std::ffi::CString::new(prefix).expect("`CString::new` failed");
         
         let ierr = unsafe { crate::petsc_raw::PetscObjectSetOptionsPrefix(self.as_raw() as *mut crate::petsc_raw::_p_PetscObject, name_cs.as_ptr()) };
         Petsc::check_error(self.world(), ierr)

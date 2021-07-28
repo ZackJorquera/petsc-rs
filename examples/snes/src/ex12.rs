@@ -336,7 +336,7 @@ fn setup_problem(dm: &mut DM, opt: &Opt) -> petsc_rs::Result<(
 
             if opt.bc_type == BCType::NEUMANN {
                 let label = dm.get_label("boundary")?.unwrap();
-                let bd = dm.add_boundary_natural("wall", &label, slice::from_ref(&id), 0, &[])?;
+                let bd = dm.add_boundary_natural("wall", &label, slice::from_ref(&id), 0, &[], |_, _, _, _, _| Ok(()))?;
                 let (mut wf, _, _, _, _, _, _) = dm.try_get_ds_mut().unwrap().get_boundary_info(bd)?;
                 petsc_weak_form_set_index_bd_residual(&mut wf, &label, id, f0_bd_u)?;
             }
@@ -347,7 +347,7 @@ fn setup_problem(dm: &mut DM, opt: &Opt) -> petsc_rs::Result<(
 
             if opt.bc_type == BCType::NEUMANN {
                 let label = dm.get_label("boundary")?.unwrap();
-                let bd = dm.add_boundary_natural("wall", &label, slice::from_ref(&id), 0, &[])?;
+                let bd = dm.add_boundary_natural("wall", &label, slice::from_ref(&id), 0, &[], |_, _, _, _, _| Ok(()))?;
                 let (mut wf, _, _, _, _, _, _) = dm.try_get_ds_mut().unwrap().get_boundary_info(bd)?;
                 petsc_weak_form_set_index_bd_residual(&mut wf, &label, id, f0_bd_u)?;
             }

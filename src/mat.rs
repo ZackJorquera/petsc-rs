@@ -689,6 +689,11 @@ impl<'a> Mat<'a> {
         let ierr = unsafe { petsc_raw::MatSetType(self.mat_p, option_cstr.as_ptr() as *const _) };
         Petsc::check_error(self.world, ierr)
     }
+
+    /// Determines whether a PETSc [`Mat`] is of a particular type.
+    pub fn type_compare(&self, type_kind: MatType) -> Result<bool> {
+        self.type_compare_str(&type_kind.to_string())
+    }
 }
 
 impl<'a> Clone for Mat<'a> {

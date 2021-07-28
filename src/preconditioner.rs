@@ -260,8 +260,8 @@ impl<'a, 'tl> PC<'a, 'tl> {
     ///
     /// * `splitname` - name of this split, if `None` the number of the split is used.
     /// * `is` - the index set that defines the vector elements in this field 
-    pub fn field_split_set_is<T: ToString>(&mut self, splitname: Option<T>, is: IS) -> Result<()> {
-        let splitname_cs = splitname.map(|to_str|
+    pub fn field_split_set_is<'strl>(&mut self, splitname: impl Into<Option<&'strl str>>, is: IS) -> Result<()> {
+        let splitname_cs = splitname.into().map(|to_str|
             CString::new(to_str.to_string()).expect("`CString::new` failed"));
 
         let ierr = unsafe { petsc_raw::PCFieldSplitSetIS(

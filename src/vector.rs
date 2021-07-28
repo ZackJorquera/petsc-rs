@@ -28,14 +28,14 @@ pub struct Vector<'a> {
     pub(crate) vec_p: *mut petsc_raw::_p_Vec, // I could use Vec which is the same thing, but i think using a pointer is more clear
 }
 
-/// A immutable view of a Vector with Deref to slice.
+/// A immutable view of a Vector with Deref to [`ndarray::ArrayView`].
 pub struct VectorView<'a, 'b> {
     pub(crate) vec: &'b Vector<'a>,
     pub(crate) array: *const PetscScalar,
     pub(crate) ndarray: ArrayView<'b, PetscScalar, ndarray::IxDyn>,
 }
 
-/// A mutable view of a Vector with Deref to slice.
+/// A mutable view of a Vector with Deref to [`ndarray::ArrayViewMut`].
 pub struct VectorViewMut<'a, 'b> {
     pub(crate) vec: &'b mut Vector<'a>,
     pub(crate) array: *mut PetscScalar,
