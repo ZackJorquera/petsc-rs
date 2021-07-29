@@ -6,15 +6,13 @@ PETSc is intended for use in large-scale application projects, many ongoing comp
 
 ## Usage
 
-To use `petsc-rs` from a Rust package, the following can be put in your `Cargo.toml`.
+To use `petsc-rs` from a Rust package, the following can be put in your `Cargo.toml`. Note, `petsc-rs` is supported for rust 1.54 and above.
 ```toml
 [dependencies]
 petsc-rs = { git = "https://github.com/ZackJorquera/petsc-rs/", branch = "main" }
 ```
 
-Note, `petsc-rs` is supported for rust 1.52 and above. However, some of the examples and documentation examples require rust 1.53 or above.
-
-In order for `petsc-rs` to work correctly, you need to [download PETSc](https://petsc.org/release/download/) (version 3.15 or above, using the main branch is recommended). Then you need to [configure and install PETSc](https://petsc.org/release/install/). I haven't tested all the different ways to install PETSc, but the following works for `petsc-rs`. Note, it is required that you install an MPI library globally and not have PETSc install it for you. This is needed by the [rsmpi](https://github.com/rsmpi/rsmpi) crate (look at its [requirements](https://github.com/rsmpi/rsmpi#requirements) for more information). Im using `openmpi` 3.1.3, which gives me `mpicc` and `mpicxx`.
+In order for `petsc-rs` to work correctly, you need to [download PETSc](https://petsc.org/release/download/). Then you need to [configure and install PETSc](https://petsc.org/release/install/). Note, `petsc-rs` requires PETSc version `3.15` or the main branch (prerelease version `3.16-dev.0`). Using the main branch is unstable as new breaking changes could be added. I haven't tested all the different ways to install PETSc, but the following I know works for `petsc-rs`. Note, it is required that you install an MPI library globally and not have PETSc install it for you. This is needed by the [rsmpi](https://github.com/rsmpi/rsmpi) crate (look at its [requirements](https://github.com/rsmpi/rsmpi#requirements) for more information). Im using `openmpi` 3.1.3, which gives me `mpicc` and `mpicxx`.
 ```text
 ./configure --with-cc=mpicc --with-cxx=mpicxx --download-f2cblaslapack --download-triangle --with-fc=0
 make all check
@@ -66,7 +64,7 @@ If you wish to use raw bindings from `petsc-sys` in the same crate that you are 
 petsc-sys = { git = "https://github.com/ZackJorquera/petsc-rs/", branch = "main", default-features = false }
 ```
 
-Note, `petsc-sys` has the same type related feature flags which `petsc-rs` will enable/disable. However, to avoid conflicts you should use `default-features = false` when importing `petsc-sys`.
+Note, `petsc-sys` has the same type related feature flags as `petsc-rs` and `petsc-rs` will pass it's flags to `petsc-sys`. To avoid conflicts you should use `default-features = false` when importing `petsc-sys` so that you don't accidentally enable any additional flags.
 
 ## Running PETSc Programs
 

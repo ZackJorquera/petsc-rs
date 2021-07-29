@@ -90,8 +90,10 @@ pub use petsc_raw::MatAssemblyType;
 pub use petsc_raw::MatOption;
 pub use petsc_raw::MatDuplicateOption;
 pub use petsc_raw::MatStencil;
-pub use petsc_raw::MatTypeEnum as MatType;
 use petsc_raw::MatReuse;
+
+/// [`Mat`] Type
+pub type MatType = crate::petsc_raw::MatTypeEnum;
 
 impl<'a> Mat<'a> {
     /// Same at [`Petsc::mat_create()`].

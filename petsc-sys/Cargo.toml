@@ -20,12 +20,12 @@ num-complex = { version = "0.4", optional = true }
 
 [build-dependencies]
 cc = "1.0"
-bindgen = "0.58"
+bindgen = "0.59"
 pkg-config = "0.3"
 syn = { version = "1.0", features = ["full"] }
 quote = "1.0"
 proc-macro2 = "1.0"
-build-probe-mpi = "*"
+build-probe-mpi = {git = "https://github.com/rsmpi/rsmpi.git", rev = "82e1d35", default-features = false }
 semver = "1.0"
-build-probe-petsc = { path = "../build-probe-petsc"}
+build-probe-petsc = { path = "../build-probe-petsc" }
 regex = "1.5"

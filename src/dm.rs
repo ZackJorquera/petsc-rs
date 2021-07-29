@@ -52,7 +52,7 @@ pub struct DM<'a, 'tl> {
     coord_dm: Option<Rc<DM<'a, 'tl>>>,
     coarse_dm: Option<Box<DM<'a, 'tl>>>,
 
-    fields: Option<Vec<(Option<DMLabel<'a>>, Field<'a, 'tl>)>>,
+    fields: Option<Vec<(Option<DMLabel<'a>>, FieldPriv<'a, 'tl>)>>,
 
     ds: Option<DS<'a, 'tl>>,
 
@@ -69,14 +69,107 @@ pub struct DMLabel<'a> {
 }
 
 /// The PetscFE class encapsulates a finite element discretization.
+///
 /// Each PetscFE object contains a PetscSpace, PetscDualSpace, and
 /// DMPlex in the classic Ciarlet triple representation. 
-pub struct Field<'a, 'tl> {
+pub struct FEDisc<'a, 'tl> {
     pub(crate) world: &'a UserCommunicator,
     pub(crate) fe_p: *mut petsc_raw::_p_PetscFE,
 
     space: Option<Space<'a>>,
     dual_space: Option<DualSpace<'a, 'tl>>,
+}
+
+/// The PetscFV class encapsulates a finite volume discretization.
+///
+/// TODO: implement
+pub struct FVDisc<'a> {
+    pub(crate) world: &'a UserCommunicator,
+    pub(crate) fv_p: *mut petsc_raw::_p_PetscFV,
+}
+
+/// PETSc object for defining a field on a mesh topology
+///
+/// TODO: implement
+pub struct DMField<'a> {
+    pub(crate) world: &'a UserCommunicator,
+    pub(crate) field_p: *mut petsc_raw::_p_DMField,
+}
+
+/// A enum that can represents types of discretization objects.
+///
+/// Many C API function that take a field, take it as a `PetscObject` to allow for
+/// multiple types of fields. This trait acts in the same way. An example of this trait
+/// being used is the method [`DM::add_field()`].
+pub enum Field<'a, 'tl> {
+    // TODO: what all do we except? Im not sure we should except DMField
+    /// The discretization object is [`FEDisc`]
+    FEDisc(FEDisc<'a, 'tl>),
+    /// The discretization object is [`FVDisc`]
+    FVDisc(FVDisc<'a>),
+    /// The discretization object is [`DMField`]
+    DMField(DMField<'a>),
+}
+
+enum FieldPriv<'a, 'tl> {
+    Known(Field<'a, 'tl>),
+    /// The discretization object is unknown, this is only use internally.
+    Unknown(crate::PetscObjectStruct<'a>),
+}
+
+unsafe impl PetscAsRaw for Field<'_, '_> {
+    type Raw = *mut petsc_raw::_p_PetscObject;
+
+    #[inline]
+    fn as_raw(&self) -> Self::Raw {
+        match self {
+            Field::FEDisc(f) => f.as_raw() as *mut _,
+            Field::FVDisc(f) => f.as_raw() as *mut _,
+            Field::DMField(f) => f.as_raw() as *mut _,
+        }
+    }
+}
+
+unsafe impl<'a> crate::PetscAsRawMut for Field<'_, '_> {
+    #[inline]
+    fn as_raw_mut(&mut self) -> *mut Self::Raw {
+        match self {
+            Field::FEDisc(f) => &mut f.as_raw() as *mut *mut _ as *mut _,
+            Field::FVDisc(f) => &mut f.as_raw() as *mut *mut _ as *mut _,
+            Field::DMField(f) => &mut f.as_raw() as *mut *mut _ as *mut _,
+        }
+    }
+} 
+
+impl<'a> crate::PetscObject<'a, petsc_raw::_p_PetscObject> for Field<'a, '_> {
+    #[inline]
+    fn world(&self) -> &'a mpi::topology::UserCommunicator {
+        match self {
+            Field::FEDisc(f) => f.world(),
+            Field::FVDisc(f) => f.world(),
+            Field::DMField(f) => f.world(),
+        }
+    }
+}
+
+impl<'a> crate::PetscObjectPrivate<'a, petsc_raw::_p_PetscObject> for Field<'a, '_> { }
+
+impl<'a, 'tl> Into<Field<'a, 'tl>> for FEDisc<'a, 'tl> {
+    fn into(self) -> Field<'a, 'tl> {
+        Field::FEDisc(self)
+    }
+}
+
+impl<'a, 'tl> Into<Field<'a, 'tl>> for FVDisc<'a> {
+    fn into(self) -> Field<'a, 'tl> {
+        Field::FVDisc(self)
+    }
+}
+
+impl<'a, 'tl> Into<Field<'a, 'tl>> for DMField<'a> {
+    fn into(self) -> Field<'a, 'tl> {
+        Field::DMField(self)
+    }
 }
 
 /// PETSc object that manages a discrete system, which is a set of
@@ -116,12 +209,19 @@ pub struct BorrowDM<'a, 'tl, 'bv> {
 pub type DMBoundaryType = crate::petsc_raw::DMBoundaryType;
 /// Determines if the stencil extends only along the coordinate directions, or also to the northeast, northwest etc.
 pub type DMDAStencilType = crate::petsc_raw::DMDAStencilType;
-/// DM Type
+/// [`DM`] Type
 pub type DMType = crate::petsc_raw::DMTypeEnum;
 /// Indicates what type of boundary condition is to be imposed
 ///
 /// <https://petsc.org/release/docs/manualpages/DM/DMBoundaryConditionType.html>
 pub type DMBoundaryConditionType = crate::petsc_raw::DMBoundaryConditionType;
+
+/// [`DMField`] Type
+pub type DMFieldType = crate::petsc_raw::DMFieldTypeEnum;
+/// [`FEDisc`] Type
+pub type FEDiscType = crate::petsc_raw::PetscFETypeEnum;
+/// [`FVDisc`] Type
+pub type FVDiscType = crate::petsc_raw::PetscFVTypeEnum;
 
 enum DMBoundaryTrampolineData<'tl> {
     BCFunc(Pin<Box<DMBoundaryFuncTrampolineData<'tl>>>),
@@ -197,7 +297,7 @@ impl<'a> Drop for DMLabel<'a> {
     }
 }
 
-impl<'a> Drop for Field<'a, '_> {
+impl<'a> Drop for FEDisc<'a, '_> {
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::PetscFEDestroy(&mut self.fe_p as *mut _) };
         let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
@@ -222,7 +322,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// Same as `DM { ... }` but sets all optional params to `None`
     pub(crate) fn new(world: &'a UserCommunicator, dm_p: *mut petsc_raw::_p_DM) -> Self {
         DM { world, dm_p, composite_dms: None, boundary_trampoline_data: None, fields: None,
-            ds: None, coord_dm: None, coarse_dm: None, aux_vec: None }
+            ds: None, coord_dm: None, coarse_dm: None, aux_vec: None, }
     }
 
     /// Creates an empty DM object. The type can then be set with [`DM::set_type()`].
@@ -1095,19 +1195,21 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// Add the discretization object for the given DM field 
     ///
     /// Note, The label indicates the support of the field, or is `None` for the entire mesh.
-    pub fn add_field(&mut self, label: impl Into<Option<DMLabel<'a>>>, field: Field<'a, 'tl>) -> Result<()> {
+    pub fn add_field(&mut self, label: impl Into<Option<DMLabel<'a>>>, field: impl Into<Field<'a, 'tl>>) -> Result<()> {
         // TODO: should we make label be an `Rc<DMLabel>`
         // TODO: what type does the dm need to be, if any?
+        let field = field.into();
         let is_correct_type = true; // self.type_compare(petsc_raw::DMTYPE_TABLE[DMType::DMCOMPOSITE as usize])?;
         if is_correct_type {
             let label: Option<DMLabel> = label.into();
-            let ierr = unsafe { petsc_raw::DMAddField(self.dm_p, label.as_ref().map_or(std::ptr::null_mut(), |l| l.dml_p), field.fe_p as *mut _) };
+            let ierr = unsafe { petsc_raw::DMAddField(self.dm_p, label.as_ref().map_or(std::ptr::null_mut(),
+                |l| l.dml_p), field.as_raw()) };
             Petsc::check_error(self.world, ierr)?;
 
             if let Some(f) = self.fields.as_mut() {
-                f.push((label, field));
+                f.push((label, FieldPriv::Known(field)));
             } else {
-                self.fields = Some(vec![(label, field)]);
+                self.fields = Some(vec![(label, FieldPriv::Known(field))]);
             }
 
             Ok(())
@@ -2040,8 +2142,8 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// // Most of this is just boilerplate
     /// let dim = dm.get_dimension()?;
     /// let simplex = dm.plex_is_simplex()?;
-    /// let mut fe1 = Field::create_default(dm.world(), dim, 1, simplex, None, None)?;
-    /// let mut fe2 = Field::create_default(dm.world(), dim, 1, simplex, None, None)?;
+    /// let mut fe1 = FEDisc::create_default(dm.world(), dim, 1, simplex, None, None)?;
+    /// let mut fe2 = FEDisc::create_default(dm.world(), dim, 1, simplex, None, None)?;
     /// dm.add_field(None, fe1)?;
     /// dm.add_field(None, fe2)?;
     /// # dm.view_with(None)?;
@@ -2417,10 +2519,11 @@ impl<'a, 'tl> DM<'a, 'tl> {
         Ok(())
     }
 
-    fn get_field_from_c_struct(&self, f: PetscInt) -> Result<(Option<DMLabel<'a>>, Field<'a, 'tl>)> { 
+    fn get_field_from_c_struct(&self, f: PetscInt) -> Result<(Option<DMLabel<'a>>, FieldPriv<'a, 'tl>)>
+    { 
         let mut dml_p = MaybeUninit::uninit();
-        let mut fe_p = MaybeUninit::uninit();
-        let ierr = unsafe { petsc_raw::DMGetField(self.dm_p, f, dml_p.as_mut_ptr(), fe_p.as_mut_ptr() as *mut _) };
+        let mut f_p = MaybeUninit::uninit();
+        let ierr = unsafe { petsc_raw::DMGetField(self.dm_p, f, dml_p.as_mut_ptr(), f_p.as_mut_ptr() as *mut _) };
         Petsc::check_error(self.world, ierr)?;
 
         let dm_label = NonNull::new(unsafe { dml_p.assume_init() } );
@@ -2429,10 +2532,9 @@ impl<'a, 'tl> DM<'a, 'tl> {
             unsafe { l.reference()?; }
         }
 
-        let mut field = Field::new(self.world, unsafe { fe_p.assume_init() });
+        let mut field = crate::PetscObjectStruct { world: self.world, po_p: unsafe { f_p.assume_init() } };
         unsafe { field.reference()?; }
-
-        Ok((label, field))
+        Ok((label, FieldPriv::Unknown(field)))
     }
 
     /// Get the coarse mesh from which this was obtained by refinement 
@@ -2591,10 +2693,10 @@ impl<'a, 'tl> DM<'a, 'tl> {
     }
 }
 
-impl<'a> Field<'a, '_> {
+impl<'a> FEDisc<'a, '_> {
     /// Same as `Field { ... }` but sets all optional params to `None`
     pub(crate) fn new(world: &'a UserCommunicator, fe_p: *mut petsc_raw::_p_PetscFE) -> Self {
-        Field { world, fe_p, space: None, dual_space: None }
+        FEDisc { world, fe_p, space: None, dual_space: None }
     }
 
     /// Create a Field for basic FEM computation.
@@ -2617,13 +2719,18 @@ impl<'a> Field<'a, '_> {
             fe_p.as_mut_ptr()) };
         Petsc::check_error(world, ierr)?;
 
-        Ok(Field::new(world, unsafe { fe_p.assume_init() }))
+        Ok(FEDisc::new(world, unsafe { fe_p.assume_init() }))
     }
 
     /// Copy both volumetric and surface quadrature from `other`.
-    pub fn copy_quadrature_from(&mut self, other: &Field) -> Result<()> {
+    pub fn copy_quadrature_from(&mut self, other: &FEDisc) -> Result<()> {
         let ierr = unsafe { petsc_raw::PetscFECopyQuadrature(other.fe_p, self.fe_p) };
         Petsc::check_error(self.world, ierr)
+    }
+
+    /// Determines whether a PETSc [`FEDisc`] is of a particular type.
+    pub fn type_compare(&self, type_kind: FEDiscType) -> Result<bool> {
+        self.type_compare_str(&type_kind.to_string())
     }
 }
 
@@ -2820,7 +2927,6 @@ impl<'a> DM<'a, '_> {
         DMSetFromOptions, pub set_from_options, takes mut, #[doc = "Sets various SNES and KSP parameters from user options."];
         DMSetUp, pub set_up, takes mut, #[doc = "Sets up the internal data structures for the later use of a nonlinear solver. This will be automatically called with [`SNES::solve()`](crate::snes::SNES::solve())."];
         DMGetDimension, pub get_dimension, output PetscInt, dim, #[doc = "Return the topological dimension of the DM"];
-        
         DMDAGetInfo, pub da_get_info, output PetscInt, dim, output PetscInt, bm, output PetscInt, bn, output PetscInt, bp, output PetscInt, m,
             output PetscInt, n, output PetscInt, p, output PetscInt, dof, output PetscInt, s, output DMBoundaryType, bx, output DMBoundaryType, by,
             output DMBoundaryType, bz, output DMDAStencilType, st,
@@ -2864,7 +2970,7 @@ impl_petsc_object_traits! { DMLabel, dml_p, petsc_raw::_p_DMLabel }
 
 impl_petsc_view_func!{ DMLabel, DMLabelView }
 
-impl<'a, 'tl> Field<'a, 'tl> {
+impl<'a, 'tl> FEDisc<'a, 'tl> {
     wrap_simple_petsc_member_funcs! {
         PetscFESetFromOptions, pub set_from_options, takes mut, #[doc = "sets parameters in a PetscFE from the options database"];
         PetscFESetUp, pub set_up, takes mut, #[doc = "Construct data structures for the PetscFE"];
@@ -2874,9 +2980,17 @@ impl<'a, 'tl> Field<'a, 'tl> {
     }
 }
 
-impl_petsc_object_traits! { Field, fe_p, petsc_raw::_p_PetscFE, '_ }
+impl_petsc_object_traits! { FEDisc, fe_p, petsc_raw::_p_PetscFE, '_ }
 
-impl_petsc_view_func!{ Field, PetscFEView, '_ }
+impl_petsc_view_func!{ FEDisc, PetscFEView, '_ }
+
+impl_petsc_object_traits! { FVDisc, fv_p, petsc_raw::_p_PetscFV }
+
+impl_petsc_view_func!{ FVDisc, PetscFVView }
+
+impl_petsc_object_traits! { DMField, field_p, petsc_raw::_p_DMField }
+
+impl_petsc_view_func!{ DMField, DMFieldView }
 
 impl_petsc_object_traits! { DS, ds_p, petsc_raw::_p_PetscDS, '_ }
 

@@ -123,16 +123,16 @@ pub mod prelude {
         PetscOptBuilder,
         petsc_println,
         petsc_println_all,
-        vector::{Vector, VecOption, },
+        vector::{Vector, VecOption, VectorType, },
         mat::{Mat, MatAssemblyType, MatOption, MatDuplicateOption, MatStencil, NullSpace, MatType },
-        ksp::{KSP, },
-        snes::{SNES, DomainOrPetscError::DomainErr, },
+        ksp::{KSP, KSPType, },
+        snes::{SNES, DomainOrPetscError::DomainErr, SNESType, },
         pc::{PC, PCType, },
-        dm::{DM, DMBoundaryType, DMDAStencilType, DMType, Field, DS, WeakForm, DMLabel,
-            DMBoundaryConditionType, },
-        indexset::{IS, },
-        viewer::{Viewer, PetscViewerFormat, },
-        spaces::{Space, },
+        dm::{DM, DMBoundaryType, DMDAStencilType, DMType, FEDisc, DS, WeakForm, DMLabel,
+            DMBoundaryConditionType, FVDisc, DMField, },
+        indexset::{IS, ISType, },
+        viewer::{Viewer, PetscViewerFormat, ViewerType, },
+        spaces::{Space, DualSpace, SpaceType, DualSpaceType},
         NormType,
         PetscOpt,
     };
@@ -1013,7 +1013,9 @@ pub trait PetscObject<'a, PT>: PetscAsRaw<Raw = *mut PT> {
         crate::Result::Ok(c_str.to_string_lossy().to_string())
     }
 
-    /// Determines whether a PETSc object is of a particular type (given as a string). 
+    /// Determines whether a PETSc object is of a particular type (given as a string).
+    ///
+    /// Some types might also implement `type_compare` which takes in the PETSc object specific type enum.
     fn type_compare_str(&self, type_name: &str) -> Result<bool> {
         let type_name_cs = ::std::ffi::CString::new(type_name).expect("`CString::new` failed");
         let mut tmp = ::std::mem::MaybeUninit::<crate::petsc_raw::PetscBool>::uninit();
@@ -1045,6 +1047,20 @@ pub(crate) trait PetscObjectPrivate<'a, PT>: PetscObject<'a, PT> {
         PetscObjectGetReference, get_reference_count, output PetscInt, cnt, #[doc = "Gets the current reference count for any PETSc object."];
     }
 }
+
+/// This is a internal template struct that is used when an object could have multiple types.
+///
+/// For example this is used in [`DM::get_field_from_c_struct()`]
+struct PetscObjectStruct<'a> {
+    pub(crate) world: &'a UserCommunicator,
+    pub(crate) po_p: *mut petsc_raw::_p_PetscObject,
+}
+
+impl_petsc_object_traits! { PetscObjectStruct, po_p, petsc_raw::_p_PetscObject }
+
+// Because the `view_with` function created is private it will yell at us
+// for not using it so until then I will comment this out:
+// impl_petsc_view_func!{ PetscObjectStruct, PetscObjectView }
 
 // TODO: make into a derive macro
 /// This trait is used to define how to get the options in a struct from the petsc object.
@@ -1144,16 +1160,9 @@ pub type PetscScalar = PetscReal;
 #[cfg(any(feature = "petsc-use-complex", feature = "petsc-sys/petsc-use-complex"))]
 pub type PetscScalar = Complex<PetscReal>;
 
-// This is a hack so that we can get around the arbitrary expressions in
-// key-value attributes issue. This wont be needed in rust v1.54
 #[cfg(doctest)]
 mod readme_doctest {
-    macro_rules! doctest_readme {
-        ($s:expr) => {
-            #[doc = $s]
-            extern {}
-        };
-    }
     // This will run the doc tests in README.md
-    doctest_readme!(include_str!("../README.md"));
+    #[doc = include_str!("../README.md")]
+    extern {}
 }

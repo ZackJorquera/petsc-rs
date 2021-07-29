@@ -32,6 +32,10 @@ use crate::{
 use mpi::topology::UserCommunicator;
 use mpi::traits::*;
 
+
+/// [`SNES`] Type
+pub type SNESType = crate::petsc_raw::SNESTypeEnum;
+
 /// Abstract PETSc object that manages all nonlinear solves
 pub struct SNES<'a, 'tl> {
     world: &'a UserCommunicator,
@@ -1106,6 +1110,11 @@ impl<'a, 'tl> SNES<'a, 'tl> {
         let ierr = unsafe { petsc_raw::SNESComputeJacobian(self.snes_p, x.vec_p, a_mat.mat_p,
             p_mat.into().map_or(a_mat.mat_p, |p| p.mat_p)) };
         Petsc::check_error(self.world, ierr)
+    }
+
+    /// Determines whether a PETSc [`SNES`] is of a particular type.
+    pub fn type_compare(&self, type_kind: SNESType) -> Result<bool> {
+        self.type_compare_str(&type_kind.to_string())
     }
 }
 

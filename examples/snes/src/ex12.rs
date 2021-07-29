@@ -391,20 +391,20 @@ fn setup_discretization(dm: &mut DM, opt: &Opt, kgrid: &Option<Vec<i32>>) -> pet
     // for now we are just doing this (we assume the dm is a DMPlex)
     let simplex = dm.plex_is_simplex()?;
 
-    let mut fe = Field::create_default(dm.world(), dim, 1, simplex, None, None)?;
+    let mut fe = FEDisc::create_default(dm.world(), dim, 1, simplex, None, None)?;
     fe.set_name("potential")?;
     
     let fe_aux = if opt.variable_coefficient == CoeffType::COEFF_FIELD || opt.variable_coefficient == CoeffType::COEFF_CHECKERBOARD_1 {
-        let mut fe_aux = Field::create_default(dm.world(), dim, 1, simplex, "mat_", None)?;
+        let mut fe_aux = FEDisc::create_default(dm.world(), dim, 1, simplex, "mat_", None)?;
         fe_aux.set_name("coefficient")?;
         fe_aux.copy_quadrature_from(&fe)?;
         Some(fe_aux)
     } else if opt.field_bc {
-        let mut fe_aux = Field::create_default(dm.world(), dim, 1, simplex, "bc_", None)?;
+        let mut fe_aux = FEDisc::create_default(dm.world(), dim, 1, simplex, "bc_", None)?;
         fe_aux.copy_quadrature_from(&fe)?;
         Some(fe_aux)
     } else {
-        None//fe_aux = Field::create_default(dm.world(), dim, 1, simplex, "none_", None)?;
+        None
     };
 
     //let _ = dm.clone_without_closures()?;
@@ -433,23 +433,23 @@ fn create_bc_label(dm: &mut DM, labelname: &str, _opt: &Opt) -> petsc_rs::Result
     dm.plex_mark_boundary_faces(1, &mut label)
 }
 
-fn setup_aux_dm(dm: &mut DM, fe_aux: &Option<Field>, opt: &Opt, kgrid: &Option<Vec<i32>>) -> petsc_rs::Result<()> {
+fn setup_aux_dm(dm: &mut DM, fe_aux: &Option<FEDisc>, opt: &Opt, kgrid: &Option<Vec<i32>>) -> petsc_rs::Result<()> {
     let dim = dm.get_dimension()?;
     let simplex = dm.plex_is_simplex()?;
     let coord_dm = dm.get_coordinate_dm()?;
     if let Some(fe_aux) = fe_aux {
         // clone the fe_aux
         let this_fe_aux = if opt.variable_coefficient == CoeffType::COEFF_FIELD || opt.variable_coefficient == CoeffType::COEFF_CHECKERBOARD_1 {
-            let mut this_fe_aux = Field::create_default(dm.world(), dim, 1, simplex, "mat_", None)?;
+            let mut this_fe_aux = FEDisc::create_default(dm.world(), dim, 1, simplex, "mat_", None)?;
             this_fe_aux.set_name("coefficient")?;
             this_fe_aux.copy_quadrature_from(fe_aux)?;
             this_fe_aux
         } else if opt.field_bc {
-            let mut this_fe_aux = Field::create_default(dm.world(), dim, 1, simplex, "bc_", None)?;
+            let mut this_fe_aux = FEDisc::create_default(dm.world(), dim, 1, simplex, "bc_", None)?;
             this_fe_aux.copy_quadrature_from(fe_aux)?;
             this_fe_aux
         } else {
-            return Ok(()); // this_fe_aux = Field::create_default(dm.world(), dim, 0, simplex, "none_", None)?;
+            return Ok(());
         };
 
         let vec;

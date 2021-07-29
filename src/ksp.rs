@@ -29,6 +29,9 @@ use crate::{
 use mpi::topology::UserCommunicator;
 use mpi::traits::*;
 
+/// [`KSP`] Type
+pub type KSPType = crate::petsc_raw::KSPTypeEnum;
+
 /// Abstract PETSc object that manages all Krylov methods. This is the object that manages the linear
 /// solves in PETSc (even those such as direct solvers that do no use Krylov accelerators).
 pub struct KSP<'a, 'tl> {
@@ -397,6 +400,11 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     pub fn get_operators(&mut self) -> Result<(Rc<Mat<'a>>, Rc<Mat<'a>>)> {
         // TODO: this shouldn't have to take `&mut self`
         self.get_pc()?.get_operators()
+    }
+
+    /// Determines whether a PETSc [`KSP`] is of a particular type.
+    pub fn type_compare(&self, type_kind: KSPType) -> Result<bool> {
+        self.type_compare_str(&type_kind.to_string())
     }
 }
 

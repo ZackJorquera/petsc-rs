@@ -21,6 +21,9 @@ use mpi::traits::*;
 
 use ndarray::{ArrayView, ArrayViewMut};
 
+/// [`Vector`] Type
+pub type VectorType = crate::petsc_raw::VecTypeEnum;
+
 /// Abstract PETSc vector object
 pub struct Vector<'a> {
     pub(crate) world: &'a UserCommunicator,
@@ -602,6 +605,11 @@ impl<'a> Vector<'a> {
         v.assembly_end()?;
 
         Ok(v)
+    }
+
+    /// Determines whether a PETSc [`Vector`] is of a particular type.
+    pub fn type_compare(&self, type_kind: VectorType) -> Result<bool> {
+        self.type_compare_str(&type_kind.to_string())
     }
 }
 

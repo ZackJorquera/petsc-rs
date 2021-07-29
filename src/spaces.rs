@@ -70,6 +70,11 @@ impl<'a> Space<'a> {
         let ierr = unsafe { petsc_raw::PetscSpaceSetType(self.s_p, option_str.as_ptr() as *const _) };
         Petsc::check_error(self.world, ierr)
     }
+
+    /// Determines whether a PETSc [`Space`] is of a particular type.
+    pub fn type_compare(&self, type_kind: SpaceType) -> Result<bool> {
+        self.type_compare_str(&type_kind.to_string())
+    }
 }
 
 impl<'a, 'tl> DualSpace<'a, 'tl> {
@@ -101,6 +106,11 @@ impl<'a, 'tl> DualSpace<'a, 'tl> {
         Petsc::check_error(self.world, ierr)?;
 
         Ok(DM::new(self.world, unsafe { dm_p.assume_init() }))
+    }
+
+    /// Determines whether a PETSc [`DualSpace`] is of a particular type.
+    pub fn type_compare(&self, type_kind: DualSpaceType) -> Result<bool> {
+        self.type_compare_str(&type_kind.to_string())
     }
 }
 

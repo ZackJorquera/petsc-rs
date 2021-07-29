@@ -16,6 +16,9 @@ use mpi::traits::*;
 
 pub use petsc_sys::PetscViewerFormat;
 
+/// [`Viewer`] Type
+pub type ViewerType = crate::petsc_raw::ViewerTypeEnum;
+
 /// Abstract collection of PetscViewers. It is just an expandable array of viewers.
 // TODO: right now this is a very basic wrapper of the view functionality, I feel like
 // we could do this more rusty, but i don't really know how.
@@ -49,6 +52,11 @@ impl<'a> Viewer<'a> {
         let mut viewer = Viewer { world, viewer_p: unsafe { viewer_p.assume_init() } };
         unsafe { viewer.reference()?; }
         Ok(viewer)
+    }
+
+    /// Determines whether a PETSc [`Viewer`] is of a particular type.
+    pub fn type_compare(&self, type_kind: ViewerType) -> Result<bool> {
+        self.type_compare_str(&type_kind.to_string())
     }
 
     wrap_simple_petsc_member_funcs! {

@@ -8,6 +8,9 @@ use crate::{Petsc, petsc_raw, Result, PetscAsRaw, PetscInt, PetscObject};
 use mpi::topology::UserCommunicator;
 use mpi::traits::*;
 
+/// [`IS`] Type
+pub type ISType = crate::petsc_raw::ISTypeEnum;
+
 /// Abstract PETSc object that allows indexing. 
 pub struct IS<'a> {
     pub(crate) world: &'a UserCommunicator,
@@ -51,6 +54,11 @@ impl<'a> IS<'a> {
     /// Returns [`ISView`] that derefs into a slice of the indices.
     pub fn get_indices(&self) -> Result<ISView<'a, '_>> {
         ISView::new(self)
+    }
+
+    /// Determines whether a PETSc [`IS`] is of a particular type.
+    pub fn type_compare(&self, type_kind: ISType) -> Result<bool> {
+        self.type_compare_str(&type_kind.to_string())
     }
 }
 

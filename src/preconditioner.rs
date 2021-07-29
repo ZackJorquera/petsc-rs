@@ -26,7 +26,8 @@ use crate::{
 use mpi::topology::UserCommunicator;
 use mpi::traits::*;
 
-pub use crate::petsc_raw::PCTypeEnum as PCType;
+/// [`PC`] Type
+pub type PCType = crate::petsc_raw::PCTypeEnum;
 
 /// Abstract PETSc object that manages all preconditioners including direct solvers such as PCLU
 pub struct PC<'a, 'tl> {
@@ -267,6 +268,11 @@ impl<'a, 'tl> PC<'a, 'tl> {
         let ierr = unsafe { petsc_raw::PCFieldSplitSetIS(
             self.pc_p, splitname_cs.map(|cs| cs.as_ptr()).unwrap_or(std::ptr::null()), is.is_p) };
         Petsc::check_error(self.world, ierr)
+    }
+
+    /// Determines whether a PETSc [`PC`] is of a particular type.
+    pub fn type_compare(&self, type_kind: PCType) -> Result<bool> {
+        self.type_compare_str(&type_kind.to_string())
     }
 }
 

@@ -117,12 +117,19 @@ fn create_all_type_enums(consts: &Vec<ItemConst>) -> proc_macro2::TokenStream {
     // I think these are correct. They might miss a few or grab to many
     // but i think it is better than manually grabbing everything.
     let enum_ident_strs = &[
-        r"MatType",
-        r"DMType",
-        r"PCType",
-        r"KSPType",
-        r"PetscSpaceType",
-        r"PetscDualSpaceType",
+        "MatType",
+        "DMType",
+        "PCType",
+        "KSPType",
+        "PetscSpaceType",
+        "PetscDualSpaceType",
+        "VecType",
+        "ISType",
+        "SNESType",
+        "ViewerType",
+        "PetscFEType",
+        "PetscFVType",
+        "DMFieldType",
     ];
     // These work in pairs, the first is something it must match
     // the second is something it cant match. This array MUST be
@@ -140,6 +147,20 @@ fn create_all_type_enums(consts: &Vec<ItemConst>) -> proc_macro2::TokenStream {
         r"^PETSCSPACE$", // Nothing should match this
         r"^PETSCDUALSPACE[A-Z0-9]+$",
         r"^PETSCDUALSPACE$", // Nothing should match this
+        r"^VEC[A-Z0-9]+$",
+        r"^VEC(TAGGER)[A-Z0-9]*$",
+        r"^IS[A-Z]+$",
+        r"^IS(LOCALTOGLOBALMAPPING)[A-Z]*$",
+        r"^SNES[A-Z0-9]+$",
+        r"^SNES(LINESEARCH|MS[A-Z])[A-Z0-9]*$",
+        r"^PETSCVIEWER[A-Z0-9]+$",
+        r"^PETSCVIEWER$", // Nothing should match this
+        r"^PETSCFE[A-Z]+$",
+        r"^PETSCFE$", // Nothing should match this
+        r"^PETSCFV[A-Z]+$",
+        r"^PETSCFV$", // Nothing should match this
+        r"^DMFIELD[A-Z]+$",
+        r"^DMFIELD$", // Nothing should match this
     ];
     assert_eq!(enum_ident_strs.len() * 2, regex_pats.len());
 
