@@ -51,7 +51,7 @@ pub struct KSP<'a, 'tl> {
 
 struct KSPComputeOperatorsTrampolineData<'a, 'tl> {
     world: &'a UserCommunicator,
-    user_f: Box<dyn FnMut(&KSP<'a, 'tl>, &mut Mat<'a>, &mut Mat<'a>) -> Result<()> + 'tl>,
+    user_f: Box<dyn FnMut(&KSP<'a, 'tl>, &mut Mat<'a, 'tl>, &mut Mat<'a, 'tl>) -> Result<()> + 'tl>,
     set_dm: bool,
 }
 
@@ -90,7 +90,7 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     /// `ksp.get_pc_mut().set_operators()`.
     ///
     /// Passing a `None` for `a_mat` or `p_mat` removes the matrix that is currently used.
-    pub fn set_operators(&mut self, a_mat: impl Into<Option<Rc<Mat<'a>>>>, p_mat: impl Into<Option<Rc<Mat<'a>>>>) -> Result<()>
+    pub fn set_operators(&mut self, a_mat: impl Into<Option<Rc<Mat<'a, 'tl>>>>, p_mat: impl Into<Option<Rc<Mat<'a, 'tl>>>>) -> Result<()>
     {
         let a_mat = a_mat.into();
         let p_mat = p_mat.into();
@@ -248,7 +248,7 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     /// [`set_compute_operators()`](KSP::set_compute_operators) method.
     pub fn set_compute_operators<F>(&mut self, user_f: F) -> Result<()>
     where
-        F: FnMut(&KSP<'a, 'tl>, &mut Mat<'a>, &mut Mat<'a>) -> Result<()> + 'tl
+        F: FnMut(&KSP<'a, 'tl>, &mut Mat<'a, 'tl>, &mut Mat<'a, 'tl>) -> Result<()> + 'tl
     {
         // TODO: look at how rsmpi did the trampoline stuff:
         // https://github.com/rsmpi/rsmpi/blob/master/src/collective.rs#L1684
@@ -287,8 +287,8 @@ impl<'a, 'tl> KSP<'a, 'tl> {
                 let dm = DM::new(trampoline_data.world, dm_p.assume_init());
                 ksp.dm = Some(dm); // Note, because ksp is not dropped, ksp.dm wont be either
             }
-            let mut a_mat = ManuallyDrop::new(Mat { world: trampoline_data.world, mat_p: mat1_p });
-            let mut p_mat = ManuallyDrop::new(Mat { world: trampoline_data.world, mat_p: mat2_p });
+            let mut a_mat = ManuallyDrop::new(Mat::new(trampoline_data.world, mat1_p));
+            let mut p_mat = ManuallyDrop::new(Mat::new(trampoline_data.world, mat2_p));
             
             (trampoline_data.get_unchecked_mut().user_f)(&ksp, &mut a_mat, &mut p_mat)
                 .map_or_else(|err| err.kind as i32, |_| 0)
@@ -397,7 +397,7 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     /// If the operators have NOT been set with [`KSP`](KSP::set_operators())/[`PC::set_operators()`]
     /// then the operators are created in the PC and returned to the user. In this case, two DIFFERENT
     /// operators will be returned.
-    pub fn get_operators(&mut self) -> Result<(Rc<Mat<'a>>, Rc<Mat<'a>>)> {
+    pub fn get_operators(&mut self) -> Result<(Rc<Mat<'a, 'tl>>, Rc<Mat<'a, 'tl>>)> {
         // TODO: this shouldn't have to take `&mut self`
         self.get_pc()?.get_operators()
     }

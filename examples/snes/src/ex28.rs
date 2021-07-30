@@ -358,7 +358,7 @@ fn form_func_k<'a>(_petsc: &Petsc, info: (PetscInt, PetscInt, PetscInt, PetscInt
 }
 
 fn form_jac_u<'a>(_petsc: &Petsc, info: (PetscInt, PetscInt, PetscInt, PetscInt, PetscInt),
-    dms: (&DM<'a, '_>, &DM<'a, '_>), u_loc: &Vector<'a>, k_loc: &Vector<'a>, jac: &mut Mat<'a>) -> petsc_rs::Result<()>
+    dms: (&DM<'a, '_>, &DM<'a, '_>), u_loc: &Vector<'a>, k_loc: &Vector<'a>, jac: &mut Mat<'a, '_>) -> petsc_rs::Result<()>
 {
     let (mx, xm, xs, xs_k, gxs) = info;
     
@@ -381,7 +381,7 @@ fn form_jac_u<'a>(_petsc: &Petsc, info: (PetscInt, PetscInt, PetscInt, PetscInt,
 }
 
 fn form_jac_k<'a>(_petsc: &Petsc, info: (PetscInt, PetscInt, PetscInt, PetscInt, PetscInt),
-    dms: (&DM<'a, '_>, &DM<'a, '_>), u_loc: &Vector<'a>, k_loc: &Vector<'a>, jac: &mut Mat<'a>) -> petsc_rs::Result<()>
+    dms: (&DM<'a, '_>, &DM<'a, '_>), u_loc: &Vector<'a>, k_loc: &Vector<'a>, jac: &mut Mat<'a, '_>) -> petsc_rs::Result<()>
 {
     let (mx, xm, xs, _xs_u, gxs) = info;
     
@@ -398,7 +398,7 @@ fn form_jac_k<'a>(_petsc: &Petsc, info: (PetscInt, PetscInt, PetscInt, PetscInt,
 }
 
 fn form_jac_uk<'a>(_petsc: &Petsc, info: (PetscInt, PetscInt, PetscInt, PetscInt, PetscInt, PetscInt),
-    dms: (&DM<'a, '_>, &DM<'a, '_>), u_loc: &Vector<'a>, k_loc: &Vector<'a>, jac: &mut Mat<'a>) -> petsc_rs::Result<()>
+    dms: (&DM<'a, '_>, &DM<'a, '_>), u_loc: &Vector<'a>, k_loc: &Vector<'a>, jac: &mut Mat<'a, '_>) -> petsc_rs::Result<()>
 {
     let (mx, xm, xs, _xs_k, gxs, gxs_k) = info;
     
@@ -421,7 +421,7 @@ fn form_jac_uk<'a>(_petsc: &Petsc, info: (PetscInt, PetscInt, PetscInt, PetscInt
 }
 
 fn form_jac_ku<'a>(_petsc: &Petsc, info: (PetscInt, PetscInt, PetscInt, PetscInt, PetscInt, PetscInt),
-    dms: (&DM<'a, '_>, &DM<'a, '_>), u_loc: &Vector<'a>, k_loc: &Vector<'a>, jac: &mut Mat<'a>) -> petsc_rs::Result<()>
+    dms: (&DM<'a, '_>, &DM<'a, '_>), u_loc: &Vector<'a>, k_loc: &Vector<'a>, jac: &mut Mat<'a, '_>) -> petsc_rs::Result<()>
 {
     let (mx_u, xm, xs, xs_u, gxs, gxs_u) = info;
     

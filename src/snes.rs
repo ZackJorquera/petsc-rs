@@ -112,16 +112,16 @@ enum SNESJacobianTrampolineData<'a, 'tl> {
 
 struct SNESJacobianSingleTrampolineData<'a, 'tl> {
     world: &'a UserCommunicator,
-    _ap_mat: Mat<'a>,
-    user_f: Box<dyn FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl>,
+    _ap_mat: Mat<'a, 'tl>,
+    user_f: Box<dyn FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a, 'tl>) -> std::result::Result<(), DomainOrPetscError> + 'tl>,
     set_dm: bool,
 }
 
 struct SNESJacobianDoubleTrampolineData<'a, 'tl> {
     world: &'a UserCommunicator,
-    _a_mat: Mat<'a>,
-    _p_mat: Mat<'a>,
-    user_f: Box<dyn FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a>, &mut Mat<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl>,
+    _a_mat: Mat<'a, 'tl>,
+    _p_mat: Mat<'a, 'tl>,
+    user_f: Box<dyn FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a, 'tl>, &mut Mat<'a, 'tl>) -> std::result::Result<(), DomainOrPetscError> + 'tl>,
     set_dm: bool,
 }
 
@@ -466,9 +466,9 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn set_jacobian_single_mat<F>(&mut self, ap_mat: Mat<'a>, user_f: F) -> Result<()>
+    pub fn set_jacobian_single_mat<F>(&mut self, ap_mat: Mat<'a, 'tl>, user_f: F) -> Result<()>
     where
-        F: FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl,
+        F: FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a, 'tl>) -> std::result::Result<(), DomainOrPetscError> + 'tl,
     {
         // TODO: should we make ap_mat an `Rc<RefCell<Mat>>`
 
@@ -506,7 +506,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
                 snes.dm = Some(dm); // Note, because snes is not dropped, snes.dm wont be either
             }
             let x = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: vec_p });
-            let mut a_mat = ManuallyDrop::new(Mat { world: trampoline_data.world, mat_p: mat1_p });
+            let mut a_mat = ManuallyDrop::new(Mat::new(trampoline_data.world, mat1_p));
             
             (trampoline_data.get_unchecked_mut().user_f)(&snes, &x, &mut a_mat)
                 .map_or_else(|err| match err {
@@ -606,9 +606,9 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn set_jacobian<F>(&mut self, a_mat: Mat<'a>, p_mat: Mat<'a>, user_f: F) -> Result<()>
+    pub fn set_jacobian<F>(&mut self, a_mat: Mat<'a, 'tl>, p_mat: Mat<'a, 'tl>, user_f: F) -> Result<()>
     where
-        F: FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a>, &mut Mat<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl
+        F: FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a, 'tl>, &mut Mat<'a, 'tl>) -> std::result::Result<(), DomainOrPetscError> + 'tl
     {
         // TODO: should we make a/p_mat an `Rc<RefCell<Mat>>`
         let closure_anchor = Box::new(user_f);
@@ -645,8 +645,8 @@ impl<'a, 'tl> SNES<'a, 'tl> {
                 snes.dm = Some(dm); // Note, because snes is not dropped, snes.dm wont be either
             }
             let x = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: vec_p });
-            let mut a_mat = ManuallyDrop::new(Mat { world: trampoline_data.world, mat_p: mat1_p });
-            let mut p_mat = ManuallyDrop::new(Mat { world: trampoline_data.world, mat_p: mat2_p });
+            let mut a_mat = ManuallyDrop::new(Mat::new(trampoline_data.world, mat1_p));
+            let mut p_mat = ManuallyDrop::new(Mat::new(trampoline_data.world, mat2_p));
             
             (trampoline_data.get_unchecked_mut().user_f)(&snes, &x, &mut a_mat, &mut p_mat)
                 .map_or_else(|err| match err {
@@ -1106,7 +1106,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     ///
     /// Note, this method is typically used within nonlinear solvers implementations,
     /// so users would not generally call this routine themselves.
-    pub fn compute_jacobian<'ml, 'mal: 'ml>(&mut self, x: &Vector, a_mat: &mut Mat, p_mat: impl Into<Option<&'ml mut Mat<'mal>>>) -> Result<()> {
+    pub fn compute_jacobian<'ml, 'mal: 'ml, 'mtl: 'ml>(&mut self, x: &Vector, a_mat: &mut Mat, p_mat: impl Into<Option<&'ml mut Mat<'mal, 'mtl>>>) -> Result<()> {
         let ierr = unsafe { petsc_raw::SNESComputeJacobian(self.snes_p, x.vec_p, a_mat.mat_p,
             p_mat.into().map_or(a_mat.mat_p, |p| p.mat_p)) };
         Petsc::check_error(self.world, ierr)

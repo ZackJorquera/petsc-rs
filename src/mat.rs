@@ -3,7 +3,7 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/Mat/index.html>
 
-use std::{ffi::CString, marker::PhantomData, ops::{Deref, DerefMut}};
+use std::{ffi::CString, marker::PhantomData, ops::{Deref, DerefMut}, pin::Pin};
 use std::mem::{MaybeUninit, ManuallyDrop};
 use std::rc::Rc;
 use crate::{
@@ -17,17 +17,21 @@ use crate::{
     PetscInt,
     InsertMode,
     NormType,
+    PetscErrorKind,
     vector::{Vector, },
     indexset::{IS, },
 };
 use mpi::topology::UserCommunicator;
 use mpi::traits::*;
+use seq_macro::seq;
 
 /// Abstract PETSc matrix object used to manage all linear operators in PETSc, even those
 /// without an explicit sparse representation (such as matrix-free operators).
-pub struct Mat<'a> {
+pub struct Mat<'a, 'tl> {
     pub(crate) world: &'a UserCommunicator,
     pub(crate) mat_p: *mut petsc_raw::_p_Mat, // I could use Mat which is the same thing, but i think using a pointer is more clear
+
+    shell_trampoline_data: Option<Pin<Box<MatShellTrampolineData<'a, 'tl>>>>,
 }
 
 /// A wrapper around [`Mat`] that is used when the [`Mat`] shouldn't be destroyed.
@@ -35,39 +39,39 @@ pub struct Mat<'a> {
 /// Gives mutable access to the underlining [`Mat`].
 ///
 /// For example, it is used with [`Mat::get_local_sub_matrix_mut()`].
-pub struct BorrowMatMut<'a, 'bv> {
-    owned_mat: ManuallyDrop<Mat<'a>>,
+pub struct BorrowMatMut<'a, 'tl, 'bv> {
+    owned_mat: ManuallyDrop<Mat<'a, 'tl>>,
     drop_func: Option<Box<dyn FnOnce(&mut Self) + 'bv>>,
     // do we need this phantom data?
     // also should 'bv be used for the closure
-    pub(crate) _phantom: PhantomData<&'bv mut Mat<'a>>,
+    pub(crate) _phantom: PhantomData<&'bv mut Mat<'a, 'tl>>,
 }
 
 /// A wrapper around [`Mat`] that is used when the [`Mat`] shouldn't be destroyed.
 ///
 /// For example, it is used with [`Mat::get_local_sub_matrix_mut()`].
-pub struct BorrowMat<'a, 'bv> {
-    owned_mat: ManuallyDrop<Mat<'a>>,
+pub struct BorrowMat<'a, 'tl, 'bv> {
+    owned_mat: ManuallyDrop<Mat<'a, 'tl>>,
     drop_func: Option<Box<dyn FnOnce(&mut Self) + 'bv>>,
     // do we need this phantom data?
     // also should 'bv be used for the closure
-    pub(crate) _phantom: PhantomData<&'bv Mat<'a>>,
+    pub(crate) _phantom: PhantomData<&'bv Mat<'a, 'tl>>,
 }
 
-impl<'a> Drop for Mat<'a> {
+impl<'a> Drop for Mat<'a, '_> {
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::MatDestroy(&mut self.mat_p as *mut _) };
         let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
-impl Drop for BorrowMatMut<'_, '_> {
+impl Drop for BorrowMatMut<'_, '_, '_> {
     fn drop(&mut self) {
         self.drop_func.take().map(|f| f(self));
     }
 }
 
-impl Drop for BorrowMat<'_, '_> {
+impl Drop for BorrowMat<'_, '_, '_> {
     fn drop(&mut self) {
         self.drop_func.take().map(|f| f(self));
     }
@@ -90,19 +94,53 @@ pub use petsc_raw::MatAssemblyType;
 pub use petsc_raw::MatOption;
 pub use petsc_raw::MatDuplicateOption;
 pub use petsc_raw::MatStencil;
+pub use petsc_raw::MatOperation;
 use petsc_raw::MatReuse;
 
 /// [`Mat`] Type
 pub type MatType = crate::petsc_raw::MatTypeEnum;
 
-impl<'a> Mat<'a> {
+struct MatShellTrampolineData<'a, 'tl> {
+    #[allow(dead_code)]
+    world: &'a UserCommunicator,
+    // TODO: there are 148 ops, but this might change so we should get this number is a better way
+    user_funcs: [Option<Box<dyn FnMut(&Mat<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>>; 148],
+}
+
+impl<'a, 'tl> Mat<'a, 'tl> {
+    /// Same as `Mat { ... }` but sets all optional params to `None`
+    pub(crate) fn new(world: &'a UserCommunicator, mat_p: *mut petsc_raw::_p_Mat) -> Self {
+        Mat { world, mat_p, shell_trampoline_data: None, }
+    }
+
     /// Same at [`Petsc::mat_create()`].
     pub fn create(world: &'a UserCommunicator,) -> Result<Self> {
         let mut mat_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::MatCreate(world.as_raw(), mat_p.as_mut_ptr()) };
         Petsc::check_error(world, ierr)?;
 
-        Ok(Mat { world, mat_p: unsafe { mat_p.assume_init() } })
+        Ok(Mat::new(world, unsafe { mat_p.assume_init() }))
+    }
+
+    /// Creates a new matrix class for use with a user-defined private data storage format. 
+    pub fn create_shell(world: &'a UserCommunicator, local_rows: impl Into<Option<PetscInt>>,
+        local_cols: impl Into<Option<PetscInt>>, global_rows: impl Into<Option<PetscInt>>,
+        global_cols: impl Into<Option<PetscInt>>) -> Result<Self>
+    {
+        let none_array = seq!(N in 0..148 { [ #( None, )* ]});
+        let ctx = Box::pin(MatShellTrampolineData { 
+            world: world, user_funcs: none_array, });
+        let mut mat_p = MaybeUninit::uninit();
+        let ierr = unsafe { petsc_raw::MatCreateShell(world.as_raw(),
+            local_rows.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
+            local_cols.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
+            global_rows.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
+            global_cols.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
+            std::mem::transmute(ctx.as_ref()),
+            mat_p.as_mut_ptr()) };
+        Petsc::check_error(world, ierr)?;
+
+        Ok(Mat { world, mat_p: unsafe { mat_p.assume_init() }, shell_trampoline_data: Some(ctx)})
     }
 
     /// Duplicates a matrix including the non-zero structure.
@@ -115,7 +153,7 @@ impl<'a> Mat<'a> {
         let ierr = unsafe { petsc_raw::MatDuplicate(self.mat_p, op, mat2_p.as_mut_ptr()) };
         Petsc::check_error(self.world, ierr)?;
 
-        Ok(Mat { world: self.world, mat_p: unsafe { mat2_p.assume_init() } })
+        Ok(Mat::new(self.world, unsafe { mat2_p.assume_init() }))
     }
 
     /// Sets the local and global sizes, and checks to determine compatibility
@@ -600,14 +638,14 @@ impl<'a> Mat<'a> {
     ///
     /// Expected fill as ratio of `nnz(C)/(nnz(self) + nnz(other))`, use `None` if you do not have
     /// a good estimate. If the result is a dense matrix this is irrelevant.
-    pub fn mat_mult(&self, other: &Mat, fill: impl Into<Option<PetscReal>>) -> Result<Mat<'a>>{
+    pub fn mat_mult(&self, other: &Mat, fill: impl Into<Option<PetscReal>>) -> Result<Self>{
         let mut mat_out_p = MaybeUninit::uninit();
         // TODO: do we want other MatReuse options
         let ierr = unsafe { petsc_raw::MatMatMult(self.mat_p, other.mat_p, MatReuse::MAT_INITIAL_MATRIX,
             fill.into().unwrap_or(petsc_raw::PETSC_DEFAULT_REAL), mat_out_p.as_mut_ptr()) };
         Petsc::check_error(self.world, ierr)?;
 
-        Ok(Mat { world: self.world, mat_p: unsafe { mat_out_p.assume_init() } })
+        Ok(Mat::new(self.world, unsafe { mat_out_p.assume_init() }))
     }
 
     /// Attaches a null space to a matrix.
@@ -660,14 +698,14 @@ impl<'a> Mat<'a> {
     ///
     /// The submat always implements [`Mat::set_local_values()`] (and thus you can also use
     /// [`Mat::set_local_values_with()`]).
-    pub fn get_local_sub_matrix_mut<'bv>(&'bv mut self, is_row: Rc<IS<'a>>, is_col: Rc<IS<'a>>) -> Result<BorrowMatMut<'a, 'bv>> {
+    pub fn get_local_sub_matrix_mut<'bv>(&'bv mut self, is_row: Rc<IS<'a>>, is_col: Rc<IS<'a>>) -> Result<BorrowMatMut<'a, 'tl, 'bv>> {
         // TODO: make a non-mut version of this function
         let mut mat_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::MatGetLocalSubMatrix(self.mat_p,
             is_row.is_p, is_col.is_p, mat_p.as_mut_ptr()) };
         Petsc::check_error(self.world, ierr)?;
-        Ok(BorrowMatMut::new(
-            ManuallyDrop::new( Mat { world: self.world, mat_p: unsafe { mat_p.assume_init() } }),
+        Ok(BorrowMatMut::new( 
+            ManuallyDrop::new( Mat::new(self.world, unsafe { mat_p.assume_init() })),
             Some(Box::new(move |borrow_mat| {
                     let ierr = unsafe { petsc_raw::MatRestoreLocalSubMatrix(self.mat_p,
                         is_row.is_p, is_col.is_p, &mut borrow_mat.owned_mat.mat_p as *mut _) };
@@ -696,47 +734,200 @@ impl<'a> Mat<'a> {
     pub fn type_compare(&self, type_kind: MatType) -> Result<bool> {
         self.type_compare_str(&type_kind.to_string())
     }
+
+    // TODO: add set shell matrix data function that uses MatShellSetContext, maybe
+    // TODO: add support for more types of ops. There are two ways i can think of doing it:
+    //     1. Make a different function for each type of method - this could be confusing to
+    //        the user, i.e. knowing what is supported and where. Or to solve this we can make a
+    //        different enum for each method type. This would also make the trampoline type easier.
+    //        We could also implement Into into each of those types from the base type. idk.
+    //        We could basically use the same strategy that we are now with the `seq!` macro.
+    //     2. Make a new MatOperation enum that contains the rust closure type and have one 
+    //        `shell_set_operation` function do all the work. This would mean that we would take Box<dyn _>
+    //        and not a generic like we do now.
+    // Both of these we could slowly roll out one function at a time. Also, it seems like this will
+    // be very tedious either way
+
+    /// Allows user to set a matrix operation for a shell matrix.
+    ///
+    /// You can only set operations that expect the correct function signature:
+    /// `FnMut(&Mat, &Vector, &mut Vector) -> Result<()>`
+    ///
+    /// Right now this function only works for `MATOP_MULT`, `MATOP_MULT_TRANSPOSE`,
+    /// `MATOP_SOLVE`, `MATOP_SOLVE_TRANSPOSE` (more to come).
+    ///
+    /// # Parameters
+    ///
+    /// * `op` - the name of the operation
+    /// * `user_f` - the name of the operation
+    ///     * `mat` - The matrix
+    ///     * `x` - The input vector
+    ///     * `y` *(output)* - The output vector
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
+    /// # use ndarray::{s, array};
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// # let petsc = Petsc::init_no_args()?;
+    /// // Note: this example will only work in a uniprocessor comm world. Also, right
+    /// // now this example only works when `PetscScalar` is `PetscReal`. It will fail
+    /// // to compile if `PetscScalar` is `PetscComplex`.
+    /// let mut x = Vector::from_slice(petsc.world(), &[1.2, -0.5])?;
+    /// let mut y = Vector::from_slice(petsc.world(), &[0.0, 0.0])?;
+    ///
+    /// let theta = std::f64::consts::PI as PetscReal / 2.0;
+    /// let mat_data = [PetscScalar::cos(theta), -PetscScalar::sin(theta),
+    ///                 PetscScalar::sin(theta),  PetscScalar::cos(theta)];
+    /// let mut mat = Mat::create_shell(petsc.world(),2,2,2,2)?;
+    /// mat.set_up()?;
+    ///
+    /// mat.shell_set_operation_mvv(MatOperation::MATOP_MULT, |_m, x, y| {
+    ///     let xx = x.view()?;
+    ///     let mut yy = y.view_mut()?;
+    ///     yy[0] = mat_data[0] * xx[0] + mat_data[1] * xx[1];
+    ///     yy[1] = mat_data[2] * xx[0] + mat_data[3] * xx[1];
+    ///     Ok(())
+    /// })?;
+    ///
+    /// mat.shell_set_operation_mvv(MatOperation::MATOP_MULT_TRANSPOSE, |_m, x, y| {
+    ///     let xx = x.view()?;
+    ///     let mut yy = y.view_mut()?;
+    ///     yy[0] = mat_data[0] * xx[0] + mat_data[2] * xx[1];
+    ///     yy[1] = mat_data[1] * xx[0] + mat_data[3] * xx[1];
+    ///     Ok(())
+    /// })?;
+    ///
+    /// mat.mult(&x, &mut y)?;
+    /// assert!(y.view()?.slice(s![..]).abs_diff_eq(&array![0.5, 1.2], 1e-15));
+    /// mat.mult_transpose(&y, &mut x)?;
+    /// assert!(x.view()?.slice(s![..]).abs_diff_eq(&array![1.2, -0.5], 1e-15));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn shell_set_operation_mvv<F>(&mut self, op: MatOperation, user_f: F) -> Result<()>
+    where
+        F: FnMut(&Mat<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
+    {
+        match op {
+            MatOperation::MATOP_MULT
+                | MatOperation::MATOP_MULT_TRANSPOSE
+                | MatOperation::MATOP_SOLVE
+                | MatOperation::MATOP_SOLVE_TRANSPOSE
+                // There are more
+                => Ok(()),
+            _ => Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_OUTOFRANGE,
+                format!("You can not set the `{:?}` operation with `Mat::shell_set_operation_mvv`.", op)),
+        }?;
+
+        let closure_anchor = Box::new(user_f);
+
+        if let Some(td) = self.shell_trampoline_data.as_mut() {
+            let _ = td.as_mut().user_funcs[op as usize].take();
+            td.as_mut().user_funcs[op as usize] = Some(closure_anchor);
+        } else {
+            let none_array = seq!(N in 0..148 { [ #( None, )* ]});
+            let mut td = MatShellTrampolineData { 
+                world: self.world, user_funcs: none_array };
+            td.user_funcs[op as usize] = Some(closure_anchor);
+            let td_anchor = Box::pin(td);
+            let ierr = unsafe { petsc_raw::MatShellSetContext(self.mat_p,
+                std::mem::transmute(td_anchor.as_ref())) }; // this will also erase the lifetimes
+            Petsc::check_error(self.world, ierr)?;
+            self.shell_trampoline_data = Some(td_anchor);
+        }
+
+        seq!(N in 0..148 {
+            unsafe extern "C" fn mat_shell_operation_trampoline_#N (mat_p: *mut petsc_raw::_p_Mat, x_p: *mut petsc_raw::_p_Vec,
+                y_p: *mut petsc_raw::_p_Vec) -> petsc_raw::PetscErrorCode
+            {
+                let mut ctx = MaybeUninit::<*mut ::std::os::raw::c_void>::uninit();
+                // TODO: why does this one take a void* but `PCShellGetContext` takes a void**?
+                // I looks like under the hood it is treated like a void** so idk
+                let ierr = petsc_raw::MatShellGetContext(mat_p, ctx.as_mut_ptr() as *mut _);
+                assert_eq!(ierr, 0);
+
+                // SAFETY: TODO
+                let trampoline_data: Pin<&mut MatShellTrampolineData> = std::mem::transmute(ctx.assume_init());
+                let world = trampoline_data.world;
+
+                let mat = ManuallyDrop::new(Mat::new(world, mat_p));
+                let x = ManuallyDrop::new(Vector {world, vec_p: x_p });
+                let mut y = ManuallyDrop::new(Vector {world, vec_p: y_p });
+                
+                // TODO: dont unwrap, make an error and return error code
+                (trampoline_data.get_unchecked_mut().user_funcs[N].as_mut()
+                    .map_or_else(
+                        || Petsc::set_error(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
+                            format!(
+                                "Rust function for {:?} was not found",
+                                std::mem::transmute::<u32, MatOperation>(N as u32))),
+                        |f| (*f)(&mat, &x, &mut y)))
+                    .map_or_else(|err| err.kind as i32, |_| 0)
+            }
+        });
+        seq!(N in 0..148 {
+            let trampolines = [
+                #(
+                    mat_shell_operation_trampoline_#N, 
+                )*
+            ];
+        });
+
+        let mat_shell_operation_trampoline_ptr: ::std::option::Option<
+            unsafe extern "C" fn(mat_p: *mut petsc_raw::_p_Mat, x_p: *mut petsc_raw::_p_Vec,
+            y_p: *mut petsc_raw::_p_Vec, ) -> petsc_raw::PetscErrorCode, >
+            = Some(trampolines[op as usize]);
+
+        let ierr = unsafe { petsc_raw::MatShellSetOperation(self.mat_p, op,
+            std::mem::transmute(mat_shell_operation_trampoline_ptr)) }; // this will also erase the lifetimes
+        Petsc::check_error(self.world, ierr)?;
+
+        Ok(())
+    }
 }
 
-impl<'a> Clone for Mat<'a> {
+impl<'a, 'tl> Clone for Mat<'a, 'tl> {
     /// Same as [`x.duplicate(MatDuplicateOption::MAT_COPY_VALUES)`](Mat::duplicate()).
     fn clone(&self) -> Self {
         self.duplicate(MatDuplicateOption::MAT_COPY_VALUES).unwrap()
     }
 }
 
-impl<'a, 'bv> BorrowMat<'a, 'bv> {
+impl<'a, 'tl, 'bv> BorrowMat<'a, 'tl, 'bv> {
     #[allow(dead_code)]
-    pub(crate) fn new(owned_mat: ManuallyDrop<Mat<'a>>, drop_func: Option<Box<dyn FnOnce(&mut BorrowMat<'a, 'bv>) + 'bv>>) -> Self {
+    pub(crate) fn new(owned_mat: ManuallyDrop<Mat<'a, 'tl>>, drop_func: Option<Box<dyn FnOnce(&mut BorrowMat<'a, 'tl, 'bv>) + 'bv>>) -> Self {
         BorrowMat { owned_mat, drop_func, _phantom: PhantomData }
     }
 }
 
-impl<'a, 'bv> BorrowMatMut<'a, 'bv> {
+impl<'a, 'tl, 'bv> BorrowMatMut<'a, 'tl, 'bv> {
     #[allow(dead_code)]
-    pub(crate) fn new(owned_mat: ManuallyDrop<Mat<'a>>, drop_func: Option<Box<dyn FnOnce(&mut BorrowMatMut<'a, 'bv>) + 'bv>>) -> Self {
+    pub(crate) fn new(owned_mat: ManuallyDrop<Mat<'a, 'tl>>, drop_func: Option<Box<dyn FnOnce(&mut BorrowMatMut<'a, 'tl, 'bv>) + 'bv>>) -> Self {
         BorrowMatMut { owned_mat, drop_func, _phantom: PhantomData }
     }
 }
 
-impl<'a> Deref for BorrowMat<'a, '_> {
-    type Target = Mat<'a>;
+impl<'a, 'tl> Deref for BorrowMat<'a, 'tl, '_> {
+    type Target = Mat<'a, 'tl>;
 
-    fn deref(&self) -> &Mat<'a> {
+    fn deref(&self) -> &Mat<'a, 'tl> {
         self.owned_mat.deref()
     }
 }
 
-impl<'a> Deref for BorrowMatMut<'a, '_> {
-    type Target = Mat<'a>;
+impl<'a, 'tl> Deref for BorrowMatMut<'a, 'tl, '_> {
+    type Target = Mat<'a, 'tl>;
 
-    fn deref(&self) -> &Mat<'a> {
+    fn deref(&self) -> &Mat<'a, 'tl> {
         self.owned_mat.deref()
     }
 }
 
-impl<'a> DerefMut for BorrowMatMut<'a, '_> {
-    fn deref_mut(&mut self) -> &mut Mat<'a> {
+impl<'a, 'tl> DerefMut for BorrowMatMut<'a, 'tl, '_> {
+    fn deref_mut(&mut self) -> &mut Mat<'a, 'tl> {
         self.owned_mat.deref_mut()
     }
 }
@@ -768,7 +959,7 @@ impl<'a> NullSpace<'a> {
 }
 
 // Macro impls
-impl<'a> Mat<'a> {    
+impl<'a> Mat<'a, '_> {    
     wrap_simple_petsc_member_funcs! {
         MatSetFromOptions, pub set_from_options, takes mut, #[doc = "Configures the Mat from the options database."];
         MatSetUp, pub set_up, takes mut, #[doc = "Sets up the internal matrix data structures for later use"];
@@ -780,6 +971,7 @@ impl<'a> Mat<'a> {
         MatNorm, pub norm, input NormType, norm_type, output PetscReal, tmp1, #[doc = "Calculates various norms of a matrix."];
         MatSetOption, pub set_option, input MatOption, option, input bool, flg, takes mut, #[doc = "Sets a parameter option for a matrix.\n\n\
             Some options may be specific to certain storage formats. Some options determine how values will be inserted (or added). Sorted, row-oriented input will generally assemble the fastest. The default is row-oriented."];
+        MatMultTranspose, pub mult_transpose, input &Vector, x.as_raw, input &mut Vector, y.as_raw, #[doc = "Computes matrix transpose times a vector y = A^T * x."];
     }
 
     // TODO: there is more to each of these allocations that i should add support for
@@ -835,9 +1027,9 @@ impl<'a> Mat<'a> {
     }
 }
 
-impl_petsc_object_traits! { Mat, mat_p, petsc_raw::_p_Mat }
+impl_petsc_object_traits! { Mat, mat_p, petsc_raw::_p_Mat, '_ }
 
-impl_petsc_view_func!{ Mat, MatView }
+impl_petsc_view_func!{ Mat, MatView, '_ }
 
 impl<'a> NullSpace<'a> {
     wrap_simple_petsc_member_funcs! {

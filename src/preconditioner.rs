@@ -40,8 +40,8 @@ pub struct PC<'a, 'tl> {
     // This might also allow us to have a get_operators function (which would also returns a Rc<RefCell<Mat>>).
     // Regardless, returning mutable access would be hard, especially when the rust side can't guarantee how the 
     // C api accesses the operators behind the scenes.
-    ref_amat: Option<Rc<Mat<'a>>>,
-    ref_pmat: Option<Rc<Mat<'a>>>,
+    ref_amat: Option<Rc<Mat<'a, 'tl>>>,
+    ref_pmat: Option<Rc<Mat<'a, 'tl>>>,
 
     shell_set_apply_trampoline_data: Option<Pin<Box<PCShellSetApplyTrampolineData<'a, 'tl>>>>,
 }
@@ -94,7 +94,7 @@ impl<'a, 'tl> PC<'a, 'tl> {
     /// Passing a `None` for `a_mat` or `p_mat` removes the matrix that is currently used.
     // TODO: should we pass in `Rc`s or should we just transfer ownership.
     // or we could do `Rc<RefCell<Mat>>` so that when you remove the mats we can give mut access back.
-    pub fn set_operators(&mut self, a_mat: impl Into<Option<Rc<Mat<'a>>>>, p_mat: impl Into<Option<Rc<Mat<'a>>>>) -> Result<()> {
+    pub fn set_operators(&mut self, a_mat: impl Into<Option<Rc<Mat<'a, 'tl>>>>, p_mat: impl Into<Option<Rc<Mat<'a, 'tl>>>>) -> Result<()> {
         let a_mat = a_mat.into();
         let p_mat = p_mat.into();
         // TODO: should we make a_mat an `Rc<RefCell<Mat>>`, `Rc<Mat>`, or just a `Mat`
@@ -126,7 +126,7 @@ impl<'a, 'tl> PC<'a, 'tl> {
     /// If the operators have NOT been set with [`KSP`](crate::ksp::KSP::set_operators())/[`PC::set_operators()`](crate::pc::PC::set_operators())
     /// then the operators are created in the PC and returned to the user. In this case, two DIFFERENT
     /// operators will be returned.
-    pub fn get_operators(&self) -> Result<(Rc<Mat<'a>>, Rc<Mat<'a>>)> {
+    pub fn get_operators(&self) -> Result<(Rc<Mat<'a, 'tl>>, Rc<Mat<'a, 'tl>>)> {
         // TODO: maybe this should return Rc<RefCell<T>> so that the caller can edit the matrices
         // https://petsc.org/release/docs/manualpages/PC/PCGetOperators.html#PCGetOperators
         // Although that would mean set_operators should also take Rc<RefCell<T>>
@@ -140,7 +140,7 @@ impl<'a, 'tl> PC<'a, 'tl> {
             let ierr = unsafe { petsc_raw::PCGetOperators(self.pc_p, a_mat_p.as_mut_ptr(), std::ptr::null_mut()) };
             Petsc::check_error(self.world, ierr)?;
 
-            let mut mat = Mat { world: self.world, mat_p: unsafe { a_mat_p.assume_init() } };
+            let mut mat = Mat::new(self.world, unsafe { a_mat_p.assume_init() });
             unsafe { mat.reference()?; }
             Rc::new(mat)
         };
@@ -154,7 +154,7 @@ impl<'a, 'tl> PC<'a, 'tl> {
             let ierr = unsafe { petsc_raw::PCGetOperators(self.pc_p, std::ptr::null_mut(), p_mat_p.as_mut_ptr()) };
             Petsc::check_error(self.world, ierr)?;
 
-            let mut mat = Mat { world: self.world, mat_p: unsafe { p_mat_p.assume_init() } };
+            let mut mat = Mat::new(self.world, unsafe { p_mat_p.assume_init() });
             unsafe { mat.reference()?; }
             Rc::new(mat)
         };
