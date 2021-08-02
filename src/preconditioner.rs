@@ -239,7 +239,7 @@ impl<'a, 'tl> PC<'a, 'tl> {
             let xin = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: xin_p });
             let mut xout = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: xout_p });
             
-            (trampoline_data.get_unchecked_mut().user_f)(&pc, &xin, &mut xout)
+            (trampoline_data.get_mut().user_f)(&pc, &xin, &mut xout)
                 .map_or_else(|err| err.kind as i32, |_| 0)
         }
 

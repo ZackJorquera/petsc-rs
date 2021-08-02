@@ -378,7 +378,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
             let mut f = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: f_p });
             
             // TODO: is this safe, can we move the data in user_f by calling it
-            (trampoline_data.get_unchecked_mut().user_f)(&snes, &x, &mut f)
+            (trampoline_data.get_mut().user_f)(&snes, &x, &mut f)
                 .map_or_else(|err| match err {
                     DomainOrPetscError::DomainErr => {
                         // TODO: `set_function_domain_error` doesn't take mut, but i think it should (because it does
@@ -508,7 +508,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
             let x = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: vec_p });
             let mut a_mat = ManuallyDrop::new(Mat::new(trampoline_data.world, mat1_p));
             
-            (trampoline_data.get_unchecked_mut().user_f)(&snes, &x, &mut a_mat)
+            (trampoline_data.get_mut().user_f)(&snes, &x, &mut a_mat)
                 .map_or_else(|err| match err {
                     DomainOrPetscError::DomainErr => {
                         // TODO: `set_jacobian_domain_error` doesn't take mut, but i think it should (because it does
@@ -648,7 +648,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
             let mut a_mat = ManuallyDrop::new(Mat::new(trampoline_data.world, mat1_p));
             let mut p_mat = ManuallyDrop::new(Mat::new(trampoline_data.world, mat2_p));
             
-            (trampoline_data.get_unchecked_mut().user_f)(&snes, &x, &mut a_mat, &mut p_mat)
+            (trampoline_data.get_mut().user_f)(&snes, &x, &mut a_mat, &mut p_mat)
                 .map_or_else(|err| match err {
                     DomainOrPetscError::DomainErr => {
                         let perr = snes.set_jacobian_domain_error();
@@ -706,7 +706,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
             // as we dont expose the mut to the user closure, we only use it with `set_jacobian_domain_error`
             let snes = ManuallyDrop::new(SNES::new(trampoline_data.world, snes_p));
             
-            (trampoline_data.get_unchecked_mut().user_f)(&snes, it, norm)
+            (trampoline_data.get_mut().user_f)(&snes, it, norm)
                 .map_or_else(|err| err.kind as i32, |_| 0)
         }
 
@@ -821,7 +821,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
             let mut changed_y = false;
             let mut changed_w = false;
             
-            let res = (trampoline_data.get_unchecked_mut().user_f)(&ls, &snes, &x_vec, &mut y_vec, &mut w_vec, &mut changed_y, &mut changed_w)
+            let res = (trampoline_data.get_mut().user_f)(&ls, &snes, &x_vec, &mut y_vec, &mut w_vec, &mut changed_y, &mut changed_w)
                 .map_or_else(|err| err.kind as i32, |_| 0);
 
             *changed_y_p = changed_y.into();
@@ -901,7 +901,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
             let mut y_vec = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: y_p });
             let mut changed_y = false;
             
-            let res = (trampoline_data.get_unchecked_mut().user_f)(&ls, &snes, &x_vec, &mut y_vec, &mut changed_y)
+            let res = (trampoline_data.get_mut().user_f)(&ls, &snes, &x_vec, &mut y_vec, &mut changed_y)
                 .map_or_else(|err| err.kind as i32, |_| 0);
 
             *changed_y_p = changed_y.into();

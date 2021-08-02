@@ -1502,7 +1502,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             let x_slice = slice::from_raw_parts(x, dim as usize);
             let bcval_slice = slice::from_raw_parts_mut(bcval, nc as usize);
             
-            (trampoline_data.get_unchecked_mut().user_f1)(dim, time, x_slice, nc, bcval_slice)
+            (trampoline_data.get_mut().user_f1)(dim, time, x_slice, nc, bcval_slice)
                 .map_or_else(|err| err.kind as i32, |_| 0)
         }
 
@@ -1515,7 +1515,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             let x_slice = slice::from_raw_parts(x, dim as usize);
             let bcval_slice = slice::from_raw_parts_mut(bcval, nc as usize);
             
-            (trampoline_data.get_unchecked_mut().user_f2.as_mut().unwrap())(dim, time, x_slice, nc, bcval_slice)
+            (trampoline_data.get_mut().user_f2.as_mut().unwrap())(dim, time, x_slice, nc, bcval_slice)
                 .map_or_else(|err| err.kind as i32, |_| 0)
         }
 
@@ -2217,7 +2217,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             let x_slice = slice::from_raw_parts(x, dim as usize);
             let u_slice = slice::from_raw_parts_mut(u, nf as usize);
             
-            (trampoline_data.get_unchecked_mut().user_f)(dim, time, x_slice, nf, u_slice)
+            (trampoline_data.get_mut().user_f)(dim, time, x_slice, nf, u_slice)
                 .map_or_else(|err| err.kind as i32, |_| 0)
         }
 
@@ -2395,7 +2395,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             let x_slice = slice::from_raw_parts(x, dim as usize);
             let u_slice = slice::from_raw_parts_mut(u, nf as usize);
             
-            (trampoline_data.get_unchecked_mut().user_f)(dim, time, x_slice, nf, u_slice)
+            (trampoline_data.get_mut().user_f)(dim, time, x_slice, nf, u_slice)
                 .map_or_else(|err| err.kind as i32, |_| 0)
         }
 
@@ -2870,7 +2870,7 @@ impl<'a, 'tl> DS<'a, 'tl> {
             let x_slice = slice::from_raw_parts(x, dim as usize);
             let u_slice = slice::from_raw_parts_mut(u, nc as usize);
             
-            (trampoline_data.get_unchecked_mut().user_f)(dim, time, x_slice, nc, u_slice)
+            (trampoline_data.get_mut().user_f)(dim, time, x_slice, nc, u_slice)
                 .map_or_else(|err| err.kind as i32, |_| 0)
         }
 

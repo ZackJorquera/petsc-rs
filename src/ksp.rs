@@ -290,7 +290,7 @@ impl<'a, 'tl> KSP<'a, 'tl> {
             let mut a_mat = ManuallyDrop::new(Mat::new(trampoline_data.world, mat1_p));
             let mut p_mat = ManuallyDrop::new(Mat::new(trampoline_data.world, mat2_p));
             
-            (trampoline_data.get_unchecked_mut().user_f)(&ksp, &mut a_mat, &mut p_mat)
+            (trampoline_data.get_mut().user_f)(&ksp, &mut a_mat, &mut p_mat)
                 .map_or_else(|err| err.kind as i32, |_| 0)
         }
 
@@ -362,7 +362,7 @@ impl<'a, 'tl> KSP<'a, 'tl> {
             }
             let mut vec = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p });
             
-            (trampoline_data.get_unchecked_mut().user_f)(&ksp, &mut vec)
+            (trampoline_data.get_mut().user_f)(&ksp, &mut vec)
                 .map_or_else(|err| err.kind as i32, |_| 0)
         }
 

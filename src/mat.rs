@@ -31,7 +31,21 @@ pub struct Mat<'a, 'tl> {
     pub(crate) world: &'a UserCommunicator,
     pub(crate) mat_p: *mut petsc_raw::_p_Mat, // I could use Mat which is the same thing, but i think using a pointer is more clear
 
-    shell_trampoline_data: Option<Pin<Box<MatShellTrampolineData<'a, 'tl>>>>,
+    // if Mat uses the closures (under the hood) we want to make
+    // sure that it holds the lifetime of them too.
+    pub(crate) _phantom_closure: PhantomData<Box<dyn FnMut(&Mat<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>>
+}
+
+/// A matrix type to be used to define your own matrix type -- perhaps matrix free
+///
+/// [`Deref`]s into [`Mat`]
+pub struct MatShell<'a, 'tl, T> {
+    pub(crate) inner_mat: Mat<'a, 'tl>,
+    shell_trampoline_data: Option<Pin<Box<MatShellTrampolineData<'a, 'tl, T>>>>,
+
+    // When we are in a closure, we don't want to give the caller access the the
+    // trampoline data so we take a reference to it and store it here.
+    tmp_mat_data: Option<&'tl mut T>
 }
 
 /// A wrapper around [`Mat`] that is used when the [`Mat`] shouldn't be destroyed.
@@ -100,9 +114,9 @@ use petsc_raw::MatReuse;
 /// [`Mat`] Type
 pub type MatType = crate::petsc_raw::MatTypeEnum;
 
-/// Specifies a matrix operation that has a "`Mat` `Vector` `Vector`" function signature.
+/// Specifies a matrix operation that has a "`Mat` `Vector` `mut Vector`" function signature.
 ///
-/// You would use [`Mat::shell_set_operation_mvv()`] with a closure that has the following
+/// You would use [`MatShell::shell_set_operation_mvv()`] with a closure that has the following
 /// signature `FnMut(&Mat, &Vector, &mut Vector) -> Result<()>`.
 ///
 /// This implements [`From`] and [`Into`] with [`MatOperation`] so you don't have to use
@@ -133,9 +147,9 @@ pub enum MatOperationMVV {
 // repr type MatOperationMVV uses.
 static MAT_OPERATION_MVV_TABLE: [usize; 4] = [3,5,7,9];
 
-/// Specifies a matrix operation that has a "`Mat` `Vector` `Vector` `Vector`" function signature.
+/// Specifies a matrix operation that has a "`Mat` `Vector` `Vector` `mut Vector`" function signature.
 ///
-/// You would use [`Mat::shell_set_operation_mvvv()`] with a closure that has the following
+/// You would use [`MatShell::shell_set_operation_mvvv()`] with a closure that has the following
 /// signature `FnMut(&Mat, &Vector, &Vector, &mut Vector) -> Result<()>`.
 ///
 /// This implements [`From`] and [`Into`] with [`MatOperation`] so you don't have to use
@@ -163,9 +177,9 @@ pub enum MatOperationMVVV {
 
 static MAT_OPERATION_MVVV_TABLE: [usize; 4] = [4,6,8,10];
 
-/// Specifies a matrix operation that has a "`Mat` `Vector`" function signature.
+/// Specifies a matrix operation that has a "`Mat` `mut Vector`" function signature.
 ///
-/// You would use [`Mat::shell_set_operation_mv()`] with a closure that has the following
+/// You would use [`MatShell::shell_set_operation_mv()`] with a closure that has the following
 /// signature `FnMut(&Mat, &mut Vector) -> Result<()>`.
 ///
 /// This implements [`From`] and [`Into`] with [`MatOperation`] so you don't have to use
@@ -187,25 +201,52 @@ pub enum MatOperationMV {
 
 static MAT_OPERATION_MV_TABLE: [usize; 1] = [17];
 
-enum MatShellSingleOperationTrampolineData<'a, 'tl> {
-    MVVV(Box<dyn FnMut(&Mat<'a, 'tl>, &Vector<'a>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>),
-    MVV(Box<dyn FnMut(&Mat<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>),
-    MV(Box<dyn FnMut(&Mat<'a, 'tl>, &mut Vector<'a>) -> Result<()> + 'tl>),
+/// Specifies a matrix operation that has a "`mut Mat` `Vector` `InsertMode`" function signature.
+///
+/// You would use [`MatShell::shell_set_operation_mvi()`] with a closure that has the following
+/// signature `FnMut(&mut Mat, &Vector, InsertMode) -> Result<()>`.
+///
+/// This implements [`From`] and [`Into`] with [`MatOperation`] so you don't have to use
+/// this enum directly.
+// Note, the C API specifically defines the operations with numbers so
+// it should be fine to also rely on that here.
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+#[allow(non_camel_case_types)]
+pub enum MatOperationMVI {
+    /// op for [`Mat::diagonal_set()`]
+    MATOP_DIAGONAL_SET=47,
+    // There are probably more that have the correct function signature that can be
+    // added in the future. If you add any entries here, you must also add them to the
+    // `impl From<MatOperation> for MatOperationMVI` at the bottom of the file and to the
+    // table bellow. You also need to change the size use by the seq! macro in
+    // `shell_set_operation_mvi` (there is a comment there).
 }
 
-struct MatShellTrampolineData<'a, 'tl> {
+static MAT_OPERATION_MVI_TABLE: [usize; 1] = [47];
+
+/// Internal struct to help with multiple types of closures
+enum MatShellSingleOperationTrampolineData<'a, 'tl, T> {
+    MVVV(Box<dyn FnMut(&MatShell<'a, 'tl, T>, &Vector<'a>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>),
+    MVV(Box<dyn FnMut(&MatShell<'a, 'tl, T>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>),
+    MV(Box<dyn FnMut(&MatShell<'a, 'tl, T>, &mut Vector<'a>) -> Result<()> + 'tl>),
+    MVI(Box<dyn FnMut(&mut MatShell<'a, 'tl, T>, &Vector<'a>, InsertMode) -> Result<()> + 'tl>),
+}
+
+struct MatShellTrampolineData<'a, 'tl, T> {
     #[allow(dead_code)]
     world: &'a UserCommunicator,
     // TODO: there are 148 ops, but this might change so we should get this number in a better way
     // Also if this number changes, this is not the only occurrence of it. You
     // will have to change it in other places too.
-    user_funcs: [Option<MatShellSingleOperationTrampolineData<'a, 'tl>>; 148],
+    user_funcs: [Option<MatShellSingleOperationTrampolineData<'a, 'tl, T>>; 148],
+    data: Option<Box<T>>,
 }
 
 impl<'a, 'tl> Mat<'a, 'tl> {
     /// Same as `Mat { ... }` but sets all optional params to `None`
     pub(crate) fn new(world: &'a UserCommunicator, mat_p: *mut petsc_raw::_p_Mat) -> Self {
-        Mat { world, mat_p, shell_trampoline_data: None, }
+        Mat { world, mat_p, _phantom_closure: PhantomData }
     }
 
     /// Same at [`Petsc::mat_create()`].
@@ -218,32 +259,26 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     }
 
     /// Creates a new matrix class for use with a user-defined private data storage format. 
-    pub fn create_shell(world: &'a UserCommunicator, local_rows: impl Into<Option<PetscInt>>,
+    pub fn create_shell<T>(world: &'a UserCommunicator, local_rows: impl Into<Option<PetscInt>>,
         local_cols: impl Into<Option<PetscInt>>, global_rows: impl Into<Option<PetscInt>>,
-        global_cols: impl Into<Option<PetscInt>>) -> Result<Self>
+        global_cols: impl Into<Option<PetscInt>>, data: impl Into<Option<Box<T>>>) -> Result<MatShell<'a, 'tl, T>>
     {
-        let none_array = seq!(N in 0..148 { [ #( None, )* ]});
-        let ctx = Box::pin(MatShellTrampolineData { 
-            world: world, user_funcs: none_array, });
-        let mut mat_p = MaybeUninit::uninit();
-        let ierr = unsafe { petsc_raw::MatCreateShell(world.as_raw(),
-            local_rows.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
-            local_cols.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
-            global_rows.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
-            global_cols.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
-            std::mem::transmute(ctx.as_ref()),
-            mat_p.as_mut_ptr()) };
-        Petsc::check_error(world, ierr)?;
-
-        Ok(Mat { world, mat_p: unsafe { mat_p.assume_init() }, shell_trampoline_data: Some(ctx)})
+        MatShell::create(world, local_rows, local_cols, global_rows, global_cols, data)
     }
 
     /// Duplicates a matrix including the non-zero structure.
     ///
     /// Note, [`Mat::clone()`] is the same as `x.duplicate(MatDuplicateOption::MAT_COPY_VALUES)`.
     ///
+    /// This method can NOT be used on a Mat Shell type.
+    ///
     /// See the manual page for [`MatDuplicateOption`](https://petsc.org/release/docs/manualpages/Mat/MatDuplicateOption.html#MatDuplicateOption) for an explanation of these options.
     pub fn duplicate(&self, op: MatDuplicateOption) -> Result<Self> {
+        if self.type_compare(MatType::MATSHELL)? {
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+                "You can't duplicate a MatShell")?;
+        }
+
         let mut mat2_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::MatDuplicate(self.mat_p, op, mat2_p.as_mut_ptr()) };
         Petsc::check_error(self.world, ierr)?;
@@ -829,23 +864,71 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     pub fn type_compare(&self, type_kind: MatType) -> Result<bool> {
         self.type_compare_str(&type_kind.to_string())
     }
+}
 
-    // TODO: add set shell matrix data function that uses MatShellSetContext, maybe
-    // This would allow for operations that mutate the mat, with this method alone
-    // we would get a multiple mutable references error.
-    // in order to do this, however, i think would would have to use a generic and 
-    // a new MatShell type. For now it could deref into a Mat, but in the future it might
-    // make sense for it to impl a Mat trait.
+impl<'a, 'tl, T> MatShell<'a, 'tl, T> {
+    /// Creates a new matrix class for use with a user-defined private data storage format. 
+    // TODO: should we have mat_data not be an option. If you don't want to use it you can
+    // just set it to be `()` or something. And even with the None case you still need to
+    // give a type for `T`.
+    pub fn create(world: &'a UserCommunicator, local_rows: impl Into<Option<PetscInt>>,
+        local_cols: impl Into<Option<PetscInt>>, global_rows: impl Into<Option<PetscInt>>,
+        global_cols: impl Into<Option<PetscInt>>, mat_data: impl Into<Option<Box<T>>>) -> Result<Self>
+    {
+        let data = mat_data.into();
+        let none_array = seq!(N in 0..148 { [ #( None, )* ]});
+        let ctx = Box::pin(MatShellTrampolineData { 
+            world: world, user_funcs: none_array, data });
+        let mut mat_p = MaybeUninit::uninit();
+        let ierr = unsafe { petsc_raw::MatCreateShell(world.as_raw(),
+            local_rows.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
+            local_cols.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
+            global_rows.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
+            global_cols.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
+            std::mem::transmute(ctx.as_ref()),
+            mat_p.as_mut_ptr()) };
+        Petsc::check_error(world, ierr)?;
+
+        let inner_mat = Mat::new(world, unsafe { mat_p.assume_init() });
+        Ok(MatShell { inner_mat, shell_trampoline_data: Some(ctx), tmp_mat_data: None })
+    }
+
+    /// Gets a reference to the mat data.
+    ///
+    /// This is the `mat_data` set when creating the [`MatShell`] with [`MatShell::create()`].
+    ///
+    /// If you set the `mat_data` to be `None`, then this will return `None`, otherwise, `Some`.
+    pub fn get_mat_data(&self) -> Option<&T> {
+        if let Some(td) = self.shell_trampoline_data.as_ref() {
+            td.data.as_deref()
+        } else {
+            self.tmp_mat_data.as_deref()
+        }
+    }
+
+    /// Gets a mutable reference to the mat data.
+    ///
+    /// This is the `mat_data` set when creating the [`MatShell`] with [`MatShell::create()`].
+    ///
+    /// If you set the `mat_data` to be `None`, then this will return `None`, otherwise, `Some`.
+    pub fn get_mat_data_mut(&mut self) -> Option<&mut T> {
+        if let Some(td) = self.shell_trampoline_data.as_mut() {
+            td.data.as_deref_mut()
+        } else {
+            self.tmp_mat_data.as_deref_mut()
+        }
+    }
 
     // TODO: add support for more types of ops. There are two ways i can think of doing it:
-    //     1. Make a different function for each type of method - this could be confusing to
+    //   * 1. Make a different function for each type of method - this could be confusing to
     //        the user, i.e. knowing what is supported and where. Or to solve this we can make a
     //        different enum for each method type. This would also make the trampoline type easier.
     //        We could also implement Into into each of those types from the base type. idk.
     //        We could basically use the same strategy that we are now with the `seq!` macro.
     //     2. Make a new MatOperation enum that contains the rust closure type and have one 
     //        `shell_set_operation` function do all the work. This would mean that we would take Box<dyn _>
-    //        and not a generic like we do now.
+    //        and not a generic like we do now. I dont think this is the best way to do it, at lease
+    //        of the user side, under the hood this makes more sense.
     // Both of these we could slowly roll out one function at a time. Also, it seems like this will
     // be very tedious either way
 
@@ -881,10 +964,12 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// let theta = std::f64::consts::PI as PetscReal / 2.0;
     /// let mat_data = [PetscScalar::cos(theta), -PetscScalar::sin(theta),
     ///                 PetscScalar::sin(theta),  PetscScalar::cos(theta)];
-    /// let mut mat = Mat::create_shell(petsc.world(),2,2,2,2)?;
+    /// // we can set the mat_data or access it by ref, here we set it
+    /// let mut mat = Mat::create_shell(petsc.world(),2,2,2,2, Box::new(mat_data))?;
     /// mat.set_up()?;
     ///
-    /// mat.shell_set_operation_mvv(MatOperation::MATOP_MULT, |_m, x, y| {
+    /// mat.shell_set_operation_mvv(MatOperation::MATOP_MULT, |m, x, y| {
+    ///     let mat_data = m.get_mat_data().unwrap();
     ///     let xx = x.view()?;
     ///     let mut yy = y.view_mut()?;
     ///     yy[0] = mat_data[0] * xx[0] + mat_data[1] * xx[1];
@@ -892,7 +977,8 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     ///     Ok(())
     /// })?;
     ///
-    /// mat.shell_set_operation_mvv(MatOperation::MATOP_MULT_TRANSPOSE, |_m, x, y| {
+    /// mat.shell_set_operation_mvv(MatOperation::MATOP_MULT_TRANSPOSE, |m, x, y| {
+    ///     let mat_data = m.get_mat_data().unwrap();
     ///     let xx = x.view()?;
     ///     let mut yy = y.view_mut()?;
     ///     yy[0] = mat_data[0] * xx[0] + mat_data[2] * xx[1];
@@ -909,7 +995,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// ```
     pub fn shell_set_operation_mvv<F>(&mut self, op: impl Into<MatOperationMVV>, user_f: F) -> Result<()>
     where
-        F: FnMut(&Mat<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
+        F: FnMut(&MatShell<'a, 'tl, T>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
     {
         let op: MatOperationMVV = op.into();
         let closure_anchor = MatShellSingleOperationTrampolineData::MVV(Box::new(user_f));
@@ -920,7 +1006,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
         } else {
             let none_array = seq!(N in 0..148 { [ #( None, )* ]});
             let mut td = MatShellTrampolineData { 
-                world: self.world, user_funcs: none_array };
+                world: self.world, user_funcs: none_array, data: None };
             td.user_funcs[op as usize] = Some(closure_anchor);
             let td_anchor = Box::pin(td);
             let ierr = unsafe { petsc_raw::MatShellSetContext(self.mat_p,
@@ -930,33 +1016,40 @@ impl<'a, 'tl> Mat<'a, 'tl> {
         }
 
         // The `MatOperationMVV` enum has 4 variants so we want to create 4 functions.
-        // We use the `MatOperationMVVTable` to get what the correct index is.
+        // We use the `MAT_OPERATION_MVV_TABLE` to get what the correct index is.
         // If you change `MatOperationMVV`, then you have to update the number 4 used by the seq!
         // macro bellow to be the number of variants in `MatOperationMVV`, or the number of elements
-        // in `MatOperationMVVTable`. Sadly, this macro expects a int literal, so there is no easy way
+        // in `MAT_OPERATION_MVV_TABLE`. Sadly, this macro expects a int literal, so there is no easy way
         // to automatically update it using a const or another macro. There is also another usage of
         // seq! bellow that you have to update.
         seq!(N in 0..4 {
             debug_assert!(N < MAT_OPERATION_MVV_TABLE.len(),
-                "Internal Error: `shell_set_operation_mvv` was not updated, but `MatOperationMVVTable` was.");
-            unsafe extern "C" fn mat_shell_operation_mvv_trampoline_#N (mat_p: *mut petsc_raw::_p_Mat, x_p: *mut petsc_raw::_p_Vec,
+                "Internal Error: `shell_set_operation_mvv` was not updated, but `MAT_OPERATION_MVV_TABLE` was.");
+            unsafe extern "C" fn mat_shell_operation_mvv_trampoline_#N <T> (mat_p: *mut petsc_raw::_p_Mat, x_p: *mut petsc_raw::_p_Vec,
                 y_p: *mut petsc_raw::_p_Vec) -> petsc_raw::PetscErrorCode
             {
                 let mut ctx = MaybeUninit::<*mut ::std::os::raw::c_void>::uninit();
                 // TODO: why does this one take a void* but `PCShellGetContext` takes a void**?
-                // I looks like under the hood it is treated like a void** so idk
+                // It looks like under the hood it is treated like a void** so idk
                 let ierr = petsc_raw::MatShellGetContext(mat_p, ctx.as_mut_ptr() as *mut _);
                 assert_eq!(ierr, 0);
 
-                // SAFETY: TODO
-                let trampoline_data: Pin<&mut MatShellTrampolineData> = std::mem::transmute(ctx.assume_init());
-                let world = trampoline_data.world;
+                // SAFETY: We construct ctx to be a Pin<Box<MatShellTrampolineData<T>>> but pass it in as a *void.
+                // Box<T> is equivalent to *T (or &T) for ffi. Because the MatShell owns the closure we can make sure
+                // everything in it (and the closure its self) lives for at least as long as this function can be
+                // called.
+                // We don't construct a Box<> because we dont want to drop anything
+                let trampoline_data: Pin<&mut MatShellTrampolineData<T>>
+                    = std::mem::transmute(ctx.assume_init());
+                let MatShellTrampolineData { world, user_funcs, data } = trampoline_data.get_mut();
+                let world = *world;
 
-                let mat = ManuallyDrop::new(Mat::new(world, mat_p));
+                let mat = ManuallyDrop::new(MatShell { inner_mat: Mat::new(world, mat_p), 
+                    shell_trampoline_data: None, tmp_mat_data: data.as_deref_mut() });
                 let x = ManuallyDrop::new(Vector {world, vec_p: x_p });
                 let mut y = ManuallyDrop::new(Vector {world, vec_p: y_p });
                 
-                (trampoline_data.get_unchecked_mut().user_funcs[MAT_OPERATION_MVV_TABLE[N]].as_mut()
+                (user_funcs[MAT_OPERATION_MVV_TABLE[N]].as_mut()
                     .map_or_else(
                         || Petsc::set_error(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
                             format!(
@@ -975,13 +1068,13 @@ impl<'a, 'tl> Mat<'a, 'tl> {
         });
         // If you change `MatOperationMVV`, then you have to update the number 4 used by the seq!
         // macro bellow to be the number of variants in `MatOperationMVV`, or the number of elements
-        // in `MatOperationMVVTable`.
-        let mut trampolines = [mat_shell_operation_mvv_trampoline_0
+        // in `MAT_OPERATION_MVV_TABLE`.
+        let mut trampolines = [mat_shell_operation_mvv_trampoline_0::<T>
             as unsafe extern "C" fn(_, _, _) -> _;148];
         seq!(N in 0..4 {
             debug_assert!(N < MAT_OPERATION_MVV_TABLE.len(),
-                "Internal Error: `shell_set_operation_mvv` was not updated, but `MatOperationMVVTable` was.");
-            trampolines[MAT_OPERATION_MVV_TABLE[N]] = mat_shell_operation_mvv_trampoline_#N;
+                "Internal Error: `shell_set_operation_mvv` was not updated, but `MAT_OPERATION_MVV_TABLE` was.");
+            trampolines[MAT_OPERATION_MVV_TABLE[N]] = mat_shell_operation_mvv_trampoline_#N::<T>;
         });
 
         let mat_shell_operation_trampoline_ptr: ::std::option::Option<
@@ -998,7 +1091,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
 
     /// Allows user to set a matrix operation for a shell matrix.
     ///
-    /// Works in the same way [`Mat::shell_set_operation_mvv()`] works, but you can only set operations
+    /// Works in the same way [`MatShell::shell_set_operation_mvv()`] works, but you can only set operations
     /// that expect the function signature:
     /// `FnMut(&Mat, &mut Vector) -> Result<()>`
     ///
@@ -1027,7 +1120,8 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// let theta = std::f64::consts::PI as PetscReal / 2.0;
     /// let mat_data = [PetscScalar::cos(theta), -PetscScalar::sin(theta),
     ///                 PetscScalar::sin(theta),  PetscScalar::cos(theta)];
-    /// let mut mat = Mat::create_shell(petsc.world(),2,2,2,2)?;
+    /// // we can set the mat_data or access it by ref, here we access it by ref
+    /// let mut mat = Mat::create_shell(petsc.world(),2,2,2,2,Option::<Box<()>>::None)?;
     /// mat.set_up()?;
     ///
     /// mat.shell_set_operation_mv(MatOperation::MATOP_GET_DIAGONAL, |_m, v| {
@@ -1044,18 +1138,18 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// ```
     pub fn shell_set_operation_mv<F>(&mut self, op: impl Into<MatOperationMV>, user_f: F) -> Result<()>
     where
-        F: FnMut(&Mat<'a, 'tl>, &mut Vector<'a>) -> Result<()> + 'tl
+        F: FnMut(&MatShell<'a, 'tl, T>, &mut Vector<'a>) -> Result<()> + 'tl
     {
         let op: MatOperationMV = op.into();
         let closure_anchor = MatShellSingleOperationTrampolineData::MV(Box::new(user_f));
-
+    
         if let Some(td) = self.shell_trampoline_data.as_mut() {
             let _ = td.as_mut().user_funcs[op as usize].take();
             td.as_mut().user_funcs[op as usize] = Some(closure_anchor);
         } else {
             let none_array = seq!(N in 0..148 { [ #( None, )* ]});
             let mut td = MatShellTrampolineData { 
-                world: self.world, user_funcs: none_array };
+                world: self.world, user_funcs: none_array, data: None };
             td.user_funcs[op as usize] = Some(closure_anchor);
             let td_anchor = Box::pin(td);
             let ierr = unsafe { petsc_raw::MatShellSetContext(self.mat_p,
@@ -1063,34 +1157,41 @@ impl<'a, 'tl> Mat<'a, 'tl> {
             Petsc::check_error(self.world, ierr)?;
             self.shell_trampoline_data = Some(td_anchor);
         }
-
+    
         // The `MatOperationMV` enum has 1 variants so we want to create 1 functions.
-        // We use the `MatOperationMVTable` to get what the correct index is.
+        // We use the `MAT_OPERATION_MV_TABLE` to get what the correct index is.
         // If you change `MatOperationMV`, then you have to update the number 1 used by the seq!
         // macro bellow to be the number of variants in `MatOperationMV`, or the number of elements
-        // in `MatOperationMVTable`. Sadly, this macro expects a int literal, so there is no easy way
+        // in `MAT_OPERATION_MV_TABLE`. Sadly, this macro expects a int literal, so there is no easy way
         // to automatically update it using a const or another macro. There is also another usage of
         // seq! bellow that you have to update.
         seq!(N in 0..1 {
             debug_assert!(N < MAT_OPERATION_MV_TABLE.len(),
-                "Internal Error: `shell_set_operation_mv` was not updated, but `MatOperationMVTable` was.");
-            unsafe extern "C" fn mat_shell_operation_mv_trampoline_#N (mat_p: *mut petsc_raw::_p_Mat,
+                "Internal Error: `shell_set_operation_mv` was not updated, but `MAT_OPERATION_MV_TABLE` was.");
+            unsafe extern "C" fn mat_shell_operation_mv_trampoline_#N <T> (mat_p: *mut petsc_raw::_p_Mat,
                 v_p: *mut petsc_raw::_p_Vec) -> petsc_raw::PetscErrorCode
             {
                 let mut ctx = MaybeUninit::<*mut ::std::os::raw::c_void>::uninit();
                 // TODO: why does this one take a void* but `PCShellGetContext` takes a void**?
-                // I looks like under the hood it is treated like a void** so idk
+                // It looks like under the hood it is treated like a void** so idk
                 let ierr = petsc_raw::MatShellGetContext(mat_p, ctx.as_mut_ptr() as *mut _);
                 assert_eq!(ierr, 0);
+    
+                // SAFETY: We construct ctx to be a Pin<Box<MatShellTrampolineData<T>>> but pass it in as a *void.
+                // Box<T> is equivalent to *T (or &T) for ffi. Because the MatShell owns the closure we can make sure
+                // everything in it (and the closure its self) lives for at least as long as this function can be
+                // called.
+                // We don't construct a Box<> because we dont want to drop anything
+                let trampoline_data: Pin<&mut MatShellTrampolineData<T>>
+                    = std::mem::transmute(ctx.assume_init());
+                let MatShellTrampolineData { world, user_funcs, data } = trampoline_data.get_mut();
+                let world = *world;
 
-                // SAFETY: TODO
-                let trampoline_data: Pin<&mut MatShellTrampolineData> = std::mem::transmute(ctx.assume_init());
-                let world = trampoline_data.world;
-
-                let mat = ManuallyDrop::new(Mat::new(world, mat_p));
+                let mat = ManuallyDrop::new(MatShell { inner_mat: Mat::new(world, mat_p), 
+                    shell_trampoline_data: None, tmp_mat_data: data.as_deref_mut() });
                 let mut v = ManuallyDrop::new(Vector {world, vec_p: v_p });
-                
-                (trampoline_data.get_unchecked_mut().user_funcs[MAT_OPERATION_MV_TABLE[N]].as_mut()
+    
+                (user_funcs[MAT_OPERATION_MV_TABLE[N]].as_mut()
                     .map_or_else(
                         || Petsc::set_error(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
                             format!(
@@ -1109,30 +1210,30 @@ impl<'a, 'tl> Mat<'a, 'tl> {
         });
         // If you change `MatOperationMV`, then you have to update the number 1 used by the seq!
         // macro bellow to be the number of variants in `MatOperationMV`, or the number of elements
-        // in `MatOperationMVTable`.
-        let mut trampolines = [mat_shell_operation_mv_trampoline_0
+        // in `MAT_OPERATION_MV_TABLE`.
+        let mut trampolines = [mat_shell_operation_mv_trampoline_0::<T>
             as unsafe extern "C" fn(_, _) -> _;148];
         seq!(N in 0..1 {
             debug_assert!(N < MAT_OPERATION_MV_TABLE.len(),
-                "Internal Error: `shell_set_operation_mv` was not updated, but `MatOperationMVTable` was.");
-            trampolines[MAT_OPERATION_MV_TABLE[N]] = mat_shell_operation_mv_trampoline_#N;
+                "Internal Error: `shell_set_operation_mv` was not updated, but `MAT_OPERATION_MV_TABLE` was.");
+            trampolines[MAT_OPERATION_MV_TABLE[N]] = mat_shell_operation_mv_trampoline_#N::<T>;
         });
-
+    
         let mat_shell_operation_trampoline_ptr: ::std::option::Option<
             unsafe extern "C" fn(mat_p: *mut petsc_raw::_p_Mat,
             v_p: *mut petsc_raw::_p_Vec, ) -> petsc_raw::PetscErrorCode, >
             = Some(trampolines[op as usize]);
-
+    
         let ierr = unsafe { petsc_raw::MatShellSetOperation(self.mat_p, op.into(),
             std::mem::transmute(mat_shell_operation_trampoline_ptr)) }; // this will also erase the lifetimes
         Petsc::check_error(self.world, ierr)?;
-
+    
         Ok(())
     }
-
+    
     /// Allows user to set a matrix operation for a shell matrix.
     ///
-    /// Works in the same way [`Mat::shell_set_operation_mvv()`] works, but you can only set operations
+    /// Works in the same way [`MatShell::shell_set_operation_mvv()`] works, but you can only set operations
     /// that expect the function signature:
     /// `FnMut(&Mat, &Vector, &Vector, &mut Vector) -> Result<()>`
     ///
@@ -1149,18 +1250,18 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     ///
     pub fn shell_set_operation_mvvv<F>(&mut self, op: impl Into<MatOperationMVVV>, user_f: F) -> Result<()>
     where
-        F: FnMut(&Mat<'a, 'tl>, &Vector<'a>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
+        F: FnMut(&MatShell<'a, 'tl, T>, &Vector<'a>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
     {
         let op: MatOperationMVVV = op.into();
         let closure_anchor = MatShellSingleOperationTrampolineData::MVVV(Box::new(user_f));
-
+    
         if let Some(td) = self.shell_trampoline_data.as_mut() {
             let _ = td.as_mut().user_funcs[op as usize].take();
             td.as_mut().user_funcs[op as usize] = Some(closure_anchor);
         } else {
             let none_array = seq!(N in 0..148 { [ #( None, )* ]});
             let mut td = MatShellTrampolineData { 
-                world: self.world, user_funcs: none_array };
+                world: self.world, user_funcs: none_array, data: None };
             td.user_funcs[op as usize] = Some(closure_anchor);
             let td_anchor = Box::pin(td);
             let ierr = unsafe { petsc_raw::MatShellSetContext(self.mat_p,
@@ -1168,36 +1269,43 @@ impl<'a, 'tl> Mat<'a, 'tl> {
             Petsc::check_error(self.world, ierr)?;
             self.shell_trampoline_data = Some(td_anchor);
         }
-
+    
         // The `MatOperationMVVV` enum has 4 variants so we want to create 4 functions.
-        // We use the `MatOperationMVVVTable` to get what the correct index is.
+        // We use the `MAT_OPERATION_MVVV_TABLE` to get what the correct index is.
         // If you change `MatOperationMVVV`, then you have to update the number 1 used by the seq!
         // macro bellow to be the number of variants in `MatOperationMVVV`, or the number of elements
-        // in `MatOperationMVVVTable`. Sadly, this macro expects a int literal, so there is no easy way
+        // in `MAT_OPERATION_MVVV_TABLE`. Sadly, this macro expects a int literal, so there is no easy way
         // to automatically update it using a const or another macro. There is also another usage of
         // seq! bellow that you have to update.
         seq!(N in 0..4 {
-            debug_assert!(N < MAT_OPERATION_MV_TABLE.len(),
-                "Internal Error: `shell_set_operation_mvvv` was not updated, but `MatOperationMVVVTable` was.");
-            unsafe extern "C" fn mat_shell_operation_mvvv_trampoline_#N (mat_p: *mut petsc_raw::_p_Mat,
+            debug_assert!(N < MAT_OPERATION_MVVV_TABLE.len(),
+                "Internal Error: `shell_set_operation_mvvv` was not updated, but `MAT_OPERATION_MVVV_TABLE` was.");
+            unsafe extern "C" fn mat_shell_operation_mvvv_trampoline_#N <T> (mat_p: *mut petsc_raw::_p_Mat,
                 v1_p: *mut petsc_raw::_p_Vec, v2_p: *mut petsc_raw::_p_Vec, v3_p: *mut petsc_raw::_p_Vec) -> petsc_raw::PetscErrorCode
             {
                 let mut ctx = MaybeUninit::<*mut ::std::os::raw::c_void>::uninit();
                 // TODO: why does this one take a void* but `PCShellGetContext` takes a void**?
-                // I looks like under the hood it is treated like a void** so idk
+                // It looks like under the hood it is treated like a void** so idk
                 let ierr = petsc_raw::MatShellGetContext(mat_p, ctx.as_mut_ptr() as *mut _);
                 assert_eq!(ierr, 0);
+    
+                // SAFETY: We construct ctx to be a Pin<Box<MatShellTrampolineData<T>>> but pass it in as a *void.
+                // Box<T> is equivalent to *T (or &T) for ffi. Because the MatShell owns the closure we can make sure
+                // everything in it (and the closure its self) lives for at least as long as this function can be
+                // called.
+                // We don't construct a Box<> because we dont want to drop anything
+                let trampoline_data: Pin<&mut MatShellTrampolineData<T>>
+                    = std::mem::transmute(ctx.assume_init());
+                let MatShellTrampolineData { world, user_funcs, data } = trampoline_data.get_mut();
+                let world = *world;
 
-                // SAFETY: TODO
-                let trampoline_data: Pin<&mut MatShellTrampolineData> = std::mem::transmute(ctx.assume_init());
-                let world = trampoline_data.world;
-
-                let mat = ManuallyDrop::new(Mat::new(world, mat_p));
+                let mat = ManuallyDrop::new(MatShell { inner_mat: Mat::new(world, mat_p), 
+                    shell_trampoline_data: None, tmp_mat_data: data.as_deref_mut() });
                 let v1 = ManuallyDrop::new(Vector {world, vec_p: v1_p });
                 let v2 = ManuallyDrop::new(Vector {world, vec_p: v2_p });
                 let mut v3 = ManuallyDrop::new(Vector {world, vec_p: v3_p });
-                
-                (trampoline_data.get_unchecked_mut().user_funcs[MAT_OPERATION_MVVV_TABLE[N]].as_mut()
+    
+                (user_funcs[MAT_OPERATION_MVVV_TABLE[N]].as_mut()
                     .map_or_else(
                         || Petsc::set_error(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
                             format!(
@@ -1216,24 +1324,187 @@ impl<'a, 'tl> Mat<'a, 'tl> {
         });
         // If you change `MatOperationMVVV`, then you have to update the number 1 used by the seq!
         // macro bellow to be the number of variants in `MatOperationMVVV`, or the number of elements
-        // in `MatOperationMVVVTable`.
-        let mut trampolines = [mat_shell_operation_mvvv_trampoline_0
+        // in `MAT_OPERATION_MVVV_TABLE`.
+        let mut trampolines = [mat_shell_operation_mvvv_trampoline_0::<T>
             as unsafe extern "C" fn(_, _, _, _) -> _;148];
         seq!(N in 0..4 {
-            debug_assert!(N < MAT_OPERATION_MV_TABLE.len(),
-                "Internal Error: `shell_set_operation_mvvv` was not updated, but `MatOperationMVVVTable` was.");
-            trampolines[MAT_OPERATION_MVVV_TABLE[N]] = mat_shell_operation_mvvv_trampoline_#N;
+            debug_assert!(N < MAT_OPERATION_MVVV_TABLE.len(),
+                "Internal Error: `shell_set_operation_mvvv` was not updated, but `MAT_OPERATION_MVVV_TABLE` was.");
+            trampolines[MAT_OPERATION_MVVV_TABLE[N]] = mat_shell_operation_mvvv_trampoline_#N::<T>;
         });
-
+    
         let mat_shell_operation_trampoline_ptr: ::std::option::Option<
             unsafe extern "C" fn(mat_p: *mut petsc_raw::_p_Mat, v1_p: *mut petsc_raw::_p_Vec,
                 v2_p: *mut petsc_raw::_p_Vec, v3_p: *mut petsc_raw::_p_Vec, ) -> petsc_raw::PetscErrorCode, >
             = Some(trampolines[op as usize]);
-
+    
         let ierr = unsafe { petsc_raw::MatShellSetOperation(self.mat_p, op.into(),
             std::mem::transmute(mat_shell_operation_trampoline_ptr)) }; // this will also erase the lifetimes
         Petsc::check_error(self.world, ierr)?;
+    
+        Ok(())
+    }
 
+    /// Allows user to set a matrix operation for a shell matrix.
+    ///
+    /// You can only set operations that expect the correct function signature:
+    /// `FnMut(&mut Mat, &Vector, InsertMode) -> Result<()>`
+    ///
+    /// This function only works for operations in [`MatOperationMVI`].
+    ///
+    /// # Parameters
+    ///
+    /// * `op` - the name of the operation
+    /// * `user_f` - the name of the operation
+    ///     * `mat` - The matrix
+    ///     * `v` - The input vector
+    ///     * `im` - insert mode
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
+    /// # use ndarray::{s, array};
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// # let petsc = Petsc::init_no_args()?;
+    /// // Note: this example will only work in a uniprocessor comm world. Also, right
+    /// // now this example only works when `PetscScalar` is `PetscReal`. It will fail
+    /// // to compile if `PetscScalar` is `PetscComplex`.
+    /// let mut v = Vector::from_slice(petsc.world(), &[0.0, 0.0])?;
+    /// let v_add = Vector::from_slice(petsc.world(), &[1.2, 2.1])?;
+    ///
+    /// let theta = std::f64::consts::PI as PetscReal;
+    /// let mat_data = [PetscScalar::cos(theta), -PetscScalar::sin(theta),
+    ///                 PetscScalar::sin(theta),  PetscScalar::cos(theta)];
+    /// let mut mat = Mat::create_shell(petsc.world(),2,2,2,2, Box::new(mat_data))?;
+    /// mat.shell_set_manage_scaling_shifts()?;
+    /// mat.set_up()?;
+    ///
+    /// mat.shell_set_operation_mv(MatOperation::MATOP_GET_DIAGONAL, |m, v| {
+    ///     let mat_data = m.get_mat_data().unwrap();
+    ///     let mut vv = v.view_mut()?;
+    ///     vv[0] = mat_data[0];
+    ///     vv[1] = mat_data[3];
+    ///     Ok(())
+    /// })?;
+    ///
+    /// mat.shell_set_operation_mvi(MatOperation::MATOP_DIAGONAL_SET, |m, v, im| {
+    ///     let mat_data = m.get_mat_data_mut().unwrap();
+    ///     let mut vv = v.view()?;
+    ///     if im == InsertMode::ADD_VALUES {
+    ///         mat_data[0] += vv[0];
+    ///         mat_data[3] += vv[1];
+    ///     } else {
+    ///         mat_data[0] = vv[0];
+    ///         mat_data[3] = vv[1];
+    ///     }
+    ///     Ok(())
+    /// })?;
+    ///
+    /// mat.get_diagonal(&mut v)?;
+    /// assert!(v.view()?.slice(s![..]).abs_diff_eq(&array![-1.0, -1.0], 1e-15));
+    /// mat.diagonal_set(&v_add, InsertMode::ADD_VALUES)?;
+    /// mat.get_diagonal(&mut v)?;
+    /// assert!(v.view()?.slice(s![..]).abs_diff_eq(&array![0.2, 1.1], 1e-15));
+    /// mat.diagonal_set(&v_add, InsertMode::INSERT_VALUES)?;
+    /// mat.get_diagonal(&mut v)?;
+    /// assert!(v.view()?.slice(s![..]).abs_diff_eq(&array![1.2, 2.1], 1e-15));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn shell_set_operation_mvi<F>(&mut self, op: impl Into<MatOperationMVI>, user_f: F) -> Result<()>
+    where
+        F: FnMut(&mut MatShell<'a, 'tl, T>, &Vector<'a>, InsertMode) -> Result<()> + 'tl
+    {
+        let op: MatOperationMVI = op.into();
+        let closure_anchor = MatShellSingleOperationTrampolineData::MVI(Box::new(user_f));
+    
+        if let Some(td) = self.shell_trampoline_data.as_mut() {
+            let _ = td.as_mut().user_funcs[op as usize].take();
+            td.as_mut().user_funcs[op as usize] = Some(closure_anchor);
+        } else {
+            let none_array = seq!(N in 0..148 { [ #( None, )* ]});
+            let mut td = MatShellTrampolineData { 
+                world: self.world, user_funcs: none_array, data: None };
+            td.user_funcs[op as usize] = Some(closure_anchor);
+            let td_anchor = Box::pin(td);
+            let ierr = unsafe { petsc_raw::MatShellSetContext(self.mat_p,
+                std::mem::transmute(td_anchor.as_ref())) }; // this will also erase the lifetimes
+            Petsc::check_error(self.world, ierr)?;
+            self.shell_trampoline_data = Some(td_anchor);
+        }
+    
+        // The `MatOperationMVI` enum has 1 variants so we want to create 1 functions.
+        // We use the `MAT_OPERATION_MVI_TABLE` to get what the correct index is.
+        // If you change `MatOperationMVI`, then you have to update the number 1 used by the seq!
+        // macro bellow to be the number of variants in `MatOperationMVI`, or the number of elements
+        // in `MAT_OPERATION_MVI_TABLE`. Sadly, this macro expects a int literal, so there is no easy way
+        // to automatically update it using a const or another macro. There is also another usage of
+        // seq! bellow that you have to update.
+        seq!(N in 0..1 {
+            debug_assert!(N < MAT_OPERATION_MVI_TABLE.len(),
+                "Internal Error: `shell_set_operation_mvi` was not updated, but `MAT_OPERATION_MVI_TABLE` was.");
+            unsafe extern "C" fn mat_shell_operation_mvi_trampoline_#N <T> (mat_p: *mut petsc_raw::_p_Mat,
+                v_p: *mut petsc_raw::_p_Vec, im: InsertMode) -> petsc_raw::PetscErrorCode
+            {
+                let mut ctx = MaybeUninit::<*mut ::std::os::raw::c_void>::uninit();
+                // TODO: why does this one take a void* but `PCShellGetContext` takes a void**?
+                // It looks like under the hood it is treated like a void** so idk
+                let ierr = petsc_raw::MatShellGetContext(mat_p, ctx.as_mut_ptr() as *mut _);
+                assert_eq!(ierr, 0);
+    
+                // SAFETY: We construct ctx to be a Pin<Box<MatShellTrampolineData<T>>> but pass it in as a *void.
+                // Box<T> is equivalent to *T (or &T) for ffi. Because the MatShell owns the closure we can make sure
+                // everything in it (and the closure its self) lives for at least as long as this function can be
+                // called.
+                // We don't construct a Box<> because we dont want to drop anything
+                let trampoline_data: Pin<&mut MatShellTrampolineData<T>>
+                    = std::mem::transmute(ctx.assume_init());
+                let MatShellTrampolineData { world, user_funcs, data } = trampoline_data.get_mut();
+                let world = *world;
+
+                let mut mat = ManuallyDrop::new(MatShell { inner_mat: Mat::new(world, mat_p), 
+                    shell_trampoline_data: None, tmp_mat_data: data.as_deref_mut() });
+                let v = ManuallyDrop::new(Vector {world, vec_p: v_p });
+    
+                (user_funcs[MAT_OPERATION_MVI_TABLE[N]].as_mut()
+                    .map_or_else(
+                        || Petsc::set_error(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
+                            format!(
+                                "Rust function for {:?} was not found",
+                                std::mem::transmute::<u32, MatOperation>(MAT_OPERATION_MVI_TABLE[N] as u32))),
+                        |f| if let MatShellSingleOperationTrampolineData::MVI(f) = f {
+                                (*f)(&mut mat, &v, im)
+                            } else {
+                                // This should never happen
+                                Petsc::set_error(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
+                                    format!("Rust closure for Mat Op {:?} is the wrong type",
+                                    std::mem::transmute::<u32, MatOperation>(MAT_OPERATION_MVI_TABLE[N] as u32)))
+                            } ))
+                    .map_or_else(|err| err.kind as i32, |_| 0)
+            }
+        });
+        // If you change `MatOperationMVI`, then you have to update the number 1 used by the seq!
+        // macro bellow to be the number of variants in `MatOperationMVI`, or the number of elements
+        // in `MAT_OPERATION_MVI_TABLE`.
+        let mut trampolines = [mat_shell_operation_mvi_trampoline_0::<T>
+            as unsafe extern "C" fn(_, _, _) -> _;148];
+        seq!(N in 0..1 {
+            debug_assert!(N < MAT_OPERATION_MVI_TABLE.len(),
+                "Internal Error: `shell_set_operation_mv` was not updated, but `MAT_OPERATION_MVI_TABLE` was.");
+            trampolines[MAT_OPERATION_MVI_TABLE[N]] = mat_shell_operation_mvi_trampoline_#N::<T>;
+        });
+    
+        let mat_shell_operation_trampoline_ptr: ::std::option::Option<
+            unsafe extern "C" fn(mat_p: *mut petsc_raw::_p_Mat,
+            v_p: *mut petsc_raw::_p_Vec, im: InsertMode) -> petsc_raw::PetscErrorCode, >
+            = Some(trampolines[op as usize]);
+    
+        let ierr = unsafe { petsc_raw::MatShellSetOperation(self.mat_p, op.into(),
+            std::mem::transmute(mat_shell_operation_trampoline_ptr)) }; // this will also erase the lifetimes
+        Petsc::check_error(self.world, ierr)?;
+    
         Ok(())
     }
 }
@@ -1310,7 +1581,29 @@ impl From<MatOperation> for MatOperationMV {
     }
 }
 
-impl<'a, 'tl> Clone for Mat<'a, 'tl> {
+impl Into<MatOperation> for MatOperationMVI {
+    fn into(self) -> MatOperation {
+        // Safety: The values of `MatOperationMVI` are always valid values of `MatOperation`
+        // because we take them directly from `MatOperation`. Also, because the numeric values
+        // of `MatOperation` are relied upon in the C API, it is safe to assume that as more
+        // varients are added to `MatOperation`, none of the old ones will be touched.
+        // Also the repr types for both enums are `u32` so memory layout/alignment will match.
+        unsafe { std::mem::transmute(self) }
+    }
+}
+
+impl From<MatOperation> for MatOperationMVI {
+    /// This will panic if the value of `op` can't be a valid `MatOperationMVI`
+    fn from(op: MatOperation) -> MatOperationMVI {
+        match op {
+            MatOperation::MATOP_DIAGONAL_SET => MatOperationMVI::MATOP_DIAGONAL_SET,
+            // There are more
+            _ => panic!("The given op: `{:?}` can not be turned into a `MatOperationMVI`", op)
+        }
+    }
+}
+
+impl<'a> Clone for Mat<'a, '_> {
     /// Same as [`x.duplicate(MatDuplicateOption::MAT_COPY_VALUES)`](Mat::duplicate()).
     fn clone(&self) -> Self {
         self.duplicate(MatDuplicateOption::MAT_COPY_VALUES).unwrap()
@@ -1350,6 +1643,20 @@ impl<'a, 'tl> Deref for BorrowMatMut<'a, 'tl, '_> {
 impl<'a, 'tl> DerefMut for BorrowMatMut<'a, 'tl, '_> {
     fn deref_mut(&mut self) -> &mut Mat<'a, 'tl> {
         self.owned_mat.deref_mut()
+    }
+}
+
+impl<'a, 'tl, T> Deref for MatShell<'a, 'tl, T> {
+    type Target = Mat<'a, 'tl>;
+
+    fn deref(&self) -> &Mat<'a, 'tl> {
+        &self.inner_mat
+    }
+}
+
+impl<'a, 'tl, T> DerefMut for MatShell<'a, 'tl, T> {
+    fn deref_mut(&mut self) -> &mut Mat<'a, 'tl> {
+        &mut self.inner_mat
     }
 }
 
@@ -1396,6 +1703,7 @@ impl<'a> Mat<'a, '_> {
         MatSetOption, pub set_option, input MatOption, option, input bool, flg, takes mut, #[doc = "Sets a parameter option for a matrix.\n\n\
             Some options may be specific to certain storage formats. Some options determine how values will be inserted (or added). Sorted, row-oriented input will generally assemble the fastest. The default is row-oriented."];
         MatGetDiagonal, pub get_diagonal, input &mut Vector, v.as_raw, #[doc = "Gets the diagonal of a matrix. "];
+        MatDiagonalSet, pub diagonal_set, input &Vector, d.as_raw, input InsertMode, im, takes mut, #[doc = "Computes `self += D`, where `D` is a diagonal matrix that is represented as a vector (`d`). Or `Y[i,i] = d[i]` if `im` is INSERT_VALUES."];
     }
 
     // TODO: there is more to each of these allocations that i should add support for
@@ -1448,6 +1756,13 @@ impl<'a> Mat<'a, '_> {
         * `bs` - size of block, the blocks are ALWAYS square. One can use `MatSetBlockSizes()` to set a different row and column blocksize \
         but the row blocksize always defines the size of the blocks. The column blocksize sets the blocksize of the vectors obtained with `MatCreateVecs()`\n\
         * Read docs for [`Mat::mpi_aij_set_preallocation()`](Mat::mpi_aij_set_preallocation())"];
+    }
+}
+
+impl<'a, 'tl, T> MatShell<'a, 'tl, T> {    
+    wrap_simple_petsc_member_funcs! {
+        MatShellSetManageScalingShifts, pub shell_set_manage_scaling_shifts, takes mut, #[doc = "Allows the user to control the scaling and shift operations of the [`MatShell`].\n\n\
+            Must be called immediately after [`MatShell::create()`]."];
     }
 }
 
