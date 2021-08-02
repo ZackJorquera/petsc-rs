@@ -100,11 +100,106 @@ use petsc_raw::MatReuse;
 /// [`Mat`] Type
 pub type MatType = crate::petsc_raw::MatTypeEnum;
 
+/// Specifies a matrix operation that has a "`Mat` `Vector` `Vector`" function signature.
+///
+/// You would use [`Mat::shell_set_operation_mvv()`] with a closure that has the following
+/// signature `FnMut(&Mat, &Vector, &mut Vector) -> Result<()>`.
+///
+/// This implements [`From`] and [`Into`] with [`MatOperation`] so you don't have to use
+/// this enum directly.
+// Note, the C API specifically defines the operations with numbers so
+// it should be fine to also rely on that here.
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+#[allow(non_camel_case_types)]
+pub enum MatOperationMVV {
+    /// op for [`Mat::mult()`]
+    MATOP_MULT = 3,
+    /// op for [`Mat::mult_transpose()`]
+    MATOP_MULT_TRANSPOSE = 5,
+    // TODO: Does solve allow for the b vec to be NULL? if so then this should be here
+    /// op for `MatSolve()`
+    MATOP_SOLVE = 7,
+    /// op for `MatSolveTranspose()`
+    MATOP_SOLVE_TRANSPOSE = 9,
+    // There are probably more that have the correct function signature that can be
+    // added in the future. If you add any entries here, you must also add them to the
+    // `impl From<MatOperation> for MatOperationMVV` at the bottom of the file and to the
+    // table bellow. You also need to change the size use by the seq! macro in
+    // `shell_set_operation_mvv` (there is a comment there).
+}
+
+// Note, this is usize because it is used for indexing. It doesn't matter what
+// repr type MatOperationMVV uses.
+static MAT_OPERATION_MVV_TABLE: [usize; 4] = [3,5,7,9];
+
+/// Specifies a matrix operation that has a "`Mat` `Vector` `Vector` `Vector`" function signature.
+///
+/// You would use [`Mat::shell_set_operation_mvvv()`] with a closure that has the following
+/// signature `FnMut(&Mat, &Vector, &Vector, &mut Vector) -> Result<()>`.
+///
+/// This implements [`From`] and [`Into`] with [`MatOperation`] so you don't have to use
+/// this enum directly.
+// Note, the C API specifically defines the operations with numbers so
+// it should be fine to also rely on that here.
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+#[allow(non_camel_case_types)]
+pub enum MatOperationMVVV {
+    /// op for [`Mat::mult_add()`]
+    MATOP_MULT_ADD = 5,
+    /// op for [`Mat::mult_transpose_add()`]
+    MATOP_MULT_TRANSPOSE_ADD = 6,
+    /// op for `MatSolveAdd()`
+    MATOP_SOLVE_ADD = 8,
+    /// op for `MatSolveTransposeAdd()`
+    MATOP_SOLVE_TRANSPOSE_ADD = 10,
+    // There are probably more that have the correct function signature that can be
+    // added in the future. If you add any entries here, you must also add them to the
+    // `impl From<MatOperation> for MatOperationMVVV` at the bottom of the file and to the
+    // table bellow. You also need to change the size use by the seq! macro in
+    // `shell_set_operation_mvvv` (there is a comment there).
+}
+
+static MAT_OPERATION_MVVV_TABLE: [usize; 4] = [4,6,8,10];
+
+/// Specifies a matrix operation that has a "`Mat` `Vector`" function signature.
+///
+/// You would use [`Mat::shell_set_operation_mv()`] with a closure that has the following
+/// signature `FnMut(&Mat, &mut Vector) -> Result<()>`.
+///
+/// This implements [`From`] and [`Into`] with [`MatOperation`] so you don't have to use
+/// this enum directly.
+// Note, the C API specifically defines the operations with numbers so
+// it should be fine to also rely on that here.
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+#[allow(non_camel_case_types)]
+pub enum MatOperationMV {
+    /// op for [`Mat::get_diagonal()`]
+    MATOP_GET_DIAGONAL = 17,
+    // There are probably more that have the correct function signature that can be
+    // added in the future. If you add any entries here, you must also add them to the
+    // `impl From<MatOperation> for MatOperationMV` at the bottom of the file and to the
+    // table bellow. You also need to change the size use by the seq! macro in
+    // `shell_set_operation_mv` (there is a comment there).
+}
+
+static MAT_OPERATION_MV_TABLE: [usize; 1] = [17];
+
+enum MatShellSingleOperationTrampolineData<'a, 'tl> {
+    MVVV(Box<dyn FnMut(&Mat<'a, 'tl>, &Vector<'a>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>),
+    MVV(Box<dyn FnMut(&Mat<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>),
+    MV(Box<dyn FnMut(&Mat<'a, 'tl>, &mut Vector<'a>) -> Result<()> + 'tl>),
+}
+
 struct MatShellTrampolineData<'a, 'tl> {
     #[allow(dead_code)]
     world: &'a UserCommunicator,
-    // TODO: there are 148 ops, but this might change so we should get this number is a better way
-    user_funcs: [Option<Box<dyn FnMut(&Mat<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>>; 148],
+    // TODO: there are 148 ops, but this might change so we should get this number in a better way
+    // Also if this number changes, this is not the only occurrence of it. You
+    // will have to change it in other places too.
+    user_funcs: [Option<MatShellSingleOperationTrampolineData<'a, 'tl>>; 148],
 }
 
 impl<'a, 'tl> Mat<'a, 'tl> {
@@ -736,6 +831,12 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     }
 
     // TODO: add set shell matrix data function that uses MatShellSetContext, maybe
+    // This would allow for operations that mutate the mat, with this method alone
+    // we would get a multiple mutable references error.
+    // in order to do this, however, i think would would have to use a generic and 
+    // a new MatShell type. For now it could deref into a Mat, but in the future it might
+    // make sense for it to impl a Mat trait.
+
     // TODO: add support for more types of ops. There are two ways i can think of doing it:
     //     1. Make a different function for each type of method - this could be confusing to
     //        the user, i.e. knowing what is supported and where. Or to solve this we can make a
@@ -753,8 +854,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// You can only set operations that expect the correct function signature:
     /// `FnMut(&Mat, &Vector, &mut Vector) -> Result<()>`
     ///
-    /// Right now this function only works for `MATOP_MULT`, `MATOP_MULT_TRANSPOSE`,
-    /// `MATOP_SOLVE`, `MATOP_SOLVE_TRANSPOSE` (more to come).
+    /// This function only works for operations in [`MatOperationMVV`].
     ///
     /// # Parameters
     ///
@@ -807,22 +907,12 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn shell_set_operation_mvv<F>(&mut self, op: MatOperation, user_f: F) -> Result<()>
+    pub fn shell_set_operation_mvv<F>(&mut self, op: impl Into<MatOperationMVV>, user_f: F) -> Result<()>
     where
         F: FnMut(&Mat<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
     {
-        match op {
-            MatOperation::MATOP_MULT
-                | MatOperation::MATOP_MULT_TRANSPOSE
-                | MatOperation::MATOP_SOLVE
-                | MatOperation::MATOP_SOLVE_TRANSPOSE
-                // There are more
-                => Ok(()),
-            _ => Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_OUTOFRANGE,
-                format!("You can not set the `{:?}` operation with `Mat::shell_set_operation_mvv`.", op)),
-        }?;
-
-        let closure_anchor = Box::new(user_f);
+        let op: MatOperationMVV = op.into();
+        let closure_anchor = MatShellSingleOperationTrampolineData::MVV(Box::new(user_f));
 
         if let Some(td) = self.shell_trampoline_data.as_mut() {
             let _ = td.as_mut().user_funcs[op as usize].take();
@@ -839,8 +929,17 @@ impl<'a, 'tl> Mat<'a, 'tl> {
             self.shell_trampoline_data = Some(td_anchor);
         }
 
-        seq!(N in 0..148 {
-            unsafe extern "C" fn mat_shell_operation_trampoline_#N (mat_p: *mut petsc_raw::_p_Mat, x_p: *mut petsc_raw::_p_Vec,
+        // The `MatOperationMVV` enum has 4 variants so we want to create 4 functions.
+        // We use the `MatOperationMVVTable` to get what the correct index is.
+        // If you change `MatOperationMVV`, then you have to update the number 4 used by the seq!
+        // macro bellow to be the number of variants in `MatOperationMVV`, or the number of elements
+        // in `MatOperationMVVTable`. Sadly, this macro expects a int literal, so there is no easy way
+        // to automatically update it using a const or another macro. There is also another usage of
+        // seq! bellow that you have to update.
+        seq!(N in 0..4 {
+            debug_assert!(N < MAT_OPERATION_MVV_TABLE.len(),
+                "Internal Error: `shell_set_operation_mvv` was not updated, but `MatOperationMVVTable` was.");
+            unsafe extern "C" fn mat_shell_operation_mvv_trampoline_#N (mat_p: *mut petsc_raw::_p_Mat, x_p: *mut petsc_raw::_p_Vec,
                 y_p: *mut petsc_raw::_p_Vec) -> petsc_raw::PetscErrorCode
             {
                 let mut ctx = MaybeUninit::<*mut ::std::os::raw::c_void>::uninit();
@@ -857,23 +956,32 @@ impl<'a, 'tl> Mat<'a, 'tl> {
                 let x = ManuallyDrop::new(Vector {world, vec_p: x_p });
                 let mut y = ManuallyDrop::new(Vector {world, vec_p: y_p });
                 
-                // TODO: dont unwrap, make an error and return error code
-                (trampoline_data.get_unchecked_mut().user_funcs[N].as_mut()
+                (trampoline_data.get_unchecked_mut().user_funcs[MAT_OPERATION_MVV_TABLE[N]].as_mut()
                     .map_or_else(
                         || Petsc::set_error(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
                             format!(
                                 "Rust function for {:?} was not found",
-                                std::mem::transmute::<u32, MatOperation>(N as u32))),
-                        |f| (*f)(&mat, &x, &mut y)))
+                                std::mem::transmute::<u32, MatOperation>(MAT_OPERATION_MVV_TABLE[N] as u32))),
+                        |f| if let MatShellSingleOperationTrampolineData::MVV(f) = f {
+                                (*f)(&mat, &x, &mut y)
+                            } else {
+                                // This should never happen
+                                Petsc::set_error(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
+                                    format!("Rust closure for Mat Op {:?} is the wrong type",
+                                    std::mem::transmute::<u32, MatOperation>(MAT_OPERATION_MVV_TABLE[N] as u32)))
+                            } ))
                     .map_or_else(|err| err.kind as i32, |_| 0)
             }
         });
-        seq!(N in 0..148 {
-            let trampolines = [
-                #(
-                    mat_shell_operation_trampoline_#N, 
-                )*
-            ];
+        // If you change `MatOperationMVV`, then you have to update the number 4 used by the seq!
+        // macro bellow to be the number of variants in `MatOperationMVV`, or the number of elements
+        // in `MatOperationMVVTable`.
+        let mut trampolines = [mat_shell_operation_mvv_trampoline_0
+            as unsafe extern "C" fn(_, _, _) -> _;148];
+        seq!(N in 0..4 {
+            debug_assert!(N < MAT_OPERATION_MVV_TABLE.len(),
+                "Internal Error: `shell_set_operation_mvv` was not updated, but `MatOperationMVVTable` was.");
+            trampolines[MAT_OPERATION_MVV_TABLE[N]] = mat_shell_operation_mvv_trampoline_#N;
         });
 
         let mat_shell_operation_trampoline_ptr: ::std::option::Option<
@@ -881,11 +989,324 @@ impl<'a, 'tl> Mat<'a, 'tl> {
             y_p: *mut petsc_raw::_p_Vec, ) -> petsc_raw::PetscErrorCode, >
             = Some(trampolines[op as usize]);
 
-        let ierr = unsafe { petsc_raw::MatShellSetOperation(self.mat_p, op,
+        let ierr = unsafe { petsc_raw::MatShellSetOperation(self.mat_p, op.into(),
             std::mem::transmute(mat_shell_operation_trampoline_ptr)) }; // this will also erase the lifetimes
         Petsc::check_error(self.world, ierr)?;
 
         Ok(())
+    }
+
+    /// Allows user to set a matrix operation for a shell matrix.
+    ///
+    /// Works in the same way [`Mat::shell_set_operation_mvv()`] works, but you can only set operations
+    /// that expect the function signature:
+    /// `FnMut(&Mat, &mut Vector) -> Result<()>`
+    ///
+    /// This function only works for operations in [`MatOperationMV`].
+    ///
+    /// # Parameters
+    ///
+    /// * `op` - the name of the operation
+    /// * `user_f` - the name of the operation
+    ///     * `mat` - The matrix
+    ///     * `v` *(output)* - The output vector
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
+    /// # use ndarray::{s, array};
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// # let petsc = Petsc::init_no_args()?;
+    /// // Note: this example will only work in a uniprocessor comm world. Also, right
+    /// // now this example only works when `PetscScalar` is `PetscReal`. It will fail
+    /// // to compile if `PetscScalar` is `PetscComplex`.
+    /// let mut v = Vector::from_slice(petsc.world(), &[0.0, 0.0])?;
+    ///
+    /// let theta = std::f64::consts::PI as PetscReal / 2.0;
+    /// let mat_data = [PetscScalar::cos(theta), -PetscScalar::sin(theta),
+    ///                 PetscScalar::sin(theta),  PetscScalar::cos(theta)];
+    /// let mut mat = Mat::create_shell(petsc.world(),2,2,2,2)?;
+    /// mat.set_up()?;
+    ///
+    /// mat.shell_set_operation_mv(MatOperation::MATOP_GET_DIAGONAL, |_m, v| {
+    ///     let mut vv = v.view_mut()?;
+    ///     vv[0] = mat_data[0];
+    ///     vv[1] = mat_data[3];
+    ///     Ok(())
+    /// })?;
+    ///
+    /// mat.get_diagonal(&mut v)?;
+    /// assert!(v.view()?.slice(s![..]).abs_diff_eq(&array![0.0, 0.0], 1e-15));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn shell_set_operation_mv<F>(&mut self, op: impl Into<MatOperationMV>, user_f: F) -> Result<()>
+    where
+        F: FnMut(&Mat<'a, 'tl>, &mut Vector<'a>) -> Result<()> + 'tl
+    {
+        let op: MatOperationMV = op.into();
+        let closure_anchor = MatShellSingleOperationTrampolineData::MV(Box::new(user_f));
+
+        if let Some(td) = self.shell_trampoline_data.as_mut() {
+            let _ = td.as_mut().user_funcs[op as usize].take();
+            td.as_mut().user_funcs[op as usize] = Some(closure_anchor);
+        } else {
+            let none_array = seq!(N in 0..148 { [ #( None, )* ]});
+            let mut td = MatShellTrampolineData { 
+                world: self.world, user_funcs: none_array };
+            td.user_funcs[op as usize] = Some(closure_anchor);
+            let td_anchor = Box::pin(td);
+            let ierr = unsafe { petsc_raw::MatShellSetContext(self.mat_p,
+                std::mem::transmute(td_anchor.as_ref())) }; // this will also erase the lifetimes
+            Petsc::check_error(self.world, ierr)?;
+            self.shell_trampoline_data = Some(td_anchor);
+        }
+
+        // The `MatOperationMV` enum has 1 variants so we want to create 1 functions.
+        // We use the `MatOperationMVTable` to get what the correct index is.
+        // If you change `MatOperationMV`, then you have to update the number 1 used by the seq!
+        // macro bellow to be the number of variants in `MatOperationMV`, or the number of elements
+        // in `MatOperationMVTable`. Sadly, this macro expects a int literal, so there is no easy way
+        // to automatically update it using a const or another macro. There is also another usage of
+        // seq! bellow that you have to update.
+        seq!(N in 0..1 {
+            debug_assert!(N < MAT_OPERATION_MV_TABLE.len(),
+                "Internal Error: `shell_set_operation_mv` was not updated, but `MatOperationMVTable` was.");
+            unsafe extern "C" fn mat_shell_operation_mv_trampoline_#N (mat_p: *mut petsc_raw::_p_Mat,
+                v_p: *mut petsc_raw::_p_Vec) -> petsc_raw::PetscErrorCode
+            {
+                let mut ctx = MaybeUninit::<*mut ::std::os::raw::c_void>::uninit();
+                // TODO: why does this one take a void* but `PCShellGetContext` takes a void**?
+                // I looks like under the hood it is treated like a void** so idk
+                let ierr = petsc_raw::MatShellGetContext(mat_p, ctx.as_mut_ptr() as *mut _);
+                assert_eq!(ierr, 0);
+
+                // SAFETY: TODO
+                let trampoline_data: Pin<&mut MatShellTrampolineData> = std::mem::transmute(ctx.assume_init());
+                let world = trampoline_data.world;
+
+                let mat = ManuallyDrop::new(Mat::new(world, mat_p));
+                let mut v = ManuallyDrop::new(Vector {world, vec_p: v_p });
+                
+                (trampoline_data.get_unchecked_mut().user_funcs[MAT_OPERATION_MV_TABLE[N]].as_mut()
+                    .map_or_else(
+                        || Petsc::set_error(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
+                            format!(
+                                "Rust function for {:?} was not found",
+                                std::mem::transmute::<u32, MatOperation>(MAT_OPERATION_MV_TABLE[N] as u32))),
+                        |f| if let MatShellSingleOperationTrampolineData::MV(f) = f {
+                                (*f)(&mat, &mut v)
+                            } else {
+                                // This should never happen
+                                Petsc::set_error(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
+                                    format!("Rust closure for Mat Op {:?} is the wrong type",
+                                    std::mem::transmute::<u32, MatOperation>(MAT_OPERATION_MV_TABLE[N] as u32)))
+                            } ))
+                    .map_or_else(|err| err.kind as i32, |_| 0)
+            }
+        });
+        // If you change `MatOperationMV`, then you have to update the number 1 used by the seq!
+        // macro bellow to be the number of variants in `MatOperationMV`, or the number of elements
+        // in `MatOperationMVTable`.
+        let mut trampolines = [mat_shell_operation_mv_trampoline_0
+            as unsafe extern "C" fn(_, _) -> _;148];
+        seq!(N in 0..1 {
+            debug_assert!(N < MAT_OPERATION_MV_TABLE.len(),
+                "Internal Error: `shell_set_operation_mv` was not updated, but `MatOperationMVTable` was.");
+            trampolines[MAT_OPERATION_MV_TABLE[N]] = mat_shell_operation_mv_trampoline_#N;
+        });
+
+        let mat_shell_operation_trampoline_ptr: ::std::option::Option<
+            unsafe extern "C" fn(mat_p: *mut petsc_raw::_p_Mat,
+            v_p: *mut petsc_raw::_p_Vec, ) -> petsc_raw::PetscErrorCode, >
+            = Some(trampolines[op as usize]);
+
+        let ierr = unsafe { petsc_raw::MatShellSetOperation(self.mat_p, op.into(),
+            std::mem::transmute(mat_shell_operation_trampoline_ptr)) }; // this will also erase the lifetimes
+        Petsc::check_error(self.world, ierr)?;
+
+        Ok(())
+    }
+
+    /// Allows user to set a matrix operation for a shell matrix.
+    ///
+    /// Works in the same way [`Mat::shell_set_operation_mvv()`] works, but you can only set operations
+    /// that expect the function signature:
+    /// `FnMut(&Mat, &Vector, &Vector, &mut Vector) -> Result<()>`
+    ///
+    /// This function only works for operations in [`MatOperationMVVV`].
+    ///
+    /// # Parameters
+    ///
+    /// * `op` - the name of the operation
+    /// * `user_f` - the name of the operation
+    ///     * `mat` - The matrix
+    ///     * `v1` - The first input vector
+    ///     * `v2` - The second input vector
+    ///     * `v3` *(output)* - The output vector
+    ///
+    pub fn shell_set_operation_mvvv<F>(&mut self, op: impl Into<MatOperationMVVV>, user_f: F) -> Result<()>
+    where
+        F: FnMut(&Mat<'a, 'tl>, &Vector<'a>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
+    {
+        let op: MatOperationMVVV = op.into();
+        let closure_anchor = MatShellSingleOperationTrampolineData::MVVV(Box::new(user_f));
+
+        if let Some(td) = self.shell_trampoline_data.as_mut() {
+            let _ = td.as_mut().user_funcs[op as usize].take();
+            td.as_mut().user_funcs[op as usize] = Some(closure_anchor);
+        } else {
+            let none_array = seq!(N in 0..148 { [ #( None, )* ]});
+            let mut td = MatShellTrampolineData { 
+                world: self.world, user_funcs: none_array };
+            td.user_funcs[op as usize] = Some(closure_anchor);
+            let td_anchor = Box::pin(td);
+            let ierr = unsafe { petsc_raw::MatShellSetContext(self.mat_p,
+                std::mem::transmute(td_anchor.as_ref())) }; // this will also erase the lifetimes
+            Petsc::check_error(self.world, ierr)?;
+            self.shell_trampoline_data = Some(td_anchor);
+        }
+
+        // The `MatOperationMVVV` enum has 4 variants so we want to create 4 functions.
+        // We use the `MatOperationMVVVTable` to get what the correct index is.
+        // If you change `MatOperationMVVV`, then you have to update the number 1 used by the seq!
+        // macro bellow to be the number of variants in `MatOperationMVVV`, or the number of elements
+        // in `MatOperationMVVVTable`. Sadly, this macro expects a int literal, so there is no easy way
+        // to automatically update it using a const or another macro. There is also another usage of
+        // seq! bellow that you have to update.
+        seq!(N in 0..4 {
+            debug_assert!(N < MAT_OPERATION_MV_TABLE.len(),
+                "Internal Error: `shell_set_operation_mvvv` was not updated, but `MatOperationMVVVTable` was.");
+            unsafe extern "C" fn mat_shell_operation_mvvv_trampoline_#N (mat_p: *mut petsc_raw::_p_Mat,
+                v1_p: *mut petsc_raw::_p_Vec, v2_p: *mut petsc_raw::_p_Vec, v3_p: *mut petsc_raw::_p_Vec) -> petsc_raw::PetscErrorCode
+            {
+                let mut ctx = MaybeUninit::<*mut ::std::os::raw::c_void>::uninit();
+                // TODO: why does this one take a void* but `PCShellGetContext` takes a void**?
+                // I looks like under the hood it is treated like a void** so idk
+                let ierr = petsc_raw::MatShellGetContext(mat_p, ctx.as_mut_ptr() as *mut _);
+                assert_eq!(ierr, 0);
+
+                // SAFETY: TODO
+                let trampoline_data: Pin<&mut MatShellTrampolineData> = std::mem::transmute(ctx.assume_init());
+                let world = trampoline_data.world;
+
+                let mat = ManuallyDrop::new(Mat::new(world, mat_p));
+                let v1 = ManuallyDrop::new(Vector {world, vec_p: v1_p });
+                let v2 = ManuallyDrop::new(Vector {world, vec_p: v2_p });
+                let mut v3 = ManuallyDrop::new(Vector {world, vec_p: v3_p });
+                
+                (trampoline_data.get_unchecked_mut().user_funcs[MAT_OPERATION_MVVV_TABLE[N]].as_mut()
+                    .map_or_else(
+                        || Petsc::set_error(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
+                            format!(
+                                "Rust function for {:?} was not found",
+                                std::mem::transmute::<u32, MatOperation>(MAT_OPERATION_MVVV_TABLE[N] as u32))),
+                        |f| if let MatShellSingleOperationTrampolineData::MVVV(f) = f {
+                                (*f)(&mat, &v1, &v2, &mut v3)
+                            } else {
+                                // This should never happen
+                                Petsc::set_error(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
+                                    format!("Rust closure for Mat Op {:?} is the wrong type",
+                                    std::mem::transmute::<u32, MatOperation>(MAT_OPERATION_MVVV_TABLE[N] as u32)))
+                            } ))
+                    .map_or_else(|err| err.kind as i32, |_| 0)
+            }
+        });
+        // If you change `MatOperationMVVV`, then you have to update the number 1 used by the seq!
+        // macro bellow to be the number of variants in `MatOperationMVVV`, or the number of elements
+        // in `MatOperationMVVVTable`.
+        let mut trampolines = [mat_shell_operation_mvvv_trampoline_0
+            as unsafe extern "C" fn(_, _, _, _) -> _;148];
+        seq!(N in 0..4 {
+            debug_assert!(N < MAT_OPERATION_MV_TABLE.len(),
+                "Internal Error: `shell_set_operation_mvvv` was not updated, but `MatOperationMVVVTable` was.");
+            trampolines[MAT_OPERATION_MVVV_TABLE[N]] = mat_shell_operation_mvvv_trampoline_#N;
+        });
+
+        let mat_shell_operation_trampoline_ptr: ::std::option::Option<
+            unsafe extern "C" fn(mat_p: *mut petsc_raw::_p_Mat, v1_p: *mut petsc_raw::_p_Vec,
+                v2_p: *mut petsc_raw::_p_Vec, v3_p: *mut petsc_raw::_p_Vec, ) -> petsc_raw::PetscErrorCode, >
+            = Some(trampolines[op as usize]);
+
+        let ierr = unsafe { petsc_raw::MatShellSetOperation(self.mat_p, op.into(),
+            std::mem::transmute(mat_shell_operation_trampoline_ptr)) }; // this will also erase the lifetimes
+        Petsc::check_error(self.world, ierr)?;
+
+        Ok(())
+    }
+}
+
+impl Into<MatOperation> for MatOperationMVV {
+    fn into(self) -> MatOperation {
+        // Safety: The values of `MatOperationMVV` are always valid values of `MatOperation`
+        // because we take them directly from `MatOperation`. Also, because the numeric values
+        // of `MatOperation` are relied upon in the C API, it is safe to assume that as more
+        // varients are added to `MatOperation`, none of the old ones will be touched.
+        // Also the repr types for both enums are `u32` so memory layout/alignment will match.
+        unsafe { std::mem::transmute(self) }
+    }
+}
+
+impl From<MatOperation> for MatOperationMVV {
+    /// This will panic if the value of `op` can't be a valid `MatOperationMVV`
+    fn from(op: MatOperation) -> MatOperationMVV {
+        match op {
+            MatOperation::MATOP_MULT => MatOperationMVV::MATOP_MULT,
+            MatOperation::MATOP_MULT_TRANSPOSE => MatOperationMVV::MATOP_MULT_TRANSPOSE,
+            MatOperation::MATOP_SOLVE => MatOperationMVV::MATOP_SOLVE,
+            MatOperation::MATOP_SOLVE_TRANSPOSE => MatOperationMVV::MATOP_SOLVE_TRANSPOSE,
+            // There are more
+            _ => panic!("The given op: `{:?}` can not be turned into a `MatOperationMVV`", op)
+        }
+    }
+}
+
+impl Into<MatOperation> for MatOperationMVVV {
+    fn into(self) -> MatOperation {
+        // Safety: The values of `MatOperationMVVV` are always valid values of `MatOperation`
+        // because we take them directly from `MatOperation`. Also, because the numeric values
+        // of `MatOperation` are relied upon in the C API, it is safe to assume that as more
+        // varients are added to `MatOperation`, none of the old ones will be touched.
+        // Also the repr types for both enums are `u32` so memory layout/alignment will match.
+        unsafe { std::mem::transmute(self) }
+    }
+}
+
+impl From<MatOperation> for MatOperationMVVV {
+    /// This will panic if the value of `op` can't be a valid `MatOperationMVVV`
+    fn from(op: MatOperation) -> MatOperationMVVV {
+        match op {
+            MatOperation::MATOP_MULT => MatOperationMVVV::MATOP_MULT_ADD,
+            MatOperation::MATOP_MULT_TRANSPOSE => MatOperationMVVV::MATOP_MULT_TRANSPOSE_ADD,
+            MatOperation::MATOP_SOLVE => MatOperationMVVV::MATOP_SOLVE_ADD,
+            MatOperation::MATOP_SOLVE_TRANSPOSE => MatOperationMVVV::MATOP_SOLVE_TRANSPOSE_ADD,
+            // There are more
+            _ => panic!("The given op: `{:?}` can not be turned into a `MatOperationMVVV`", op)
+        }
+    }
+}
+
+impl Into<MatOperation> for MatOperationMV {
+    fn into(self) -> MatOperation {
+        // Safety: The values of `MatOperationMV` are always valid values of `MatOperation`
+        // because we take them directly from `MatOperation`. Also, because the numeric values
+        // of `MatOperation` are relied upon in the C API, it is safe to assume that as more
+        // varients are added to `MatOperation`, none of the old ones will be touched.
+        // Also the repr types for both enums are `u32` so memory layout/alignment will match.
+        unsafe { std::mem::transmute(self) }
+    }
+}
+
+impl From<MatOperation> for MatOperationMV {
+    /// This will panic if the value of `op` can't be a valid `MatOperationMV`
+    fn from(op: MatOperation) -> MatOperationMV {
+        match op {
+            MatOperation::MATOP_GET_DIAGONAL => MatOperationMV::MATOP_GET_DIAGONAL,
+            // There are more
+            _ => panic!("The given op: `{:?}` can not be turned into a `MatOperationMV`", op)
+        }
     }
 }
 
@@ -968,10 +1389,13 @@ impl<'a> Mat<'a, '_> {
         MatGetLocalSize, pub get_local_size, output PetscInt, res1, output PetscInt, res2, #[doc = "Returns the number of local rows and local columns of a matrix.\n\nThat is the local size of the left and right vectors as returned by `MatCreateVecs()`"];
         MatGetSize, pub get_global_size, output PetscInt, res1, output PetscInt, res2, #[doc = "Returns the number of global rows and columns of a matrix."];
         MatMult, pub mult, input &Vector, x.as_raw, input &mut Vector, y.as_raw, #[doc = "Computes the matrix-vector product, y = Ax"];
+        MatMultTranspose, pub mult_transpose, input &Vector, x.as_raw, input &mut Vector, y.as_raw, #[doc = "Computes matrix transpose times a vector y = A^T * x."];
+        MatMultAdd, pub mult_add, input &Vector, v1.as_raw, input &Vector, v2.as_raw, input &mut Vector, v3.as_raw, #[doc = "Computes v3 = v2 + A * v1. "];
+        MatMultTransposeAdd, pub mult_transpose_add, input &Vector, v1.as_raw, input &Vector, v2.as_raw, input &mut Vector, v3.as_raw, #[doc = "Computes v3 = v2 + A^T * v1."];
         MatNorm, pub norm, input NormType, norm_type, output PetscReal, tmp1, #[doc = "Calculates various norms of a matrix."];
         MatSetOption, pub set_option, input MatOption, option, input bool, flg, takes mut, #[doc = "Sets a parameter option for a matrix.\n\n\
             Some options may be specific to certain storage formats. Some options determine how values will be inserted (or added). Sorted, row-oriented input will generally assemble the fastest. The default is row-oriented."];
-        MatMultTranspose, pub mult_transpose, input &Vector, x.as_raw, input &mut Vector, y.as_raw, #[doc = "Computes matrix transpose times a vector y = A^T * x."];
+        MatGetDiagonal, pub get_diagonal, input &mut Vector, v.as_raw, #[doc = "Gets the diagonal of a matrix. "];
     }
 
     // TODO: there is more to each of these allocations that i should add support for
