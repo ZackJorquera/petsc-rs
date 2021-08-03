@@ -47,9 +47,9 @@ fn main() -> petsc_rs::Result<()> {
     let mut x = petsc.vec_create()?;
     x.set_sizes(None, Some(n))?;
     x.set_from_options()?;
-    let mut r = x.duplicate()?;
     let mut g = x.duplicate()?;
     let mut u = x.duplicate()?;
+    let mut r = x.duplicate()?;
     x.set_name("Approximate Solution")?;
     u.set_name("Exact Solution")?;
     
@@ -76,6 +76,15 @@ fn main() -> petsc_rs::Result<()> {
         this vector to zero by calling VecSet().
     */
     x.set_all(PetscScalar::from(0.5))?;
+
+    /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        Create matrix data structure; set Jacobian evaluation routine
+    - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+    #[allow(non_snake_case)]
+    let mut J = petsc.mat_create()?;
+    J.set_sizes(None, None, Some(n), Some(n))?;
+    J.set_from_options()?;
+    J.seq_aij_set_preallocation(3, None)?;
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
      Create nonlinear solver context
@@ -112,15 +121,6 @@ fn main() -> petsc_rs::Result<()> {
         Ok(())
     })?;
 
-    /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-        Create matrix data structure; set Jacobian evaluation routine
-    - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
-    #[allow(non_snake_case)]
-    let mut J = petsc.mat_create()?;
-    J.set_sizes(None, None, Some(n), Some(n))?;
-    J.set_from_options()?;
-    J.seq_aij_set_preallocation(3, None)?;
-
     /*
         Set Jacobian matrix data structure and default Jacobian evaluation
         routine. User can override with:
@@ -131,7 +131,7 @@ fn main() -> petsc_rs::Result<()> {
                             but use matrix-free approx for Jacobian-vector
                             products within Newton-Krylov method
     */
-    snes.set_jacobian_single_mat(J,|_snes, x: &Vector, ap_mat: &mut Mat| {
+    snes.set_jacobian_single_mat(&mut J, |_snes, x: &Vector, ap_mat: &mut Mat| {
         /*
             Evaluates Jacobian matrix.
 

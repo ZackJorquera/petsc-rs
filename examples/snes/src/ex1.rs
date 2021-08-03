@@ -63,7 +63,7 @@ fn main() -> petsc_rs::Result<()> {
         /*
             Set function evaluation routine and vector with closure.
         */
-        snes.set_function(Some(&mut r), |_snes: &SNES, x: &Vector, f: &mut Vector| {
+        snes.set_function(&mut r, |_snes: &SNES, x: &Vector, f: &mut Vector| {
             let x_view = x.view()?;
             let mut f_view = f.view_mut()?;
 
@@ -75,7 +75,7 @@ fn main() -> petsc_rs::Result<()> {
         /*
             Set Jacobian matrix data structure and Jacobian evaluation routine with closure
         */
-        snes.set_jacobian_single_mat(J, |_snes: &SNES, x: &Vector, jac: &mut Mat| {
+        snes.set_jacobian_single_mat(&mut J, |_snes: &SNES, x: &Vector, jac: &mut Mat| {
             let x_view = x.view()?;
 
             jac.assemble_with([(0,0,2.0*x_view[0]), (0,1,x_view[0]), (1,0,x_view[1]), (1,1,x_view[0]+2.0*x_view[1])],
@@ -85,8 +85,8 @@ fn main() -> petsc_rs::Result<()> {
         })?;
     } else {
         // We can also use functions, not closures for input
-        snes.set_function(Some(&mut r), from_function2)?;
-        snes.set_jacobian_single_mat(J, from_jacobian2)?;
+        snes.set_function(&mut r, from_function2)?;
+        snes.set_jacobian_single_mat(&mut J, from_jacobian2)?;
     }
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -

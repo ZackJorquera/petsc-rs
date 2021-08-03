@@ -109,7 +109,9 @@ fn main() -> petsc_rs::Result<()> {
         0 => {
             let mut x_parts = pack.composite_get_access_mut(&mut x)?;
             let mut f_parts = pack.composite_get_access_mut(&mut f)?;
-    
+
+            let mut b_mat = dms[0].create_matrix()?;
+
             let mut snes = SNES::create(petsc.world())?;
             snes.set_dm(dms[0].clone())?; // TODO: does this work
             snes.set_function(f_parts[0].deref_mut(), |snes, x, y| {
@@ -135,8 +137,8 @@ fn main() -> petsc_rs::Result<()> {
 
                 Ok(())
             })?;
-            let b_mat = dms[0].create_matrix()?;
-            snes.set_jacobian_single_mat(b_mat, |snes, x, jac| {
+
+            snes.set_jacobian_single_mat(&mut b_mat, |snes, x, jac| {
                 // TODO: idk if we need to do this, we might be able to just use the dms
                 // from outside of the closure
                 let dms = [snes.try_get_dm().unwrap(), &dms[1]];
@@ -163,10 +165,10 @@ fn main() -> petsc_rs::Result<()> {
         1 => {
             let mut x_parts = pack.composite_get_access_mut(&mut x)?;
             let mut f_parts = pack.composite_get_access_mut(&mut f)?;
+
+            let mut b_mat = dms[1].create_matrix()?;
     
             let mut snes = SNES::create(petsc.world())?;
-
-            let b_mat = dms[1].create_matrix()?;
             
             snes.set_dm(dms[1].clone())?; // TODO: does this work
             
@@ -189,7 +191,7 @@ fn main() -> petsc_rs::Result<()> {
 
                 Ok(())
             })?;
-            snes.set_jacobian_single_mat(b_mat, |snes, x, jac| {
+            snes.set_jacobian_single_mat(&mut b_mat, |snes, x, jac| {
                 // TODO: idk if we need to do this, we might be able to just use the dms
                 // from outside of the closure
                 let dms = [&dms[0], snes.try_get_dm().unwrap()];
@@ -214,9 +216,9 @@ fn main() -> petsc_rs::Result<()> {
             snes.solve(None, &mut x_parts[1])?;
         },
         2 => {
-            let mut snes = SNES::create(petsc.world())?;
-
             let mut b_mat = pack.create_matrix()?;
+
+            let mut snes = SNES::create(petsc.world())?;
 
             if !pass_dm {
                 let pc = snes.get_ksp_mut()?.get_pc_mut()?;
@@ -253,7 +255,7 @@ fn main() -> petsc_rs::Result<()> {
 
                 Ok(())
             })?;
-            snes.set_jacobian_single_mat(b_mat, |snes, x, jac| {
+            snes.set_jacobian_single_mat(&mut b_mat, |snes, x, jac| {
                 // TODO: idk if we need to do this, we might be able to just use the dms/pack
                 // from outside of the closure
                 let pack = snes.try_get_dm().unwrap_or(&pack);

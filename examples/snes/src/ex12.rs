@@ -17,7 +17,7 @@ static HELP_MSG: &str = "Poisson Problem in 2d and 3d with simplicial finite ele
     multilevel nonlinear solvers.\n\n\n";
 
 use core::slice;
-use std::{fmt::{self, Display}, io::{Error, ErrorKind}, rc::Rc, str::FromStr};
+use std::{fmt::{self, Display}, io::{Error, ErrorKind}, ops::DerefMut, rc::Rc, str::FromStr};
 
 use petsc_rs::prelude::*;
 use mpi::topology::UserCommunicator;
@@ -522,7 +522,7 @@ fn main() -> petsc_rs::Result<()> {
     u.set_name("potential")?;
 
     #[allow(non_snake_case)]
-    let J = dm.create_matrix()?;
+    let mut J = dm.create_matrix()?;
 
     #[allow(non_snake_case)]
     let mut A2;
@@ -533,10 +533,7 @@ fn main() -> petsc_rs::Result<()> {
         let (mg, ng) = J.get_global_size()?;
         let (m, n) = J.get_local_size()?;
         #[allow(non_snake_case)]
-        let mut A = Mat::create(J.world())?;
-        A.set_sizes(m, n, mg, ng)?;
-        A.set_type_str("shell")?;
-        A.set_up()?;
+        let mut A = Mat::create_shell(J.world(), m, n, mg, ng, Option::<Box<()>>::None)?;
 
         let mut u_loc = dm.create_local_vector()?;
         let exact_funcs: [Box<dyn FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> petsc_rs::Result<()>>; 1]
@@ -544,8 +541,10 @@ fn main() -> petsc_rs::Result<()> {
         if opt.field_bc { dm.project_field_local_raw(0.0, None, InsertMode::INSERT_BC_VALUES, &mut u_loc, [exact_field])?; }
         else            { dm.project_function_local(0.0, InsertMode::INSERT_BC_VALUES, &mut u_loc, exact_funcs)?; }
 
-        // MatShellSetContext(A, &userJ);
-        // todo!();
+        if cfg!(cfg_false) {
+            A.shell_set_operation_mvv(MatOperation::MATOP_MULT, |_m, _x, _y| todo!())?;
+        }
+
         A2 = A.clone();
         J2 = Some(J.clone());
         Some(A)
@@ -582,10 +581,10 @@ fn main() -> petsc_rs::Result<()> {
     snes.set_from_options()?;
 
     snes.dm_plex_local_fem()?;
-    if let Some(a_mat) = A {
-        snes.set_jacobian(a_mat, J, |_, _, _, _| { Ok (()) })?;
+    if let Some(ref mut a_mat) = A {
+        snes.set_jacobian(a_mat.deref_mut(), &mut J, |_, _, _, _| { Ok (()) })?;
     } else {
-        snes.set_jacobian_single_mat(J, |_, _, _| { Ok (()) })?;
+        snes.set_jacobian_single_mat(&mut J, |_, _, _| { Ok (()) })?;
     }
 
     if opt.run_type == RunType::RUN_FULL || opt.run_type == RunType::RUN_EXACT {
