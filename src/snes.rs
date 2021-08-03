@@ -37,7 +37,7 @@ use mpi::traits::*;
 pub type SNESType = crate::petsc_raw::SNESTypeEnum;
 
 /// Abstract PETSc object that manages all nonlinear solves
-pub struct SNES<'a, 'tl> {
+pub struct SNES<'a, 'tl, 'bl> {
     world: &'a UserCommunicator,
     pub(crate) snes_p: *mut petsc_raw::_p_SNES,
 
@@ -45,8 +45,8 @@ pub struct SNES<'a, 'tl> {
     linesearch: Option<LineSearch<'a>>,
     dm: Option<DM<'a, 'tl>>,
 
-    function_trampoline_data: Option<Pin<Box<SNESFunctionTrampolineData<'a, 'tl>>>>,
-    jacobian_trampoline_data: Option<SNESJacobianTrampolineData<'a, 'tl>>,
+    function_trampoline_data: Option<Pin<Box<SNESFunctionTrampolineData<'a, 'tl, 'bl>>>>,
+    jacobian_trampoline_data: Option<SNESJacobianTrampolineData<'a, 'tl, 'bl>>,
 
     monitor_tramoline_data: Option<Pin<Box<SNESMonitorTrampolineData<'a,'tl>>>>,
     
@@ -95,57 +95,57 @@ impl From<crate::PetscError> for DomainOrPetscError {
     }
 }
 
-struct SNESFunctionTrampolineData<'a, 'tl> {
+struct SNESFunctionTrampolineData<'a, 'tl, 'bl> {
     world: &'a UserCommunicator,
     // This field is only used for its ownership/lifetime.
     // The usage of the pointer/reference is all handled on the c side.
     // However, we might want to use it for something like `get_residuals()`
-    _vec: Option<&'tl mut Vector<'a>>,
-    user_f: Box<dyn FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl>,
+    _vec: Option<&'bl mut Vector<'a>>,
+    user_f: Box<dyn FnMut(&SNES<'a, 'tl, '_>, &Vector<'a>, &mut Vector<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl>,
     set_dm: bool,
 }
 
-enum SNESJacobianTrampolineData<'a, 'tl> {
-    SingleMat(Pin<Box<SNESJacobianSingleTrampolineData<'a, 'tl>>>),
-    DoubleMat(Pin<Box<SNESJacobianDoubleTrampolineData<'a, 'tl>>>),
+enum SNESJacobianTrampolineData<'a, 'tl, 'bl> {
+    SingleMat(Pin<Box<SNESJacobianSingleTrampolineData<'a, 'tl, 'bl>>>),
+    DoubleMat(Pin<Box<SNESJacobianDoubleTrampolineData<'a, 'tl, 'bl>>>),
 }
 
-struct SNESJacobianSingleTrampolineData<'a, 'tl> {
+struct SNESJacobianSingleTrampolineData<'a, 'tl, 'bl> {
     world: &'a UserCommunicator,
-    _ap_mat: Mat<'a>,
-    user_f: Box<dyn FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl>,
+    _ap_mat: &'bl mut Mat<'a, 'tl>,
+    user_f: Box<dyn FnMut(&SNES<'a, 'tl, '_>, &Vector<'a>, &mut Mat<'a, 'tl>) -> std::result::Result<(), DomainOrPetscError> + 'tl>,
     set_dm: bool,
 }
 
-struct SNESJacobianDoubleTrampolineData<'a, 'tl> {
+struct SNESJacobianDoubleTrampolineData<'a, 'tl, 'bl> {
     world: &'a UserCommunicator,
-    _a_mat: Mat<'a>,
-    _p_mat: Mat<'a>,
-    user_f: Box<dyn FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a>, &mut Mat<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl>,
+    _a_mat: &'bl mut Mat<'a, 'tl>,
+    _p_mat: &'bl mut Mat<'a, 'tl>,
+    user_f: Box<dyn FnMut(&SNES<'a, 'tl, '_>, &Vector<'a>, &mut Mat<'a, 'tl>, &mut Mat<'a, 'tl>) -> std::result::Result<(), DomainOrPetscError> + 'tl>,
     set_dm: bool,
 }
 
 struct SNESMonitorTrampolineData<'a, 'tl> {
     world: &'a UserCommunicator,
-    user_f: Box<dyn FnMut(&SNES<'a, 'tl>, PetscInt, PetscReal) -> Result<()> + 'tl>,
+    user_f: Box<dyn FnMut(&SNES<'a, 'tl, '_>, PetscInt, PetscReal) -> Result<()> + 'tl>,
     // set_dm: bool, // TODO: should we add this
 }
 
 struct SNESLineSearchPostCheckTrampolineData<'a, 'tl> {
     world: &'a UserCommunicator,
-    user_f: Box<dyn FnMut(&LineSearch<'a>, &SNES<'a, 'tl>, &Vector<'a>, &mut Vector<'a>, &mut Vector<'a>, &mut bool, &mut bool) -> Result<()> + 'tl>,
+    user_f: Box<dyn FnMut(&LineSearch<'a>, &SNES<'a, 'tl, '_>, &Vector<'a>, &mut Vector<'a>, &mut Vector<'a>, &mut bool, &mut bool) -> Result<()> + 'tl>,
     set_dm: bool,
 }
 
 struct SNESLineSearchPreCheckTrampolineData<'a, 'tl> {
     world: &'a UserCommunicator,
-    user_f: Box<dyn FnMut(&LineSearch<'a>, &SNES<'a, 'tl>, &Vector<'a>, &mut Vector<'a>, &mut bool) -> Result<()> + 'tl>,
+    user_f: Box<dyn FnMut(&LineSearch<'a>, &SNES<'a, 'tl, '_>, &Vector<'a>, &mut Vector<'a>, &mut bool) -> Result<()> + 'tl>,
     set_dm: bool,
 }
 
 pub use petsc_raw::SNESConvergedReason;
 
-impl<'a> Drop for SNES<'a, '_> {
+impl<'a> Drop for SNES<'a, '_, '_> {
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::SNESDestroy(&mut self.snes_p as *mut _) };
         let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
@@ -159,7 +159,7 @@ impl Drop for LineSearch<'_> {
     }
 }
 
-impl<'a, 'tl> SNES<'a, 'tl> {
+impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     /// Same as `SNES { ... }` but sets all optional params to `None`
     pub(crate) fn new(world: &'a UserCommunicator, snes_p: *mut petsc_raw::_p_SNES) -> Self {
         SNES { world, snes_p, ksp: None, function_trampoline_data: None,
@@ -282,10 +282,10 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
     /// let n = 10;
-    /// let mut r = petsc.vec_create()?;
-    /// r.set_sizes(None, n)?;
-    /// r.set_from_options()?;
-    /// let g = r.duplicate()?;
+    /// let mut g = petsc.vec_create()?;
+    /// g.set_sizes(None, n)?;
+    /// g.set_from_options()?;
+    /// let mut r = g.duplicate()?;
     ///
     /// let mut snes = petsc.snes_create()?;
     ///
@@ -310,9 +310,9 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn set_function<'av: 'tl, F>(&mut self, input_vec: impl Into<Option<&'tl mut Vector<'av>>>, user_f: F) -> Result<()>
+    pub fn set_function<F>(&mut self, input_vec: impl Into<Option<&'bl mut Vector<'a>>> + 'bl, user_f: F) -> Result<()>
     where
-        F: FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl
+        F: FnMut(&SNES<'a, 'tl, '_>, &Vector<'a>, &mut Vector<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl
     {
         // TODO: should input_vec be consumed or passed by mut ref? We want to take mutable access for
         // it until the SNES is dropped. so either way its not like we can return mutable access to the
@@ -330,16 +330,8 @@ impl<'a, 'tl> SNES<'a, 'tl> {
         let input_vec_p = input_vec.as_ref().map_or(std::ptr::null_mut(), |v| v.vec_p);
         // Note, we only store input_vec in the trampoline data so it isn't dropped,
         // we never actually use it.
-        // TODO: is this transmute safe? I don't think it is? With out it, i have no idea how to
-        // make this function work. The alternative and "correct" was to do this is to make `'av: 'a`,
-        // or get rid of `'av` in place of `'a`. But, this doesn't work, and i dont know why.
-        // I think using a transmute should be fine because we never edit anything todo with the world,
-        // which is what has the `'a`/`'av` attached to it. We only touch what the vec_p points to 
-        // (through the C API). In fact, in rust, we never touch `_vec` at all. It acts more as phantom
-        // data than anything. Also, when we give the user access to the vec, it has the world from the
-        // `trampoline_data`, i.e. from self.
         let trampoline_data = Box::pin(SNESFunctionTrampolineData { 
-            world: self.world, _vec: unsafe { std::mem::transmute(input_vec) }, user_f: closure_anchor,
+            world: self.world, _vec: input_vec, user_f: closure_anchor,
             set_dm: self.dm.is_some() });
 
         // drop old trampoline_data
@@ -378,7 +370,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
             let mut f = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: f_p });
             
             // TODO: is this safe, can we move the data in user_f by calling it
-            (trampoline_data.get_unchecked_mut().user_f)(&snes, &x, &mut f)
+            (trampoline_data.get_mut().user_f)(&snes, &x, &mut f)
                 .map_or_else(|err| match err {
                     DomainOrPetscError::DomainErr => {
                         // TODO: `set_function_domain_error` doesn't take mut, but i think it should (because it does
@@ -449,7 +441,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     ///
     /// let mut snes = petsc.snes_create()?;
     ///
-    /// snes.set_jacobian_single_mat(J,|_snes, x: &Vector, ap_mat: &mut Mat| {
+    /// snes.set_jacobian_single_mat(&mut J,|_snes, x: &Vector, ap_mat: &mut Mat| {
     ///     let x_view = x.view()?;
     ///
     ///     let d = (PetscScalar::from(n as PetscReal) - 1.0).powi(2);
@@ -466,9 +458,10 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn set_jacobian_single_mat<F>(&mut self, ap_mat: Mat<'a>, user_f: F) -> Result<()>
+    // pub fn set_jacobian_single_mat<F>(&mut self, ap_mat: Mat<'a, 'tl>, user_f: F) -> Result<()>
+    pub fn set_jacobian_single_mat<F>(&mut self, ap_mat: &'bl mut Mat<'a, 'tl>, user_f: F) -> Result<()>
     where
-        F: FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl,
+        F: FnMut(&SNES<'a, 'tl, '_>, &Vector<'a>, &mut Mat<'a, 'tl>) -> std::result::Result<(), DomainOrPetscError> + 'tl,
     {
         // TODO: should we make ap_mat an `Rc<RefCell<Mat>>`
 
@@ -506,9 +499,9 @@ impl<'a, 'tl> SNES<'a, 'tl> {
                 snes.dm = Some(dm); // Note, because snes is not dropped, snes.dm wont be either
             }
             let x = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: vec_p });
-            let mut a_mat = ManuallyDrop::new(Mat { world: trampoline_data.world, mat_p: mat1_p });
+            let mut a_mat = ManuallyDrop::new(Mat::new(trampoline_data.world, mat1_p));
             
-            (trampoline_data.get_unchecked_mut().user_f)(&snes, &x, &mut a_mat)
+            (trampoline_data.get_mut().user_f)(&snes, &x, &mut a_mat)
                 .map_or_else(|err| match err {
                     DomainOrPetscError::DomainErr => {
                         // TODO: `set_jacobian_domain_error` doesn't take mut, but i think it should (because it does
@@ -583,7 +576,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     ///
     /// let mut snes = petsc.snes_create()?;
     ///
-    /// snes.set_jacobian(J, P,|_snes, x: &Vector, a_mat: &mut Mat, p_mat: &mut Mat| {
+    /// snes.set_jacobian(&mut J, &mut P,|_snes, x: &Vector, a_mat: &mut Mat, p_mat: &mut Mat| {
     ///     let x_view = x.view()?;
     ///
     ///     let d = (PetscScalar::from(n as PetscReal) - 1.0).powi(2);
@@ -606,9 +599,9 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn set_jacobian<F>(&mut self, a_mat: Mat<'a>, p_mat: Mat<'a>, user_f: F) -> Result<()>
+    pub fn set_jacobian<F>(&mut self, a_mat: &'bl mut Mat<'a, 'tl>, p_mat: &'bl mut Mat<'a, 'tl>, user_f: F) -> Result<()>
     where
-        F: FnMut(&SNES<'a, 'tl>, &Vector<'a>, &mut Mat<'a>, &mut Mat<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl
+        F: FnMut(&SNES<'a, 'tl, '_>, &Vector<'a>, &mut Mat<'a, 'tl>, &mut Mat<'a, 'tl>) -> std::result::Result<(), DomainOrPetscError> + 'tl
     {
         // TODO: should we make a/p_mat an `Rc<RefCell<Mat>>`
         let closure_anchor = Box::new(user_f);
@@ -645,10 +638,10 @@ impl<'a, 'tl> SNES<'a, 'tl> {
                 snes.dm = Some(dm); // Note, because snes is not dropped, snes.dm wont be either
             }
             let x = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: vec_p });
-            let mut a_mat = ManuallyDrop::new(Mat { world: trampoline_data.world, mat_p: mat1_p });
-            let mut p_mat = ManuallyDrop::new(Mat { world: trampoline_data.world, mat_p: mat2_p });
+            let mut a_mat = ManuallyDrop::new(Mat::new(trampoline_data.world, mat1_p));
+            let mut p_mat = ManuallyDrop::new(Mat::new(trampoline_data.world, mat2_p));
             
-            (trampoline_data.get_unchecked_mut().user_f)(&snes, &x, &mut a_mat, &mut p_mat)
+            (trampoline_data.get_mut().user_f)(&snes, &x, &mut a_mat, &mut p_mat)
                 .map_or_else(|err| match err {
                     DomainOrPetscError::DomainErr => {
                         let perr = snes.set_jacobian_domain_error();
@@ -685,7 +678,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     ///     * `norm - 2-norm function value (may be estimated)
     pub fn monitor_set<F>(&mut self, user_f: F) -> Result<()>
     where
-        F: FnMut(&SNES<'a, 'tl>, PetscInt, PetscReal) -> Result<()> + 'tl
+        F: FnMut(&SNES<'a, 'tl, '_>, PetscInt, PetscReal) -> Result<()> + 'tl
     {
         // TODO: should we make a/p_mat an `Rc<RefCell<Mat>>`
         let closure_anchor = Box::new(user_f);
@@ -706,7 +699,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
             // as we dont expose the mut to the user closure, we only use it with `set_jacobian_domain_error`
             let snes = ManuallyDrop::new(SNES::new(trampoline_data.world, snes_p));
             
-            (trampoline_data.get_unchecked_mut().user_f)(&snes, it, norm)
+            (trampoline_data.get_mut().user_f)(&snes, it, norm)
                 .map_or_else(|err| err.kind as i32, |_| 0)
         }
 
@@ -779,7 +772,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     /// [`linesearch_set_post_check()`](SNES::linesearch_set_post_check) method.
     pub fn linesearch_set_post_check<F>(&mut self, user_f: F) -> Result<()>
     where
-        F: FnMut(&LineSearch<'a>, &SNES<'a, 'tl>, &Vector<'a>, &mut Vector<'a>, &mut Vector<'a>, &mut bool, &mut bool) -> Result<()> + 'tl
+        F: FnMut(&LineSearch<'a>, &SNES<'a, 'tl, '_>, &Vector<'a>, &mut Vector<'a>, &mut Vector<'a>, &mut bool, &mut bool) -> Result<()> + 'tl
     {
         if self.linesearch.is_none() {
             // This just sets the linesearch
@@ -821,7 +814,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
             let mut changed_y = false;
             let mut changed_w = false;
             
-            let res = (trampoline_data.get_unchecked_mut().user_f)(&ls, &snes, &x_vec, &mut y_vec, &mut w_vec, &mut changed_y, &mut changed_w)
+            let res = (trampoline_data.get_mut().user_f)(&ls, &snes, &x_vec, &mut y_vec, &mut w_vec, &mut changed_y, &mut changed_w)
                 .map_or_else(|err| err.kind as i32, |_| 0);
 
             *changed_y_p = changed_y.into();
@@ -861,7 +854,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     /// [`linesearch_set_pre_check()`](SNES::linesearch_set_pre_check) method.
     pub fn linesearch_set_pre_check<F>(&mut self, user_f: F) -> Result<()>
     where
-        F: FnMut(&LineSearch<'a>, &SNES<'a, 'tl>, &Vector<'a>, &mut Vector<'a>, &mut bool) -> Result<()> + 'tl
+        F: FnMut(&LineSearch<'a>, &SNES<'a, 'tl, '_>, &Vector<'a>, &mut Vector<'a>, &mut bool) -> Result<()> + 'tl
     {
         if self.linesearch.is_none() {
             // This just sets the linesearch if it isn't already
@@ -901,7 +894,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
             let mut y_vec = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: y_p });
             let mut changed_y = false;
             
-            let res = (trampoline_data.get_unchecked_mut().user_f)(&ls, &snes, &x_vec, &mut y_vec, &mut changed_y)
+            let res = (trampoline_data.get_mut().user_f)(&ls, &snes, &x_vec, &mut y_vec, &mut changed_y)
                 .map_or_else(|err| err.kind as i32, |_| 0);
 
             *changed_y_p = changed_y.into();
@@ -1106,7 +1099,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
     ///
     /// Note, this method is typically used within nonlinear solvers implementations,
     /// so users would not generally call this routine themselves.
-    pub fn compute_jacobian<'ml, 'mal: 'ml>(&mut self, x: &Vector, a_mat: &mut Mat, p_mat: impl Into<Option<&'ml mut Mat<'mal>>>) -> Result<()> {
+    pub fn compute_jacobian<'ml, 'mal: 'ml, 'mtl: 'ml>(&mut self, x: &Vector, a_mat: &mut Mat, p_mat: impl Into<Option<&'ml mut Mat<'mal, 'mtl>>>) -> Result<()> {
         let ierr = unsafe { petsc_raw::SNESComputeJacobian(self.snes_p, x.vec_p, a_mat.mat_p,
             p_mat.into().map_or(a_mat.mat_p, |p| p.mat_p)) };
         Petsc::check_error(self.world, ierr)
@@ -1119,7 +1112,7 @@ impl<'a, 'tl> SNES<'a, 'tl> {
 }
 
 // macro impls
-impl<'a> SNES<'a, '_> {
+impl<'a> SNES<'a, '_, '_> {
     wrap_simple_petsc_member_funcs! {
         SNESSetFromOptions, pub set_from_options, takes mut, #[doc = "Sets various SNES and KSP parameters from user options."];
         SNESSetUp, pub set_up, takes mut, #[doc = "Sets up the internal data structures for the later use of a nonlinear solver. This will be automatically called with [`SNES::solve()`]."];
@@ -1142,9 +1135,9 @@ impl<'a> SNES<'a, '_> {
     }
 }
 
-impl_petsc_object_traits! { SNES, snes_p, petsc_raw::_p_SNES, '_ }
+impl_petsc_object_traits! { SNES, snes_p, petsc_raw::_p_SNES, '_, '_ }
 
-impl_petsc_view_func!{ SNES, SNESView, '_ }
+impl_petsc_view_func!{ SNES, SNESView, '_, '_ }
 
 impl_petsc_object_traits! { LineSearch, ls_p, petsc_raw::_p_LineSearch }
 

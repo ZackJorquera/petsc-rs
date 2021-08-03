@@ -53,10 +53,10 @@ fn main() -> petsc_rs::Result<()> {
     da.set_up()?;
 
     let mut x = da.create_global_vector()?;
-    let mut r = x.duplicate()?;
     let mut f = x.duplicate()?;
     let mut u = x.duplicate()?;
     let mut last_step = x.duplicate()?;
+    let mut r = x.duplicate()?;
     x.set_name("Solution")?;
     u.set_name("Exact Solution")?;
     f.set_name("Forcing Function")?;
@@ -78,9 +78,16 @@ fn main() -> petsc_rs::Result<()> {
         f.view_with(None)?;
     }
 
+    #[allow(non_snake_case)]
+    let mut J = petsc.mat_create()?;
+    J.set_sizes(None, None, Some(n), Some(n))?;
+    J.set_from_options()?;
+    J.seq_aij_set_preallocation(3, None)?;
+    J.mpi_aij_set_preallocation(3, None, 3, None)?;
+
     let mut snes = petsc.snes_create()?;
 
-    snes.set_function(Some(&mut r), |_snes, x, y| {
+    snes.set_function(&mut r, |_snes, x, y| {
         // Note, is the ex3.c file, this is a `DMGetLocalVector` not a `DMCreateLocalVector`.
         // TODO: make it use `DMGetLocalVector` to be consistent with c examples
         let mut x_local = da.create_local_vector()?;
@@ -112,15 +119,8 @@ fn main() -> petsc_rs::Result<()> {
 
         Ok(())
     })?;
-    
-    #[allow(non_snake_case)]
-    let mut J = petsc.mat_create()?;
-    J.set_sizes(None, None, Some(n), Some(n))?;
-    J.set_from_options()?;
-    J.seq_aij_set_preallocation(3, None)?;
-    J.mpi_aij_set_preallocation(3, None, 3, None)?;
 
-    snes.set_jacobian_single_mat(J, |_snes, x, jac| {
+    snes.set_jacobian_single_mat(&mut J, |_snes, x, jac| {
         let xx = da.da_vec_view(&x)?;
 
         let (_, m, _, _, _, _, _, _, _, _, _, _, _) = da.da_get_info()?;

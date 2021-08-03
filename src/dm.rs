@@ -101,6 +101,8 @@ pub struct DMField<'a> {
 /// Many C API function that take a field, take it as a `PetscObject` to allow for
 /// multiple types of fields. This trait acts in the same way. An example of this trait
 /// being used is the method [`DM::add_field()`].
+///
+/// All variants implement `Into<Field>` so it easier to use.
 pub enum Field<'a, 'tl> {
     // TODO: what all do we except? Im not sure we should except DMField
     /// The discretization object is [`FEDisc`]
@@ -111,6 +113,7 @@ pub enum Field<'a, 'tl> {
     DMField(DMField<'a>),
 }
 
+/// internal type used only for storage.
 enum FieldPriv<'a, 'tl> {
     Known(Field<'a, 'tl>),
     /// The discretization object is unknown, this is only use internally.
@@ -617,12 +620,12 @@ impl<'a, 'tl> DM<'a, 'tl> {
     ///
     /// For structured grid problems, when you call [`Mat::view_with()`] on this matrix it is
     /// displayed using the global natural ordering, NOT in the ordering used internally by PETSc.
-    pub fn create_matrix(&self) -> Result<Mat<'a>> {
+    pub fn create_matrix(&self) -> Result<Mat<'a, 'tl>> {
         let mut mat_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMCreateMatrix(self.dm_p, mat_p.as_mut_ptr()) };
         Petsc::check_error(self.world, ierr)?;
         
-        Ok(Mat { world: self.world, mat_p: unsafe { mat_p.assume_init() } })
+        Ok(Mat::new(self.world, unsafe { mat_p.assume_init() }))
     }
 
     /// Updates global vectors from local vectors.
@@ -1499,7 +1502,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             let x_slice = slice::from_raw_parts(x, dim as usize);
             let bcval_slice = slice::from_raw_parts_mut(bcval, nc as usize);
             
-            (trampoline_data.get_unchecked_mut().user_f1)(dim, time, x_slice, nc, bcval_slice)
+            (trampoline_data.get_mut().user_f1)(dim, time, x_slice, nc, bcval_slice)
                 .map_or_else(|err| err.kind as i32, |_| 0)
         }
 
@@ -1512,7 +1515,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             let x_slice = slice::from_raw_parts(x, dim as usize);
             let bcval_slice = slice::from_raw_parts_mut(bcval, nc as usize);
             
-            (trampoline_data.get_unchecked_mut().user_f2.as_mut().unwrap())(dim, time, x_slice, nc, bcval_slice)
+            (trampoline_data.get_mut().user_f2.as_mut().unwrap())(dim, time, x_slice, nc, bcval_slice)
                 .map_or_else(|err| err.kind as i32, |_| 0)
         }
 
@@ -2214,7 +2217,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             let x_slice = slice::from_raw_parts(x, dim as usize);
             let u_slice = slice::from_raw_parts_mut(u, nf as usize);
             
-            (trampoline_data.get_unchecked_mut().user_f)(dim, time, x_slice, nf, u_slice)
+            (trampoline_data.get_mut().user_f)(dim, time, x_slice, nf, u_slice)
                 .map_or_else(|err| err.kind as i32, |_| 0)
         }
 
@@ -2392,7 +2395,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             let x_slice = slice::from_raw_parts(x, dim as usize);
             let u_slice = slice::from_raw_parts_mut(u, nf as usize);
             
-            (trampoline_data.get_unchecked_mut().user_f)(dim, time, x_slice, nf, u_slice)
+            (trampoline_data.get_mut().user_f)(dim, time, x_slice, nf, u_slice)
                 .map_or_else(|err| err.kind as i32, |_| 0)
         }
 
@@ -2867,7 +2870,7 @@ impl<'a, 'tl> DS<'a, 'tl> {
             let x_slice = slice::from_raw_parts(x, dim as usize);
             let u_slice = slice::from_raw_parts_mut(u, nc as usize);
             
-            (trampoline_data.get_unchecked_mut().user_f)(dim, time, x_slice, nc, u_slice)
+            (trampoline_data.get_mut().user_f)(dim, time, x_slice, nc, u_slice)
                 .map_or_else(|err| err.kind as i32, |_| 0)
         }
 
