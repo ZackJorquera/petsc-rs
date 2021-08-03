@@ -720,7 +720,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
         Petsc::check_error(self.world, ierr)
     }
 
-    /// Sets the type of the [`Mat`] to be [`MatType::MATSHELL`] and then returns a [`MatShell`].
+    /// Sets the type of the [`Mat`] to be [`MatType::MATSHELL`](petsc_raw::MatTypeEnum::MATSHELL) and then returns a [`MatShell`].
     pub fn into_shell<T>(mut self, mat_data: impl Into<Option<Box<T>>>) -> Result<MatShell<'a, 'tl, T>> {
         self.set_type(MatType::MATSHELL)?;
         let mut ms = MatShell::new(self);
@@ -738,15 +738,17 @@ impl<'a, 'tl> Mat<'a, 'tl> {
 pub mod mat_shell {
     use std::{ops::{Deref, DerefMut}, pin::Pin};
     use std::mem::{MaybeUninit, ManuallyDrop};
-    use super::{MatOperation, Mat};
+    use super::{MatOperation, Mat, MatDuplicateOption};
     use crate::{
         Petsc,
         petsc_raw,
         Result,
+        PetscAsRaw,
+        PetscObject,
         PetscInt,
         InsertMode,
         PetscErrorKind,
-        vector::{Vector, },
+        vector::{Vector, VectorType},
     };
     use mpi::topology::UserCommunicator;
     use mpi::traits::*;
@@ -764,7 +766,10 @@ pub mod mat_shell {
 
         // When we are in a closure, we don't want to give the caller access the the
         // trampoline data so we take a reference to it and store it here.
-        tmp_mat_data: Option<&'tl mut T>
+        tmp_mat_data: Option<&'tl mut T>,
+        // Some operations give mutable access to the MatShell, so we want to make sure we limit
+        // what can be done in these closures.
+        in_operation_closure: bool,
     }
 
     /// Specifies a matrix operation that has a "`Mat` `Vector` `mut Vector`" function signature.
@@ -884,6 +889,11 @@ pub mod mat_shell {
         MVV(Box<dyn FnMut(&MatShell<'a, 'tl, T>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>),
         MV(Box<dyn FnMut(&MatShell<'a, 'tl, T>, &mut Vector<'a>) -> Result<()> + 'tl>),
         MVI(Box<dyn FnMut(&mut MatShell<'a, 'tl, T>, &Vector<'a>, InsertMode) -> Result<()> + 'tl>),
+        // TODO: add more as we create more `shell_set_operation` methods
+        #[allow(dead_code)]
+        Destroy(Box<dyn FnOnce(&mut MatShell<'a, 'tl, T>) -> Result<()> + 'tl>),
+        #[allow(dead_code)]
+        Duplicate(Box<dyn FnMut(&MatShell<'a, 'tl, T>, MatDuplicateOption) -> Result<MatShell<'a, 'tl, T>> + 'tl>),
     }
 
     struct MatShellTrampolineData<'a, 'tl, T> {
@@ -893,13 +903,20 @@ pub mod mat_shell {
         // Also if this number changes, this is not the only occurrence of it. You
         // will have to change it in other places too.
         user_funcs: [Option<MatShellSingleOperationTrampolineData<'a, 'tl, T>>; 148],
+        // TODO: do we want a `destroy_func`? what would it even do. Is it just to drop things in the
+        // context? if that is the case then we don't need this as rust will will call that drop on the
+        // context type. It might still make sense to have it though, although.
+        // TODO: add duplicate operation, make sure it doesn't copy closure data. Also then add
+        // clone and duplicate methods for `MatShell` not `Mat`. I think we will have to
+        // have the duplicate be 100% rust as otherwise returning closures will be hard.
         data: Option<Box<T>>,
     }
 
     impl<'a, 'tl, T> MatShell<'a, 'tl, T> {
         /// Same as `MatShell { ... }` but sets all optional params to `None`
         pub(crate) fn new(inner_mat: Mat<'a, 'tl>) -> Self {
-            MatShell { inner_mat, shell_trampoline_data: None, tmp_mat_data: None }
+            MatShell { inner_mat, shell_trampoline_data: None, tmp_mat_data: None,
+                in_operation_closure: false }
         }
 
         /// Creates a new matrix class for use with a user-defined private data storage format. 
@@ -1052,6 +1069,11 @@ pub mod mat_shell {
         where
             F: FnMut(&MatShell<'a, 'tl, T>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
         {
+            if self.in_operation_closure {
+                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ORDER,
+                    "You can not set operations in another operation.")?;
+            }
+
             let op: MatOperationMVV = op.into();
             let closure_anchor = MatShellSingleOperationTrampolineData::MVV(Box::new(user_f));
 
@@ -1101,6 +1123,7 @@ pub mod mat_shell {
 
                     let mut mat = ManuallyDrop::new(MatShell::new(Mat::new(world, mat_p))); 
                     mat.tmp_mat_data = data.as_deref_mut();
+                    mat.in_operation_closure = true;
                     let x = ManuallyDrop::new(Vector {world, vec_p: x_p });
                     let mut y = ManuallyDrop::new(Vector {world, vec_p: y_p });
                     
@@ -1195,6 +1218,11 @@ pub mod mat_shell {
         where
             F: FnMut(&MatShell<'a, 'tl, T>, &mut Vector<'a>) -> Result<()> + 'tl
         {
+            if self.in_operation_closure {
+                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ORDER,
+                    "You can not set operations in another operation.")?;
+            }
+
             let op: MatOperationMV = op.into();
             let closure_anchor = MatShellSingleOperationTrampolineData::MV(Box::new(user_f));
         
@@ -1244,6 +1272,7 @@ pub mod mat_shell {
 
                     let mut mat = ManuallyDrop::new(MatShell::new(Mat::new(world, mat_p))); 
                     mat.tmp_mat_data = data.as_deref_mut();
+                    mat.in_operation_closure = true;
                     let mut v = ManuallyDrop::new(Vector {world, vec_p: v_p });
         
                     (user_funcs[MAT_OPERATION_MV_TABLE[N]].as_mut()
@@ -1306,6 +1335,11 @@ pub mod mat_shell {
         where
             F: FnMut(&MatShell<'a, 'tl, T>, &Vector<'a>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
         {
+            if self.in_operation_closure {
+                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ORDER,
+                    "You can not set operations in another operation.")?;
+            }
+
             let op: MatOperationMVVV = op.into();
             let closure_anchor = MatShellSingleOperationTrampolineData::MVVV(Box::new(user_f));
         
@@ -1355,6 +1389,7 @@ pub mod mat_shell {
 
                     let mut mat = ManuallyDrop::new(MatShell::new(Mat::new(world, mat_p))); 
                     mat.tmp_mat_data = data.as_deref_mut();
+                    mat.in_operation_closure = true;
                     let v1 = ManuallyDrop::new(Vector {world, vec_p: v1_p });
                     let v2 = ManuallyDrop::new(Vector {world, vec_p: v2_p });
                     let mut v3 = ManuallyDrop::new(Vector {world, vec_p: v3_p });
@@ -1471,6 +1506,11 @@ pub mod mat_shell {
         where
             F: FnMut(&mut MatShell<'a, 'tl, T>, &Vector<'a>, InsertMode) -> Result<()> + 'tl
         {
+            if self.in_operation_closure {
+                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ORDER,
+                    "You can not set operations in another operation.")?;
+            }
+
             let op: MatOperationMVI = op.into();
             let closure_anchor = MatShellSingleOperationTrampolineData::MVI(Box::new(user_f));
         
@@ -1520,6 +1560,7 @@ pub mod mat_shell {
 
                     let mut mat = ManuallyDrop::new(MatShell::new(Mat::new(world, mat_p))); 
                     mat.tmp_mat_data = data.as_deref_mut();
+                    mat.in_operation_closure = true;
                     let v = ManuallyDrop::new(Vector {world, vec_p: v_p });
         
                     (user_funcs[MAT_OPERATION_MVI_TABLE[N]].as_mut()
@@ -1560,6 +1601,13 @@ pub mod mat_shell {
             Petsc::check_error(self.world, ierr)?;
         
             Ok(())
+        }
+
+        /// Sets the type of [`Vector`] returned by `MatCreateVecs()`.
+        pub fn shell_set_vector_type(&mut self, vtype: VectorType) -> Result<()> {
+            let type_name_cs = ::std::ffi::CString::new(vtype.to_string()).expect("`CString::new` failed");
+            let ierr = unsafe { petsc_raw::MatShellSetVecType(self.mat_p, type_name_cs.as_ptr()) };
+            Petsc::check_error(self.world, ierr)
         }
     }
 
@@ -1668,6 +1716,14 @@ pub mod mat_shell {
     impl<'a, 'tl, T> DerefMut for MatShell<'a, 'tl, T> {
         fn deref_mut(&mut self) -> &mut Mat<'a, 'tl> {
             &mut self.inner_mat
+        }
+    }
+
+    // macro impls
+    impl<'a, 'tl, T> MatShell<'a, 'tl, T> {    
+        wrap_simple_petsc_member_funcs! {
+            MatShellSetManageScalingShifts, pub shell_set_manage_scaling_shifts, takes mut, #[doc = "Allows the user to control the scaling and shift operations of the [`MatShell`].\n\n\
+                Must be called immediately after [`MatShell::create()`]."];
         }
     }
 }
@@ -1811,13 +1867,6 @@ impl<'a> Mat<'a, '_> {
         * `bs` - size of block, the blocks are ALWAYS square. One can use `MatSetBlockSizes()` to set a different row and column blocksize \
         but the row blocksize always defines the size of the blocks. The column blocksize sets the blocksize of the vectors obtained with `MatCreateVecs()`\n\
         * Read docs for [`Mat::mpi_aij_set_preallocation()`](Mat::mpi_aij_set_preallocation())"];
-    }
-}
-
-impl<'a, 'tl, T> MatShell<'a, 'tl, T> {    
-    wrap_simple_petsc_member_funcs! {
-        MatShellSetManageScalingShifts, pub shell_set_manage_scaling_shifts, takes mut, #[doc = "Allows the user to control the scaling and shift operations of the [`MatShell`].\n\n\
-            Must be called immediately after [`MatShell::create()`]."];
     }
 }
 
