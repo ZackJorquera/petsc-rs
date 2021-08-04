@@ -440,6 +440,4 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
     }
 }
 
-impl_petsc_object_traits! { KSP, ksp_p, petsc_raw::_p_KSP, '_, '_ }
-
-impl_petsc_view_func!{ KSP, KSPView, '_, '_ }
+impl_petsc_object_traits! { KSP, ksp_p, petsc_raw::_p_KSP, KSPView, '_, '_; }

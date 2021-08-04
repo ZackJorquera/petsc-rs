@@ -137,14 +137,14 @@ fn main() -> petsc_rs::Result<()> {
     // then duplicate as needed.
     let mut x = petsc.vec_create()?;
     x.set_name("Solution")?;
-    x.set_sizes(None, Some(n))?;
+    x.set_sizes(None, n)?;
     x.set_from_options()?;
     let mut b = x.clone();
     let mut u = x.clone();
 
     #[allow(non_snake_case)]
     let mut A = petsc.mat_create()?;
-    A.set_sizes(None, None, Some(n), Some(n))?;
+    A.set_sizes(None, None, n, n)?;
     A.set_from_options()?;
     A.set_up()?;
 
@@ -152,7 +152,7 @@ fn main() -> petsc_rs::Result<()> {
     // Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
     // float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
     // call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
-    // but if `PetscScalar` is complex it will construct a complex value which the imaginary part being
+    // but if `PetscScalar` is complex it will construct a complex value with the imaginary part being
     // set to `0`.
     A.assemble_with((0..n).map(|i| (-1..=1).map(move |j| (i,i+j))).flatten()
             .filter(|&(i, j)| i < n && j < n) // we could also filter out negatives, but assemble_with does that for us
@@ -177,12 +177,12 @@ fn main() -> petsc_rs::Result<()> {
     // - By extracting the KSP and PC contexts from the KSP context,
     //     we can then directly call any KSP and PC routines to set
     //     various options.
-    // - The following four statements are optional; all of these
+    // - The following statements are optional; all of these
     //     parameters could alternatively be specified at runtime via
     //     `KSP::set_from_options()`.
     let pc = ksp.get_pc_mut()?;
     pc.set_type(PCType::PCJACOBI)?;
-    ksp.set_tolerances(Some(1.0e-5), None, None, None)?;
+    ksp.set_tolerances(1.0e-5, None, None, None)?;
 
     // Set runtime options, e.g.,
     //     `-ksp_type <type> -pc_type <type> -ksp_monitor -ksp_rtol <rtol>`
@@ -194,12 +194,12 @@ fn main() -> petsc_rs::Result<()> {
     // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     //                  Solve the linear system
     // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    ksp.solve(Some(&b), &mut x)?;
+    ksp.solve(&b, &mut x)?;
 
     // View solver info; we could instead use the option -ksp_view to
     // print this info to the screen at the conclusion of `KSP::solve()`.
     let viewer = Viewer::create_ascii_stdout(petsc.world())?;
-    ksp.view_with(Some(&viewer))?;
+    viewer.view(&ksp)?;
 
     // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     //                Check the solution and clean up

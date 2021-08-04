@@ -762,6 +762,4 @@ impl<'a> Vector<'a> {
     }
 }
 
-impl_petsc_object_traits! { Vector, vec_p, petsc_raw::_p_Vec }
-
-impl_petsc_view_func!{ Vector, VecView }
+impl_petsc_object_traits! { Vector, vec_p, petsc_raw::_p_Vec, VecView; }

@@ -172,16 +172,12 @@ impl<'a, 'tl, 'bl> PC<'a, 'tl, 'bl> {
         Ok((
             if self.ref_amat.is_some() {
                 self.ref_amat
-            }
-            else
-            { 
+            } else { 
                 self.owned_amat.as_ref()
             },
             if self.ref_pmat.is_some() {
                 self.ref_pmat
-            }
-            else
-            {
+            } else {
                 self.owned_pmat.as_ref()
             }
         ))
@@ -278,6 +274,4 @@ impl<'a> PC<'a, '_, '_> {
     }
 }
 
-impl_petsc_object_traits! { PC, pc_p, petsc_raw::_p_PC, '_, '_ }
-
-impl_petsc_view_func!{ PC, PCView, '_, '_ }
+impl_petsc_object_traits! { PC, pc_p, petsc_raw::_p_PC, PCView, '_, '_; }

@@ -103,6 +103,4 @@ impl IS<'_> {
     }
 }
 
-impl_petsc_object_traits! { IS, is_p, petsc_raw::_p_IS }
-
-impl_petsc_view_func!{ IS, ISView }
+impl_petsc_object_traits! { IS, is_p, petsc_raw::_p_IS, ISView; }

@@ -9,8 +9,13 @@
 //!
 //! # Basic Usage
 //! 
-//! First, you will need to add `petsc-rs` to your `Cargo.toml`. Next, to get access to all the important
-//! traits and types you can use `use petsc_rs::prelude::*`. Some of the important types that are included are:
+//! First, you will need to add `petsc-rs` to your `Cargo.toml`.
+//! ```text
+//! [dependencies]
+//! petsc-rs = { git = "https://github.com/ZackJorquera/petsc-rs/", branch = "main" }
+//! ```
+//! Next, to get access to all the important traits and types you can use `use petsc_rs::prelude::*`.
+//! Some of the important types that are included are:
 //!
 //! * Index sets ([`IS`](indexset::IS)), including permutations, for indexing into vectors, renumbering, etc
 //! * Vectors ([`Vector`](vector::Vector))
@@ -52,12 +57,15 @@
 //! You must be using the `complex-scalar` branch to enable this feature.
 //! - **`petsc-int-i32`** *(enabled by default)* — Sets the integer type, [`PetscInt`], to be `i32`.
 //! - **`petsc-int-i64`** — Sets the integer type, [`PetscInt`], to be `i64`.
-//! 
-//! As an example, if you wanted to use a petsc install that uses PETSc with 64-bit integers,
-//! 32-bit floats (single precision), and real numbers for scalars you would put the following
-//! in your `Cargo.toml`
-//! ```text
-//! petsc-rs = { version = "*", default-features = false, features = ["petsc-real-f32", "petsc-int-i64"] }
+//!
+//! If you want to use a PETSc with non-standard precisions for floats or integers, or for complex numbers
+//! (experimental only) you can include something like the following in your Cargo.toml.
+//! ```toml
+//! [dependencies.petsc-rs]
+//! git = "https://github.com/ZackJorquera/petsc-rs/"
+//! branch = "main"  # for complex numbers use the "complex-scalar" branch
+//! default-features = false  # note, default turns on "petsc-real-f64" and "petsc-int-i32"
+//! features = ["petsc-real-f32", "petsc-int-i64"]
 //! ```
 //!
 //! # Further Reading
@@ -123,6 +131,8 @@ pub mod prelude {
         PetscOptBuilder,
         petsc_println,
         petsc_println_all,
+        petsc_print,
+        petsc_print_all,
         vector::{Vector, VecOption, VectorType, },
         mat::{Mat, MatAssemblyType, MatOption, MatDuplicateOption, MatStencil, NullSpace, MatType,
             MatOperation, },
@@ -132,7 +142,7 @@ pub mod prelude {
         dm::{DM, DMBoundaryType, DMDAStencilType, DMType, FEDisc, DS, WeakForm, DMLabel,
             DMBoundaryConditionType, FVDisc, DMField, },
         indexset::{IS, ISType, },
-        viewer::{Viewer, PetscViewerFormat, ViewerType, },
+        viewer::{Viewer, PetscViewerFormat, ViewerType, PetscViewable, },
         spaces::{Space, DualSpace, SpaceType, DualSpaceType},
         NormType,
         PetscOpt,
@@ -144,7 +154,7 @@ use num_complex::Complex;
 
 // https://petsc.org/release/docs/manualpages/Sys/index.html
 
-/// Prints to standard out, only from the first processor in the communicator.
+/// Prints to standard out with a new line, only from the first processor in the communicator.
 ///
 /// Calls from other processes are ignored.
 ///
@@ -175,8 +185,25 @@ macro_rules! petsc_println {
     })
 }
 
-/// Prints synchronized output from several processors. Output of the first processor is followed by
-/// that of the second, etc.
+/// Prints to standard out without a new line, only from the first processor in the communicator.
+///
+/// Calls from other processes are ignored.
+///
+/// Note, this macro creates a block that evaluates to a [`petsc_rs::Result`](Result), so the try operator, `?`,
+/// can and should be used.
+///
+/// Also look at [`petsc_println!`].
+#[macro_export]
+macro_rules! petsc_print {
+    ($world:expr, $($arg:tt)*) => ({
+        let s = ::std::fmt::format(format_args!($($arg)*));
+        Petsc::print($world, s)
+    })
+}
+
+/// Prints synchronized output from several processors with a new line.
+///
+/// Output of the first processor is followed by that of the second, etc.
 ///
 /// Will automatically call `PetscSynchronizedFlush` after.
 ///
@@ -205,6 +232,24 @@ macro_rules! petsc_println_all {
     ($world:expr) => ( Petsc::print_all($world, "\n") );
     ($world:expr, $($arg:tt)*) => ({
         let s = format!("{}\n", format_args!($($arg)*));
+        Petsc::print_all($world, s)
+    })
+}
+
+/// Prints synchronized output from several processors with out a new line.
+///
+/// Output of the first processor is followed by that of the second, etc.
+///
+/// Will automatically call `PetscSynchronizedFlush` after.
+///
+/// Note, this macro creates a block that evaluates to a [`petsc_rs::Result`](Result), so the try operator, `?`,
+/// can and should be used.
+///
+/// Also look at [`petsc_println_all!`].
+#[macro_export]
+macro_rules! petsc_print_all {
+    ($world:expr, $($arg:tt)*) => ({
+        let s = ::std::fmt::format(format_args!($($arg)*));
         Petsc::print_all($world, s)
     })
 }
@@ -579,8 +624,7 @@ impl Drop for Petsc {
 
 impl Petsc {
     /// Creates a [`PetscBuilder`] which allows you to specify arguments when calling [`PetscInitialize`](petsc_raw::PetscInitialize).
-    pub fn builder() -> PetscBuilder
-    {
+    pub fn builder() -> PetscBuilder {
         PetscBuilder::default()
     }
 
@@ -1057,7 +1101,7 @@ struct PetscObjectStruct<'a> {
     pub(crate) po_p: *mut petsc_raw::_p_PetscObject,
 }
 
-impl_petsc_object_traits! { PetscObjectStruct, po_p, petsc_raw::_p_PetscObject }
+impl_petsc_object_traits! { PetscObjectStruct, po_p, petsc_raw::_p_PetscObject, PetscObjectView; }
 
 // Because the `view_with` function created is private it will yell at us
 // for not using it so until then I will comment this out:
@@ -1125,7 +1169,7 @@ pub type PetscComplex = petsc_sys::PetscComplex;
 /// Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
 /// float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
 /// call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
-/// but if `PetscScalar` is complex it will construct a complex value which the imaginary part being
+/// but if `PetscScalar` is complex it will construct a complex value with the imaginary part being
 /// set to `0`.
 ///
 /// # Example
@@ -1147,7 +1191,7 @@ pub type PetscScalar = PetscReal;
 /// Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
 /// float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
 /// call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
-/// but if `PetscScalar` is complex it will construct a complex value which the imaginary part being
+/// but if `PetscScalar` is complex it will construct a complex value with the imaginary part being
 /// set to `0`.
 ///
 /// # Example

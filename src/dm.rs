@@ -102,7 +102,7 @@ pub struct DMField<'a> {
 /// multiple types of fields. This trait acts in the same way. An example of this trait
 /// being used is the method [`DM::add_field()`].
 ///
-/// All variants implement `Into<Field>` so it easier to use.
+/// All variants implement `Into<Field>` so it's easier to use.
 pub enum Field<'a, 'tl> {
     // TODO: what all do we except? Im not sure we should except DMField
     /// The discretization object is [`FEDisc`]
@@ -618,7 +618,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// This properly preallocates the number of nonzeros in the sparse
     /// matrix so you do not need to do it yourself. 
     ///
-    /// For structured grid problems, when you call [`Mat::view_with()`] on this matrix it is
+    /// For structured grid problems, when you call [`view_with()`](crate::viewer::PetscViewable::view_with()) on this matrix it is
     /// displayed using the global natural ordering, NOT in the ordering used internally by PETSc.
     pub fn create_matrix(&self) -> Result<Mat<'a, 'tl>> {
         let mut mat_p = MaybeUninit::uninit();
@@ -2965,14 +2965,6 @@ impl<'a> DM<'a, '_> {
     }
 }
 
-impl_petsc_object_traits! { DM, dm_p, petsc_raw::_p_DM, '_ }
-
-impl_petsc_view_func!{ DM, DMView, '_ }
-
-impl_petsc_object_traits! { DMLabel, dml_p, petsc_raw::_p_DMLabel }
-
-impl_petsc_view_func!{ DMLabel, DMLabelView }
-
 impl<'a, 'tl> FEDisc<'a, 'tl> {
     wrap_simple_petsc_member_funcs! {
         PetscFESetFromOptions, pub set_from_options, takes mut, #[doc = "sets parameters in a PetscFE from the options database"];
@@ -2983,22 +2975,12 @@ impl<'a, 'tl> FEDisc<'a, 'tl> {
     }
 }
 
-impl_petsc_object_traits! { FEDisc, fe_p, petsc_raw::_p_PetscFE, '_ }
-
-impl_petsc_view_func!{ FEDisc, PetscFEView, '_ }
-
-impl_petsc_object_traits! { FVDisc, fv_p, petsc_raw::_p_PetscFV }
-
-impl_petsc_view_func!{ FVDisc, PetscFVView }
-
-impl_petsc_object_traits! { DMField, field_p, petsc_raw::_p_DMField }
-
-impl_petsc_view_func!{ DMField, DMFieldView }
-
-impl_petsc_object_traits! { DS, ds_p, petsc_raw::_p_PetscDS, '_ }
-
-impl_petsc_view_func!{ DS, PetscDSView, '_ }
-
-impl_petsc_object_traits! { WeakForm, wf_p, petsc_raw::_p_PetscWeakForm }
-
-impl_petsc_view_func!{ WeakForm, PetscWeakFormView }
+impl_petsc_object_traits! {
+    DM, dm_p, petsc_raw::_p_DM, DMView, '_;
+    DMLabel, dml_p, petsc_raw::_p_DMLabel, DMLabelView;
+    FEDisc, fe_p, petsc_raw::_p_PetscFE, PetscFEView, '_;
+    FVDisc, fv_p, petsc_raw::_p_PetscFV, PetscFVView;
+    DMField, field_p, petsc_raw::_p_DMField, DMFieldView;
+    DS, ds_p, petsc_raw::_p_PetscDS, PetscDSView, '_;
+    WeakForm, wf_p, petsc_raw::_p_PetscWeakForm, PetscWeakFormView;
+}

@@ -186,7 +186,10 @@ $(
 }
 
 macro_rules! impl_petsc_object_traits {
-    ($struct_name:ident, $raw_ptr_var:ident, $raw_ptr_ty:ty $(, $add_lt:lifetime)*) => {
+    {$(
+        $struct_name:ident, $raw_ptr_var:ident, $raw_ptr_ty:ty, $raw_view_func:ident $(, $add_lt:lifetime)* ;
+    )*} => {
+    $(
         unsafe impl<'a> crate::PetscAsRaw for $struct_name<'a, $( $add_lt ),*> {
             type Raw = *mut $raw_ptr_ty;
 
@@ -211,26 +214,23 @@ macro_rules! impl_petsc_object_traits {
         }
 
         impl<'a> crate::PetscObjectPrivate<'a, $raw_ptr_ty> for $struct_name<'a, $( $add_lt ),*> { }
-    };
-}
 
-// defines `view_with`
-macro_rules! impl_petsc_view_func {
-    ($struct_name:ident, $raw_view_func:ident $(, $add_lt:lifetime)*) => {
-        impl $struct_name<'_, $( $add_lt ),*>
+        impl crate::viewer::PetscViewable for $struct_name<'_, $( $add_lt ),*>
         {
             /// Views the object with a viewer
-            pub fn view_with(&self, viewer: Option<&crate::viewer::Viewer>) -> crate::Result<()> {
+            fn view_with<'vl, 'val: 'vl>(&self, viewer: impl Into<Option<&'vl crate::viewer::Viewer<'val>>>) -> crate::Result<()> {
                 let owned_viewer;
-                let viewer = if let Some(viewer) = viewer {
+                let viewer = if let Some(viewer) = viewer.into() {
                     viewer
                 } else {
-                    owned_viewer = Some(crate::viewer::Viewer::create_ascii_stdout(self.world)?);
+                    // Or should we just pass NULL into the raw_view_func
+                    owned_viewer = Some(crate::viewer::Viewer::create_ascii_stdout(self.world())?);
                     owned_viewer.as_ref().unwrap()
                 };
-                let ierr = unsafe { crate::petsc_raw::$raw_view_func(self.as_raw(), viewer.viewer_p) };
-                Petsc::check_error(self.world, ierr)
+                let ierr = unsafe { crate::petsc_raw::$raw_view_func(self.as_raw(), viewer.as_raw()) };
+                Petsc::check_error(self.world(), ierr)
             }
         }
+    )*
     };
 }

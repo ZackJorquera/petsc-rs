@@ -1135,10 +1135,7 @@ impl<'a> SNES<'a, '_, '_> {
     }
 }
 
-impl_petsc_object_traits! { SNES, snes_p, petsc_raw::_p_SNES, '_, '_ }
-
-impl_petsc_view_func!{ SNES, SNESView, '_, '_ }
-
-impl_petsc_object_traits! { LineSearch, ls_p, petsc_raw::_p_LineSearch }
-
-impl_petsc_view_func!{ LineSearch, SNESLineSearchView }
+impl_petsc_object_traits! {
+    SNES, snes_p, petsc_raw::_p_SNES, SNESView, '_, '_;
+    LineSearch, ls_p, petsc_raw::_p_LineSearch, SNESLineSearchView;
+}

@@ -59,9 +59,22 @@ impl<'a> Viewer<'a> {
         self.type_compare_str(&type_kind.to_string())
     }
 
+    /// Views a [viewable PetscObject](PetscViewable).
+    ///
+    /// Same as [`obj.view_with(&self)`](PetscViewable::view_with())
+    pub fn view<T: PetscViewable>(&self, obj: &T) -> Result<()> {
+        obj.view_with(self)
+    }
+
     wrap_simple_petsc_member_funcs! {
         PetscViewerPushFormat, pub push_format, input PetscViewerFormat, format, takes mut, #[doc = "Sets the format for file PetscViewers."];
     }
 }
 
-impl_petsc_object_traits! { Viewer, viewer_p, petsc_raw::_p_PetscViewer }
+/// A PETSc object that can be viewed with a [`Viewer`]
+pub trait PetscViewable {
+    /// Views the object with a [`Viewer`]
+    fn view_with<'vl, 'val: 'vl>(&self, viewer: impl Into<Option<&'vl Viewer<'val>>>) -> Result<()>;
+}
+
+impl_petsc_object_traits! { Viewer, viewer_p, petsc_raw::_p_PetscViewer, PetscViewerView; }

@@ -327,7 +327,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// Allows you to give an iter that will be use to make a series of calls to [`Mat::set_values`].
     /// Then is followed by both [`Mat::assembly_begin()`] and [`Mat::assembly_end()`].
     ///
-    /// Note, each call to [`Mat::set_values()`] will only add only one value to the matrix at
+    /// Note, each call to [`Mat::set_values()`] will add only one value to the matrix at
     /// a time. If you want to insert multiple at a time, use [`Mat::assemble_with_batched()`].
     ///
     /// [`assemble_with()`](Mat::assemble_with()) will short circuit on the first error
@@ -430,9 +430,10 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// //  0  0  0 -1  2
     /// let v = [PetscScalar::from(-1.0), PetscScalar::from(2.0), PetscScalar::from(-1.0)];
     /// mat.assemble_with_batched((0..n)
-    ///         .map(|i| if i == 0 { ( vec![i], vec![i, i+1], &v[1..] ) }
-    ///                  else if i == n-1 { ( vec![i], vec![i-1, i], &v[..2] ) }
-    ///                  else { ( vec![i], vec![i-1, i, i+1], &v[..] ) }),
+    ///         // Note, negative indices are ignored
+    ///         .map(|i| if i == 0 { ( [i], [-1, i, i+1], &v ) }
+    ///                  else if i == n-1 { ( [i], [i-1, i, -1], &v ) }
+    ///                  else { ( [i], [i-1, i, i+1], &v ) }),
     ///     InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
     /// # // for debugging
     /// # let viewer = Viewer::create_ascii_stdout(petsc.world())?;
@@ -549,7 +550,9 @@ impl<'a, 'tl> Mat<'a, 'tl> {
         Ok(())
     }
 
-    /// Gets values from certain locations of a Matrix. Currently can only get values on the same processor.
+    /// Gets values from certain locations of a Matrix.
+    ///
+    /// Currently can only get values on the same processor.
     ///
     /// # Example
     /// 
@@ -703,8 +706,6 @@ impl<'a, 'tl> Mat<'a, 'tl> {
                 })),
         ))
     }
-
-    
 
     /// Builds [`Mat`] for a particular type
     pub fn set_type_str(&mut self, mat_type: &str) -> Result<()> {
@@ -2039,10 +2040,6 @@ impl<'a> Mat<'a, '_> {
     }
 }
 
-impl_petsc_object_traits! { Mat, mat_p, petsc_raw::_p_Mat, '_ }
-
-impl_petsc_view_func!{ Mat, MatView, '_ }
-
 impl<'a> NullSpace<'a> {
     wrap_simple_petsc_member_funcs! {
         MatNullSpaceRemove, pub remove_from, input &mut Vector, vec.as_raw, #[doc = "Removes all the components of a null space from a vector."];
@@ -2050,6 +2047,7 @@ impl<'a> NullSpace<'a> {
     }
 }
 
-impl_petsc_object_traits! { NullSpace, ns_p, petsc_raw::_p_MatNullSpace }
-
-impl_petsc_view_func!{ NullSpace, MatNullSpaceView }
+impl_petsc_object_traits! { 
+    Mat, mat_p, petsc_raw::_p_Mat, MatView, '_;
+    NullSpace, ns_p, petsc_raw::_p_MatNullSpace, MatNullSpaceView;
+}

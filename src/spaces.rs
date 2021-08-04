@@ -134,10 +134,6 @@ impl<'a> Space<'a> {
     }
 }
 
-impl_petsc_object_traits! { Space, s_p, petsc_raw::_p_PetscSpace }
-
-impl_petsc_view_func!{ Space, PetscSpaceView }
-
 impl<'a, 'tl> DualSpace<'a, 'tl> {
     wrap_simple_petsc_member_funcs! {
         PetscDualSpaceSetFromOptions, pub set_from_options, takes mut, #[doc = "Sets parameters from the options database"];
@@ -153,6 +149,7 @@ impl<'a, 'tl> DualSpace<'a, 'tl> {
     }
 }
 
-impl_petsc_object_traits! { DualSpace, ds_p, petsc_raw::_p_PetscDualSpace, '_ }
-
-impl_petsc_view_func!{ DualSpace, PetscDualSpaceView, '_ }
+impl_petsc_object_traits! {
+    Space, s_p, petsc_raw::_p_PetscSpace, PetscSpaceView;
+    DualSpace, ds_p, petsc_raw::_p_PetscDualSpace, PetscDualSpaceView, '_;
+}
