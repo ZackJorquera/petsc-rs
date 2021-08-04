@@ -197,9 +197,7 @@ fn do_ksp_ex2(petsc: &Petsc, m: PetscInt, n: PetscInt, view_exact_sol: bool) -> 
         Set operators. Here the matrix that defines the linear system
         also serves as the matrix that defines the preconditioner.
     */
-    #[allow(non_snake_case)]
-    let rc_A = std::rc::Rc::new(A);
-    ksp.set_operators(Some(rc_A.clone()), Some(rc_A.clone()))?;
+    ksp.set_operators(&A, &A)?;
 
     /*
         Set linear solver defaults for this problem (optional).
@@ -314,9 +312,7 @@ fn do_ksp_ex23(petsc: &Petsc, n: PetscInt, view_ksp: bool) -> petsc_rs::Result<(
         Set operators. Here the matrix that defines the linear system
         also serves as the matrix that defines the preconditioner.
     */
-    #[allow(non_snake_case)]
-    let rc_A = std::rc::Rc::new(A);
-    ksp.set_operators(Some(rc_A.clone()), Some(rc_A.clone()))?;
+    ksp.set_operators(&A, &A)?;
     
     /*
         Set linear solver defaults for this problem (optional).

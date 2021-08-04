@@ -524,8 +524,10 @@ fn main() -> petsc_rs::Result<()> {
     #[allow(non_snake_case)]
     let mut J = dm.create_matrix()?;
 
+    let mut a2_mat;
+    let mut a2_shell;
     #[allow(non_snake_case)]
-    let mut A2;
+    let A2_ref;
     #[allow(non_snake_case)]
     let mut J2 = None;
     #[allow(non_snake_case)]
@@ -533,7 +535,7 @@ fn main() -> petsc_rs::Result<()> {
         let (mg, ng) = J.get_global_size()?;
         let (m, n) = J.get_local_size()?;
         #[allow(non_snake_case)]
-        let mut A = Mat::create_shell(J.world(), m, n, mg, ng, Option::<Box<()>>::None)?;
+        let mut A = Mat::create_shell(J.world(), m, n, mg, ng, Box::new(()))?;
 
         let mut u_loc = dm.create_local_vector()?;
         let exact_funcs: [Box<dyn FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> petsc_rs::Result<()>>; 1]
@@ -545,11 +547,13 @@ fn main() -> petsc_rs::Result<()> {
             A.shell_set_operation_mvv(MatOperation::MATOP_MULT, |_m, _x, _y| todo!())?;
         }
 
-        A2 = A.clone();
+        a2_shell = A.clone();
+        A2_ref = a2_shell.deref_mut();
         J2 = Some(J.clone());
         Some(A)
     } else {
-        A2 = J.clone();
+        a2_mat = J.clone();
+        A2_ref = &mut a2_mat;
         None
     };
 
@@ -637,11 +641,11 @@ fn main() -> petsc_rs::Result<()> {
         petsc_println!(petsc.world(), "L_2 Residual: {:.5}", norm)?;
 
         {
-            snes.compute_jacobian(&u, &mut A2, None)?;
+            snes.compute_jacobian(&u, A2_ref, None)?;
             let mut b = u.clone();
             r.set_all(0.0)?;
             snes.compute_function(&r, &mut b)?;
-            A2.mult(&u, &mut r)?;
+            A2_ref.mult(&u, &mut r)?;
             r.axpy(1.0, &b)?;
             petsc_println!(petsc.world(), "Au - b = Au + F(0)")?;
             r.chop(1.0e-10)?;
@@ -654,13 +658,12 @@ fn main() -> petsc_rs::Result<()> {
                     ns.remove_from(&mut u)?;
                 }
 
-                let (a_mat, j_mat) = if let Some(mut j_mat) = J2 {
-                    snes.compute_jacobian(&u, &mut A2, &mut j_mat)?;
-                    (Rc::new(A2), Rc::new(j_mat))
+                let (a_mat, j_mat) = if let Some(j_mat) = J2.as_mut() {
+                    snes.compute_jacobian(&u, A2_ref, &mut *j_mat)?;
+                    (&*A2_ref, &*j_mat)
                 } else {
-                    snes.compute_jacobian(&u, &mut A2, None)?;
-                    let a = Rc::new(A2);
-                    (a.clone(), a)
+                    snes.compute_jacobian(&u, A2_ref, None)?;
+                    (&*A2_ref, &*A2_ref)
                 };
 
                 a_mat.mult(&u, &mut b)?;

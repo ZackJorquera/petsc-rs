@@ -34,14 +34,14 @@ pub type KSPType = crate::petsc_raw::KSPTypeEnum;
 
 /// Abstract PETSc object that manages all Krylov methods. This is the object that manages the linear
 /// solves in PETSc (even those such as direct solvers that do no use Krylov accelerators).
-pub struct KSP<'a, 'tl> {
+pub struct KSP<'a, 'tl, 'bl> {
     world: &'a UserCommunicator,
     pub(crate) ksp_p: *mut petsc_raw::_p_KSP, // I could use KSP which is the same thing, but i think using a pointer is more clear
 
     // As far as Petsc is concerned we own a reference to the PC as it is reference counted under the hood.
     // But it should be fine to keep it here as an owned reference because we can control access and the 
     // default `KSPDestroy` accounts for references.
-    pc: Option<PC<'a, 'tl>>,
+    pc: Option<PC<'a, 'tl, 'bl>>,
 
     dm: Option<DM<'a, 'tl>>,
 
@@ -51,24 +51,24 @@ pub struct KSP<'a, 'tl> {
 
 struct KSPComputeOperatorsTrampolineData<'a, 'tl> {
     world: &'a UserCommunicator,
-    user_f: Box<dyn FnMut(&KSP<'a, 'tl>, &mut Mat<'a, 'tl>, &mut Mat<'a, 'tl>) -> Result<()> + 'tl>,
+    user_f: Box<dyn FnMut(&KSP<'a, 'tl, '_>, &mut Mat<'a, 'tl>, &mut Mat<'a, 'tl>) -> Result<()> + 'tl>,
     set_dm: bool,
 }
 
 struct KSPComputeRHSTrampolineData<'a, 'tl> {
     world: &'a UserCommunicator,
-    user_f: Box<dyn FnMut(&KSP<'a, 'tl>, &mut Vector<'a>) -> Result<()> + 'tl>,
+    user_f: Box<dyn FnMut(&KSP<'a, 'tl, '_>, &mut Vector<'a>) -> Result<()> + 'tl>,
     set_dm: bool,
 }
 
-impl<'a> Drop for KSP<'a, '_> {
+impl<'a> Drop for KSP<'a, '_, '_> {
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::KSPDestroy(&mut self.ksp_p as *mut _) };
         let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
-impl<'a, 'tl> KSP<'a, 'tl> {
+impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
     /// Same as `KSP { ... }` but sets all optional params to `None`
     pub(crate) fn new(world: &'a UserCommunicator, ksp_p: *mut petsc_raw::_p_KSP) -> Self {
         KSP { world, ksp_p, pc: None, dm: None,
@@ -90,7 +90,7 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     /// `ksp.get_pc_mut().set_operators()`.
     ///
     /// Passing a `None` for `a_mat` or `p_mat` removes the matrix that is currently used.
-    pub fn set_operators(&mut self, a_mat: impl Into<Option<Rc<Mat<'a, 'tl>>>>, p_mat: impl Into<Option<Rc<Mat<'a, 'tl>>>>) -> Result<()>
+    pub fn set_operators(&mut self, a_mat: impl Into<Option<&'bl Mat<'a, 'tl>>>, p_mat: impl Into<Option<&'bl Mat<'a, 'tl>>>) -> Result<()>
     {
         let a_mat = a_mat.into();
         let p_mat = p_mat.into();
@@ -107,12 +107,12 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     ///
     /// Note, this does not return a [`Result`](crate::Result) because it can never
     /// fail, instead it will return `None`.
-    pub fn try_get_pc<'b>(&'b self) -> Option<&'b PC<'a, 'tl>> {
+    pub fn try_get_pc<'b>(&'b self) -> Option<&'b PC<'a, 'tl, 'bl>> {
         self.pc.as_ref()
     }
 
     /// Returns a reference to the [`PC`] context set with [`KSP::set_pc()`].
-    pub fn get_pc<'b>(&'b mut self) -> Result<&'b PC<'a, 'tl>>
+    pub fn get_pc<'b>(&'b mut self) -> Result<&'b PC<'a, 'tl, 'bl>>
     {
         // TODO: This shouldn't have to take a mut self (maybe we use a RefCell internally)
 
@@ -134,7 +134,7 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     }
 
     /// Returns a mutable reference to the [`PC`] context set with [`KSP::set_pc()`].
-    pub fn get_pc_mut<'b>(&'b mut self) -> Result<&'b mut PC<'a, 'tl>>
+    pub fn get_pc_mut<'b>(&'b mut self) -> Result<&'b mut PC<'a, 'tl, 'bl>>
     {
         if self.pc.is_some() {
             Ok(self.pc.as_mut().unwrap())
@@ -248,7 +248,7 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     /// [`set_compute_operators()`](KSP::set_compute_operators) method.
     pub fn set_compute_operators<F>(&mut self, user_f: F) -> Result<()>
     where
-        F: FnMut(&KSP<'a, 'tl>, &mut Mat<'a, 'tl>, &mut Mat<'a, 'tl>) -> Result<()> + 'tl
+        F: FnMut(&KSP<'a, 'tl, '_>, &mut Mat<'a, 'tl>, &mut Mat<'a, 'tl>) -> Result<()> + 'tl
     {
         // TODO: look at how rsmpi did the trampoline stuff:
         // https://github.com/rsmpi/rsmpi/blob/master/src/collective.rs#L1684
@@ -324,7 +324,7 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     /// [`set_compute_rhs()`](KSP::set_compute_rhs) method.
     pub fn set_compute_rhs<F>(&mut self, user_f: F) -> Result<()>
     where
-        F: FnMut(&KSP<'a, '_>, &mut Vector<'a>) -> Result<()> + 'tl
+        F: FnMut(&KSP<'a, '_, '_>, &mut Vector<'a>) -> Result<()> + 'tl
     {
         // TODO: look at how rsmpi did the trampoline stuff:
         // https://github.com/rsmpi/rsmpi/blob/master/src/collective.rs#L1684
@@ -392,14 +392,32 @@ impl<'a, 'tl> KSP<'a, 'tl> {
     /// Gets the matrix associated with the linear system and possibly a different
     /// one associated with the preconditioner.
     ///
-    /// See also [`PC::get_operators()`].
+    /// See also [`PC::get_operators_or_create()`].
     ///
     /// If the operators have NOT been set with [`KSP`](KSP::set_operators())/[`PC::set_operators()`]
     /// then the operators are created in the PC and returned to the user. In this case, two DIFFERENT
     /// operators will be returned.
-    pub fn get_operators(&mut self) -> Result<(Rc<Mat<'a, 'tl>>, Rc<Mat<'a, 'tl>>)> {
-        // TODO: this shouldn't have to take `&mut self`
-        self.get_pc()?.get_operators()
+    pub fn get_operators_or_create<'rl>(&'rl mut self) -> Result<(&'rl Mat<'a, 'tl>, &'rl Mat<'a, 'tl>)> {
+        self.get_pc_mut()?.get_operators_or_create()
+    }
+
+    /// Gets the matrix associated with the linear system and possibly a different
+    /// one associated with the preconditioner.
+    ///
+    /// See also [`PC::get_operators_or_create()`].
+    ///
+    /// If the operators have NOT been set with [`KSP`](crate::ksp::KSP::set_operators())/[`PC::set_operators()`](crate::pc::PC::set_operators())
+    /// then this will return `None` for those operators. Also, if the PC is not set it will return `None`s,
+    /// this is because it uses [`KSP::try_get_pc()`].
+    ///
+    /// Note, if you used [`KSP::set_compute_operators()`] to set the operators, you must use
+    /// [`KSP::get_operators_or_create()`] to create the operators from the method.
+    pub fn try_get_operators<'rl>(&'rl self) -> Result<(Option<&'rl Mat<'a, 'tl>>, Option<&'rl Mat<'a, 'tl>>)> {
+        if let Some(pc) = self.try_get_pc() {
+            pc.try_get_operators()
+        } else {
+            Ok((None, None))
+        }
     }
 
     /// Determines whether a PETSc [`KSP`] is of a particular type.
@@ -409,7 +427,7 @@ impl<'a, 'tl> KSP<'a, 'tl> {
 }
 
 // macro impls
-impl<'a, 'tl> KSP<'a, 'tl> {
+impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
     wrap_simple_petsc_member_funcs! {
         KSPSetFromOptions, pub set_from_options, takes mut, #[doc = "Sets KSP options from the options database. This routine must be called before KSPSetUp() if the user is to be allowed to set the Krylov type."];
         KSPSetUp, pub set_up, takes mut, #[doc = "Sets up the internal data structures for the later use of an iterative solver. . This will be automatically called with [`KSP::solve()`]."];
@@ -417,11 +435,11 @@ impl<'a, 'tl> KSP<'a, 'tl> {
         KSPSetDM, pub set_dm, input DM<'a, 'tl>, dm .as_raw consume .dm, takes mut, #[doc = "Sets the [DM](DM) that may be used by some [preconditioners](crate::pc).\n\n\
             If this is used then the KSP will attempt to use the DM to create the matrix and use the routine set with [`DMKSPSetComputeOperators()`](#) or [`KSP::set_compute_operators()`]. Use\
             [`KSP::set_dm_active(false)`] to instead use the matrix you've provided with [`KSP::set_operators()`]."];
-        KSPSetPC, pub set_pc, input PC<'a, 'tl>, pc .as_raw consume .pc, takes mut, #[doc = "Sets the [preconditioner](crate::pc)([`PC`]) to be used to calculate the application of the preconditioner on a vector.\n\n\
+        KSPSetPC, pub set_pc, input PC<'a, 'tl, 'bl>, pc .as_raw consume .pc, takes mut, #[doc = "Sets the [preconditioner](crate::pc)([`PC`]) to be used to calculate the application of the preconditioner on a vector.\n\n\
             If you change the PC by calling set again, then the original will be dropped."];
     }
 }
 
-impl_petsc_object_traits! { KSP, ksp_p, petsc_raw::_p_KSP, '_ }
+impl_petsc_object_traits! { KSP, ksp_p, petsc_raw::_p_KSP, '_, '_ }
 
-impl_petsc_view_func!{ KSP, KSPView, '_ }
+impl_petsc_view_func!{ KSP, KSPView, '_, '_ }

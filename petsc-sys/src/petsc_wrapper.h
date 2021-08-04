@@ -11,5 +11,6 @@
 #include <petsc/private/petscdsimpl.h>
 #include <petsc/private/dmimpl.h>
 #include <petsc/private/dmlabelimpl.h>
+#include <petsc/private/matimpl.h>
 
 #endif //PETSC_FFI_WRAPPER_H

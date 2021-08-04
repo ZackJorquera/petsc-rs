@@ -118,10 +118,10 @@ impl<'a, 'tl> Mat<'a, 'tl> {
         Ok(Mat::new(world, unsafe { mat_p.assume_init() }))
     }
 
-    /// Creates a new matrix class for use with a user-defined private data storage format. 
+    /// Creates a new matrix class for use with a user-defined data storage format. 
     pub fn create_shell<T>(world: &'a UserCommunicator, local_rows: impl Into<Option<PetscInt>>,
         local_cols: impl Into<Option<PetscInt>>, global_rows: impl Into<Option<PetscInt>>,
-        global_cols: impl Into<Option<PetscInt>>, data: impl Into<Option<Box<T>>>) -> Result<MatShell<'a, 'tl, T>>
+        global_cols: impl Into<Option<PetscInt>>, data: Box<T>) -> Result<MatShell<'a, 'tl, T>>
     {
         MatShell::create(world, local_rows, local_cols, global_rows, global_cols, data)
     }
@@ -130,7 +130,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     ///
     /// Note, [`Mat::clone()`] is the same as `x.duplicate(MatDuplicateOption::MAT_COPY_VALUES)`.
     ///
-    /// This method can NOT be used on a Mat Shell type.
+    /// This method can NOT be used on a Mat Shell type. In that case use [`MatShell::duplicate()`].
     ///
     /// See the manual page for [`MatDuplicateOption`](https://petsc.org/release/docs/manualpages/Mat/MatDuplicateOption.html#MatDuplicateOption) for an explanation of these options.
     pub fn duplicate(&self, op: MatDuplicateOption) -> Result<Self> {
@@ -736,7 +736,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
 
 /// Types to be used to define your own matrix type -- perhaps matrix free
 pub mod mat_shell {
-    use std::{ops::{Deref, DerefMut}, pin::Pin};
+    use std::{ffi::CString, ops::{Deref, DerefMut}, pin::Pin, ptr::NonNull};
     use std::mem::{MaybeUninit, ManuallyDrop};
     use super::{MatOperation, Mat, MatDuplicateOption};
     use crate::{
@@ -775,7 +775,7 @@ pub mod mat_shell {
     /// Specifies a matrix operation that has a "`Mat` `Vector` `mut Vector`" function signature.
     ///
     /// You would use [`MatShell::shell_set_operation_mvv()`] with a closure that has the following
-    /// signature `FnMut(&Mat, &Vector, &mut Vector) -> Result<()>`.
+    /// signature `Fn(&Mat, &Vector, &mut Vector) -> Result<()>`.
     ///
     /// This implements [`From`] and [`Into`] with [`MatOperation`] so you don't have to use
     /// this enum directly.
@@ -808,7 +808,7 @@ pub mod mat_shell {
     /// Specifies a matrix operation that has a "`Mat` `Vector` `Vector` `mut Vector`" function signature.
     ///
     /// You would use [`MatShell::shell_set_operation_mvvv()`] with a closure that has the following
-    /// signature `FnMut(&Mat, &Vector, &Vector, &mut Vector) -> Result<()>`.
+    /// signature `Fn(&Mat, &Vector, &Vector, &mut Vector) -> Result<()>`.
     ///
     /// This implements [`From`] and [`Into`] with [`MatOperation`] so you don't have to use
     /// this enum directly.
@@ -838,7 +838,7 @@ pub mod mat_shell {
     /// Specifies a matrix operation that has a "`Mat` `mut Vector`" function signature.
     ///
     /// You would use [`MatShell::shell_set_operation_mv()`] with a closure that has the following
-    /// signature `FnMut(&Mat, &mut Vector) -> Result<()>`.
+    /// signature `Fn(&Mat, &mut Vector) -> Result<()>`.
     ///
     /// This implements [`From`] and [`Into`] with [`MatOperation`] so you don't have to use
     /// this enum directly.
@@ -885,15 +885,14 @@ pub mod mat_shell {
 
     /// Internal struct to help with multiple types of closures
     enum MatShellSingleOperationTrampolineData<'a, 'tl, T> {
-        MVVV(Box<dyn FnMut(&MatShell<'a, 'tl, T>, &Vector<'a>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>),
-        MVV(Box<dyn FnMut(&MatShell<'a, 'tl, T>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>),
-        MV(Box<dyn FnMut(&MatShell<'a, 'tl, T>, &mut Vector<'a>) -> Result<()> + 'tl>),
+        MVVV(Box<dyn Fn(&MatShell<'a, 'tl, T>, &Vector<'a>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>),
+        MVV(Box<dyn Fn(&MatShell<'a, 'tl, T>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>),
+        MV(Box<dyn Fn(&MatShell<'a, 'tl, T>, &mut Vector<'a>) -> Result<()> + 'tl>),
         MVI(Box<dyn FnMut(&mut MatShell<'a, 'tl, T>, &Vector<'a>, InsertMode) -> Result<()> + 'tl>),
         // TODO: add more as we create more `shell_set_operation` methods
         #[allow(dead_code)]
         Destroy(Box<dyn FnOnce(&mut MatShell<'a, 'tl, T>) -> Result<()> + 'tl>),
-        #[allow(dead_code)]
-        Duplicate(Box<dyn FnMut(&MatShell<'a, 'tl, T>, MatDuplicateOption) -> Result<MatShell<'a, 'tl, T>> + 'tl>),
+        Duplicate(Box<dyn Fn(&MatShell<'a, 'tl, T>, MatDuplicateOption) -> Result<MatShell<'a, 'tl, T>> + 'tl>),
     }
 
     struct MatShellTrampolineData<'a, 'tl, T> {
@@ -919,15 +918,12 @@ pub mod mat_shell {
                 in_operation_closure: false }
         }
 
-        /// Creates a new matrix class for use with a user-defined private data storage format. 
-        // TODO: should we have mat_data not be an option. If you don't want to use it you can
-        // just set it to be `()` or something. And even with the None case you still need to
-        // give a type for `T`.
+        /// Creates a new matrix class for use with a user-defined data storage format.
         pub fn create(world: &'a UserCommunicator, local_rows: impl Into<Option<PetscInt>>,
             local_cols: impl Into<Option<PetscInt>>, global_rows: impl Into<Option<PetscInt>>,
-            global_cols: impl Into<Option<PetscInt>>, mat_data: impl Into<Option<Box<T>>>) -> Result<Self>
+            global_cols: impl Into<Option<PetscInt>>, mat_data: Box<T>) -> Result<Self>
         {
-            let data = mat_data.into();
+            let data = Some(mat_data);
             let none_array = seq!(N in 0..148 { [ #( None, )* ] });
             let ctx = Box::pin(MatShellTrampolineData { 
                 world: world, user_funcs: none_array, data });
@@ -1007,7 +1003,7 @@ pub mod mat_shell {
         /// Allows user to set a matrix operation for a shell matrix.
         ///
         /// You can only set operations that expect the correct function signature:
-        /// `FnMut(&Mat, &Vector, &mut Vector) -> Result<()>`
+        /// `Fn(&Mat, &Vector, &mut Vector) -> Result<()>`
         ///
         /// This function only works for operations in [`MatOperationMVV`].
         ///
@@ -1067,7 +1063,7 @@ pub mod mat_shell {
         /// ```
         pub fn shell_set_operation_mvv<F>(&mut self, op: impl Into<MatOperationMVV>, user_f: F) -> Result<()>
         where
-            F: FnMut(&MatShell<'a, 'tl, T>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
+            F: Fn(&MatShell<'a, 'tl, T>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
         {
             if self.in_operation_closure {
                 Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ORDER,
@@ -1171,7 +1167,7 @@ pub mod mat_shell {
         ///
         /// Works in the same way [`MatShell::shell_set_operation_mvv()`] works, but you can only set operations
         /// that expect the function signature:
-        /// `FnMut(&Mat, &mut Vector) -> Result<()>`
+        /// `Fn(&Mat, &mut Vector) -> Result<()>`
         ///
         /// This function only works for operations in [`MatOperationMV`].
         ///
@@ -1199,7 +1195,7 @@ pub mod mat_shell {
         /// let mat_data = [PetscScalar::cos(theta), -PetscScalar::sin(theta),
         ///                 PetscScalar::sin(theta),  PetscScalar::cos(theta)];
         /// // we can set the mat_data or access it by ref, here we access it by ref
-        /// let mut mat = Mat::create_shell(petsc.world(),2,2,2,2,Option::<Box<()>>::None)?;
+        /// let mut mat = Mat::create_shell(petsc.world(),2,2,2,2,Box::new(()))?;
         /// mat.set_up()?;
         ///
         /// mat.shell_set_operation_mv(MatOperation::MATOP_GET_DIAGONAL, |_m, v| {
@@ -1216,7 +1212,7 @@ pub mod mat_shell {
         /// ```
         pub fn shell_set_operation_mv<F>(&mut self, op: impl Into<MatOperationMV>, user_f: F) -> Result<()>
         where
-            F: FnMut(&MatShell<'a, 'tl, T>, &mut Vector<'a>) -> Result<()> + 'tl
+            F: Fn(&MatShell<'a, 'tl, T>, &mut Vector<'a>) -> Result<()> + 'tl
         {
             if self.in_operation_closure {
                 Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ORDER,
@@ -1319,7 +1315,7 @@ pub mod mat_shell {
         ///
         /// Works in the same way [`MatShell::shell_set_operation_mvv()`] works, but you can only set operations
         /// that expect the function signature:
-        /// `FnMut(&Mat, &Vector, &Vector, &mut Vector) -> Result<()>`
+        /// `Fn(&Mat, &Vector, &Vector, &mut Vector) -> Result<()>`
         ///
         /// This function only works for operations in [`MatOperationMVVV`].
         ///
@@ -1333,7 +1329,7 @@ pub mod mat_shell {
         ///     * `v3` *(output)* - The output vector
         pub fn shell_set_operation_mvvv<F>(&mut self, op: impl Into<MatOperationMVVV>, user_f: F) -> Result<()>
         where
-            F: FnMut(&MatShell<'a, 'tl, T>, &Vector<'a>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
+            F: Fn(&MatShell<'a, 'tl, T>, &Vector<'a>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
         {
             if self.in_operation_closure {
                 Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ORDER,
@@ -1609,6 +1605,179 @@ pub mod mat_shell {
             let ierr = unsafe { petsc_raw::MatShellSetVecType(self.mat_p, type_name_cs.as_ptr()) };
             Petsc::check_error(self.world, ierr)
         }
+
+        /// Allows user to set the duplicate operation for a shell matrix.
+        ///
+        /// # Example
+        ///
+        /// ```
+        /// # use petsc_rs::prelude::*;
+        /// # use petsc_rs::mat::MatShell;
+        /// # use mpi::traits::*;
+        /// # use ndarray::{s, array};
+        /// fn my_mat_duplicate<'a, 'tl>(mat: &MatShell<'a, 'tl, [PetscScalar; 4]>, _op: MatDuplicateOption)
+        ///     -> petsc_rs::Result<MatShell<'a, 'tl, [PetscScalar; 4]>>
+        /// {
+        ///     let mat_data = mat.get_mat_data().unwrap();
+        ///     let (mg, ng) = mat.get_global_size()?;
+        ///     let (m, n) = mat.get_local_size()?;
+        ///     
+        ///     let mut new_mat = Mat::create_shell(mat.world(), m, n, mg, ng, Box::new(mat_data.clone()))?;
+        ///     // We can't clone closures so we have to re set them.
+        ///     new_mat.shell_set_operation_mvv(MatOperation::MATOP_MULT, my_mat_mult)?;
+        ///     new_mat.shell_set_duplicate_operation(my_mat_duplicate)?;
+        ///     Ok(new_mat)
+        /// }
+        ///
+        /// fn my_mat_mult(m: &MatShell<[PetscScalar; 4]>, x: &Vector, y: &mut Vector) -> petsc_rs::Result<()> {
+        ///     let mat_data = m.get_mat_data().unwrap();
+        ///     let xx = x.view()?;
+        ///     let mut yy = y.view_mut()?;
+        ///     yy[0] = mat_data[0] * xx[0] + mat_data[1] * xx[1];
+        ///     yy[1] = mat_data[2] * xx[0] + mat_data[3] * xx[1];
+        ///     Ok(())
+        /// }
+        ///
+        /// # fn main() -> petsc_rs::Result<()> {
+        /// # let petsc = Petsc::init_no_args()?;
+        /// // Note: this example will only work in a uniprocessor comm world. Also, right
+        /// // now this example only works when `PetscScalar` is `PetscReal`. It will fail
+        /// // to compile if `PetscScalar` is `PetscComplex`.
+        /// let mut x = Vector::from_slice(petsc.world(), &[1.2, -0.5])?;
+        /// let mut y = Vector::from_slice(petsc.world(), &[0.0, 0.0])?;
+        ///
+        /// let theta = std::f64::consts::PI as PetscReal / 2.0;
+        /// let mat_data = [PetscScalar::cos(theta), -PetscScalar::sin(theta),
+        ///                 PetscScalar::sin(theta),  PetscScalar::cos(theta)];
+        /// let mut mat = Mat::create_shell(petsc.world(),2,2,2,2, Box::new(mat_data))?;
+        /// mat.shell_set_manage_scaling_shifts()?;
+        /// mat.set_up()?;
+        ///
+        /// // set operations
+        /// mat.shell_set_operation_mvv(MatOperation::MATOP_MULT, my_mat_mult)?;
+        /// mat.shell_set_duplicate_operation(my_mat_duplicate)?;
+        ///
+        /// mat.mult(&x, &mut y)?;
+        /// assert!(y.view()?.slice(s![..]).abs_diff_eq(&array![0.5, 1.2], 1e-15));
+        ///
+        /// let new_mat = mat.clone(); // calls `mat.duplicate`
+        /// new_mat.mult(&y, &mut x)?;
+        /// assert!(x.view()?.slice(s![..]).abs_diff_eq(&array![-1.2, 0.5], 1e-15));
+        ///
+        /// let new_new_mat = new_mat.clone(); // calls `mat.duplicate`
+        /// new_mat.mult(&x, &mut y)?;
+        /// assert!(y.view()?.slice(s![..]).abs_diff_eq(&array![-0.5, -1.2], 1e-15));
+        /// # Ok(())
+        /// # }
+        /// ```
+        pub fn shell_set_duplicate_operation<F>(&mut self, user_f: F) -> Result<()>
+        where
+            F: Fn(&MatShell<'a, 'tl, T>, MatDuplicateOption) -> Result<MatShell<'a, 'tl, T>> + 'tl,
+        {
+            if self.in_operation_closure {
+                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ORDER,
+                    "You can not set operations in another operation.")?;
+            }
+
+            // TODO: should we set `in_closure = true` somehow. It probably doesn't matter as mat is immutable
+            let closure_anchor = MatShellSingleOperationTrampolineData::Duplicate(Box::new(user_f));
+        
+            if let Some(td) = self.shell_trampoline_data.as_mut() {
+                let _ = td.as_mut().user_funcs[MatOperation::MATOP_DUPLICATE as usize].take();
+                td.as_mut().user_funcs[MatOperation::MATOP_DUPLICATE as usize] = Some(closure_anchor);
+            } else {
+                let none_array = seq!(N in 0..148 { [ #( None, )* ] });
+                let mut td = MatShellTrampolineData { 
+                    world: self.world, user_funcs: none_array, data: None };
+                td.user_funcs[MatOperation::MATOP_DUPLICATE as usize] = Some(closure_anchor);
+                let td_anchor = Box::pin(td);
+                let ierr = unsafe { petsc_raw::MatShellSetContext(self.mat_p,
+                    std::mem::transmute(td_anchor.as_ref())) }; // this will also erase the lifetimes
+                Petsc::check_error(self.world, ierr)?;
+                self.shell_trampoline_data = Some(td_anchor);
+            }
+        
+            let ierr = unsafe { petsc_raw::MatShellSetOperation(self.mat_p, MatOperation::MATOP_DUPLICATE, None) };
+            Petsc::check_error(self.world, ierr)
+        }
+
+        /// Duplicates a [`MatShell`] using the operation set with [`MatShell::shell_set_duplicate_operation()`].
+        ///
+        /// Note, [`MatShell::clone()`] is the same as `x.duplicate(MatDuplicateOption::MAT_COPY_VALUES)`.
+        ///
+        /// See the manual page for [`MatDuplicateOption`](https://petsc.org/release/docs/manualpages/Mat/MatDuplicateOption.html#MatDuplicateOption) for an explanation of these options.
+        pub fn duplicate(&self, op: MatDuplicateOption) -> Result<Self> {
+            // For the most part this is a port of the C MatDuplicate method
+            // We have to do this all in rust because otherwise we cant set closures.
+            // This is by no means safe rust code.
+            let is_assembled: bool = unsafe { &*self.mat_p }.assembled.into();
+            if op == MatDuplicateOption::MAT_COPY_VALUES && !is_assembled {
+                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+                    "MAT_COPY_VALUES not allowed for unassembled matrix")?;
+            }
+            if unsafe { &*self.mat_p }.factortype != petsc_raw::MatFactorType::MAT_FACTOR_NONE {
+                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+                    "`duplicate`: Not for factored matrix")?;
+            }
+
+            if let Some(td) = self.shell_trampoline_data.as_ref() {
+                if let Some(MatShellSingleOperationTrampolineData::Duplicate(ref duplicate))
+                    = td.as_ref().user_funcs[MatOperation::MATOP_DUPLICATE as usize]
+                {
+                    // TODO: ierr = PetscLogEventBegin(MAT_Convert,mat,0,0,0);CHKERRQ(ierr);
+                    let mut new_mat = duplicate(self, op)?;
+                    let new_mat_ref = unsafe { &mut *new_mat.mat_p };
+                    let old_mat_ref = unsafe { &*self.mat_p };
+
+                    // // TODO: should we do the following? 
+                    // ierr = MatGetOperation(mat,MATOP_VIEW,&viewf);CHKERRQ(ierr);
+                    // if (viewf) {
+                    //     ierr = MatSetOperation(B,MATOP_VIEW,viewf);CHKERRQ(ierr);
+                    // }
+
+                    new_mat_ref.stencil.dim = old_mat_ref.stencil.dim;
+                    new_mat_ref.stencil.noc = old_mat_ref.stencil.noc;
+                    for i in 0..old_mat_ref.stencil.dim as usize {
+                        new_mat_ref.stencil.dims[i] = old_mat_ref.stencil.dims[i];
+                        new_mat_ref.stencil.starts[i] = old_mat_ref.stencil.starts[i];
+                    }
+                    new_mat_ref.nooffproczerorows = old_mat_ref.nooffproczerorows;
+                    new_mat_ref.nooffprocentries = old_mat_ref.nooffprocentries;
+
+                    let mut dm_p = MaybeUninit::zeroed();
+                    let cstr = CString::new("__PETSc_dm").expect("`CString::new` failed");
+                    let ierr = unsafe { petsc_raw::PetscObjectQuery(self.mat_p as *mut _, cstr.as_ptr(), dm_p.as_mut_ptr()) };
+                    Petsc::check_error(self.world(), ierr)?;
+                    let dm_p_nn = NonNull::new(unsafe { dm_p.assume_init() } );
+                    if let Some(dm_p) = dm_p_nn {
+                        let ierr = unsafe { petsc_raw::PetscObjectCompose(new_mat_ref as *mut _ as *mut _, cstr.as_ptr(), dm_p.as_ptr()) };
+                        Petsc::check_error(self.world(), ierr)?;
+                    }
+
+                    // ierr = PetscLogEventEnd(MAT_Convert,mat,0,0,0);CHKERRQ(ierr);
+                    unsafe { &mut *(new_mat_ref as *mut _ as *mut petsc_raw::_p_PetscObject) }.state += 1;
+
+                    Ok(new_mat)
+                }
+                else
+                {
+                    Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_SUP, 
+                        "No `duplicate` operation written for matrix type `MatShell`\n")
+                            .map(|_| unreachable!())
+                }
+            } else {
+                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_SUP, 
+                    "No `duplicate` operation written for matrix type `MatShell`\n")
+                        .map(|_| unreachable!())
+            }
+        }
+    }
+
+    impl<'a, 'tl, T> Clone for MatShell<'a, 'tl, T> {
+        /// Same as [`x.duplicate(MatDuplicateOption::MAT_COPY_VALUES)`](MatShell::duplicate()).
+        fn clone(&self) -> Self {
+            self.duplicate(MatDuplicateOption::MAT_COPY_VALUES).unwrap()
+        }
     }
 
     impl Into<MatOperation> for MatOperationMVV {
@@ -1728,7 +1897,7 @@ pub mod mat_shell {
     }
 }
 
-impl<'a> Clone for Mat<'a, '_> {
+impl<'a, 'tl> Clone for Mat<'a, 'tl> {
     /// Same as [`x.duplicate(MatDuplicateOption::MAT_COPY_VALUES)`](Mat::duplicate()).
     fn clone(&self) -> Self {
         self.duplicate(MatDuplicateOption::MAT_COPY_VALUES).unwrap()

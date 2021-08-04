@@ -10,7 +10,6 @@
 
 use std::mem::{MaybeUninit, ManuallyDrop};
 use std::ffi::{CString, };
-use std::rc::Rc;
 use std::pin::Pin;
 use crate::{
     Petsc,
@@ -30,28 +29,26 @@ use mpi::traits::*;
 pub type PCType = crate::petsc_raw::PCTypeEnum;
 
 /// Abstract PETSc object that manages all preconditioners including direct solvers such as PCLU
-pub struct PC<'a, 'tl> {
+pub struct PC<'a, 'tl, 'bl> {
     pub(crate) world: &'a UserCommunicator,
     pub(crate) pc_p: *mut petsc_raw::_p_PC, // I could use petsc_raw::PC which is the same thing, but i think using a pointer is more clear
 
-    // We take an `Rc` because we don't want ownership of the Mat. Under the hood, this is how the 
-    // PetscSetOperators function works, it increments the reference count. The problem with this
-    // solution right now is that we lose mutable access. It might be worth making it a Rc<RefCell<Mat>>.
-    // This might also allow us to have a get_operators function (which would also returns a Rc<RefCell<Mat>>).
-    // Regardless, returning mutable access would be hard, especially when the rust side can't guarantee how the 
-    // C api accesses the operators behind the scenes.
-    ref_amat: Option<Rc<Mat<'a, 'tl>>>,
-    ref_pmat: Option<Rc<Mat<'a, 'tl>>>,
+    // Note, to prevent self references, the ref version is `None`
+    // if the current mat value is stored in the owned version
+    ref_amat: Option<&'bl Mat<'a, 'tl>>,
+    ref_pmat: Option<&'bl Mat<'a, 'tl>>,
+    owned_amat: Option<Mat<'a, 'tl>>,
+    owned_pmat: Option<Mat<'a, 'tl>>,
 
     shell_set_apply_trampoline_data: Option<Pin<Box<PCShellSetApplyTrampolineData<'a, 'tl>>>>,
 }
 
 struct PCShellSetApplyTrampolineData<'a, 'tl> {
     world: &'a UserCommunicator,
-    user_f: Box<dyn FnMut(&PC<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>,
+    user_f: Box<dyn FnMut(&PC<'a, 'tl, '_>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>,
 }
 
-impl<'a> Drop for PC<'a, '_> {
+impl<'a> Drop for PC<'a, '_, '_> {
     // Note, this should only be called if the PC context was created with `PCCreate`.
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::PCDestroy(&mut self.pc_p as *mut _) };
@@ -59,10 +56,10 @@ impl<'a> Drop for PC<'a, '_> {
     }
 }
 
-impl<'a, 'tl> PC<'a, 'tl> {
+impl<'a, 'tl, 'bl> PC<'a, 'tl, 'bl> {
     /// Same as `PC { ... }` but sets all optional params to `None`
     pub(crate) fn new(world: &'a UserCommunicator, pc_p: *mut petsc_raw::_p_PC) -> Self {
-        PC { world, pc_p, ref_amat: None, ref_pmat: None,
+        PC { world, pc_p, ref_amat: None, ref_pmat: None, owned_amat: None, owned_pmat: None,
             shell_set_apply_trampoline_data: None }
     }
 
@@ -92,17 +89,9 @@ impl<'a, 'tl> PC<'a, 'tl> {
     /// different one associated with the preconditioner.
     ///
     /// Passing a `None` for `a_mat` or `p_mat` removes the matrix that is currently used.
-    // TODO: should we pass in `Rc`s or should we just transfer ownership.
-    // or we could do `Rc<RefCell<Mat>>` so that when you remove the mats we can give mut access back.
-    pub fn set_operators(&mut self, a_mat: impl Into<Option<Rc<Mat<'a, 'tl>>>>, p_mat: impl Into<Option<Rc<Mat<'a, 'tl>>>>) -> Result<()> {
+    pub fn set_operators(&mut self, a_mat: impl Into<Option<&'bl Mat<'a, 'tl>>>, p_mat: impl Into<Option<&'bl Mat<'a, 'tl>>>) -> Result<()> {
         let a_mat = a_mat.into();
         let p_mat = p_mat.into();
-        // TODO: should we make a_mat an `Rc<RefCell<Mat>>`, `Rc<Mat>`, or just a `Mat`
-        // if this consumes a_mat and p_mat, make `set_operators_single_mat` so that you can set
-        // them to be the same.
-
-        // Should this function consume the mats? Right now you have to turn the mats into `Rc`s which
-        // means you loose mutable access, even if you remove them.
 
         let ierr = unsafe { petsc_raw::PCSetOperators(self.pc_p,
             a_mat.as_ref().map_or(std::ptr::null_mut(), |m| m.mat_p), 
@@ -113,6 +102,9 @@ impl<'a, 'tl> PC<'a, 'tl> {
         // them each time `PCSetOperators` is called).
         let _ = self.ref_amat.take();
         let _ = self.ref_pmat.take();
+        // We aren't using the owned mats anymore so drop them.
+        let _ = self.owned_amat.take();
+        let _ = self.owned_pmat.take();
 
         self.ref_amat = a_mat;
         self.ref_pmat = p_mat;
@@ -126,72 +118,74 @@ impl<'a, 'tl> PC<'a, 'tl> {
     /// If the operators have NOT been set with [`KSP`](crate::ksp::KSP::set_operators())/[`PC::set_operators()`](crate::pc::PC::set_operators())
     /// then the operators are created in the PC and returned to the user. In this case, two DIFFERENT
     /// operators will be returned.
-    pub fn get_operators(&self) -> Result<(Rc<Mat<'a, 'tl>>, Rc<Mat<'a, 'tl>>)> {
-        // TODO: maybe this should return Rc<RefCell<T>> so that the caller can edit the matrices
-        // https://petsc.org/release/docs/manualpages/PC/PCGetOperators.html#PCGetOperators
-        // Although that would mean set_operators should also take Rc<RefCell<T>>
-
-        let a_mat = if let Some(ref a_mat) = self.ref_amat {
-            a_mat.clone()
+    pub fn get_operators_or_create<'rl>(&'rl mut self) -> Result<(&'rl Mat<'a, 'tl>, &'rl Mat<'a, 'tl>)> {
+        let a_mat = if let Some(a_mat) = self.ref_amat {
+            a_mat
         }
         else
         {
-            let mut a_mat_p = MaybeUninit::uninit();
-            let ierr = unsafe { petsc_raw::PCGetOperators(self.pc_p, a_mat_p.as_mut_ptr(), std::ptr::null_mut()) };
-            Petsc::check_error(self.world, ierr)?;
+            if self.owned_amat.is_none() {
+                let mut a_mat_p = MaybeUninit::zeroed();
+                let ierr = unsafe { petsc_raw::PCGetOperators(self.pc_p, a_mat_p.as_mut_ptr(), std::ptr::null_mut()) };
+                Petsc::check_error(self.world, ierr)?;
 
-            let mut mat = Mat::new(self.world, unsafe { a_mat_p.assume_init() });
-            unsafe { mat.reference()?; }
-            Rc::new(mat)
+                let mut mat = Mat::new(self.world, unsafe { a_mat_p.assume_init() });
+                // We only call this if amat has not been set which means that PETSc will create a new mat
+                // so it is ok to increment the reference of mat and take ownership.
+                unsafe { mat.reference()?; }
+                self.owned_amat = Some(mat);
+            }
+            self.owned_amat.as_ref().unwrap()
         };
 
-        let p_mat = if let Some(ref p_mat) = self.ref_pmat {
-            p_mat.clone()
+        let p_mat = if let Some(p_mat) = self.ref_pmat {
+            p_mat
         }
         else
         {
-            let mut p_mat_p = MaybeUninit::uninit();
-            let ierr = unsafe { petsc_raw::PCGetOperators(self.pc_p, std::ptr::null_mut(), p_mat_p.as_mut_ptr()) };
-            Petsc::check_error(self.world, ierr)?;
+            if self.owned_pmat.is_none() {
+                let mut p_mat_p = MaybeUninit::zeroed();
+                let ierr = unsafe { petsc_raw::PCGetOperators(self.pc_p, std::ptr::null_mut(), p_mat_p.as_mut_ptr()) };
+                Petsc::check_error(self.world, ierr)?;
 
-            let mut mat = Mat::new(self.world, unsafe { p_mat_p.assume_init() });
-            unsafe { mat.reference()?; }
-            Rc::new(mat)
+                let mut mat = Mat::new(self.world, unsafe { p_mat_p.assume_init() });
+                // We only call this if pmat has not been set which means that PETSc will create a new mat
+                // so it is ok to increment the reference of mat and take ownership.
+                unsafe { mat.reference()?; }
+                self.owned_pmat = Some(mat);
+            }
+            self.owned_pmat.as_ref().unwrap()
         };
 
         Ok((a_mat, p_mat))
     }
 
-    // TODO: make a branch to test this out
-    // /// Sets the matrix associated with the linear system and a (possibly)
-    // /// different one associated with the preconditioner.
-    // ///
-    // /// Note, this method will borrow `a_mat` and `p_mat` as mutable until they are dropped.
-    // /// Passing a `None` for `a_mat` or `p_mat` removes the matrix that is currently used.
-    // /// This will drop the mutable borrows taken from the `RefCells` giving mutable access
-    // /// back to the caller.
-    // pub fn set_operators(&mut self, a_mat: Option<Rc<RefCell<Mat<'a>>>>, p_mat: Option<Rc<RefCell<Mat<'a>>>>) -> Result<()>
-    // {
-    //     // drop everything as it is getting replaced. (note under the hood MatDestroy is called on both of
-    //     // them each time `PCSetOperators` is called).
-    //     // let _ = self.ref_amat.take();
-    //     // let _ = self.ref_pmat.take();
-    //
-    //     let ierr = unsafe { petsc_raw::PCSetOperators(self.pc_p,
-    //         a_mat.as_ref().map_or(std::ptr::null_mut(), |m| m.borrow().mat_p), 
-    //         p_mat.as_ref().map_or(std::ptr::null_mut(), |m| m.borrow().mat_p)) };
-    //     Petsc::check_error(self.world, ierr)?;
-    //
-    //     let _ = self.a_mat.take();
-    //     let _ = self.p_mat.take();
-    //
-    //     self.a_mat = a_mat;
-    //     self.p_mat = p_mat;
-    //     // self.ref_amat = self.a_mat.map(|m| m.borrow_mut());
-    //     // self.ref_pmat = self.p_mat.map(|m| m.borrow_mut());
-    //
-    //     Ok(())
-    // }
+    /// Gets the matrix associated with the linear system and possibly a different
+    /// one associated with the preconditioner.
+    ///
+    /// If the operators have NOT been set with [`KSP`](crate::ksp::KSP::set_operators())/[`PC::set_operators()`](crate::pc::PC::set_operators())
+    /// then this will return `None` for those operators.
+    ///
+    /// Note, if you used [`KSP::set_compute_operators()`](crate::ksp::KSP::set_compute_operators()) to set the operators, you must use
+    /// [`PC::get_operators_or_create()`] to create the operators from the method.
+    pub fn try_get_operators<'rl>(&'rl self) -> Result<(Option<&'rl Mat<'a, 'tl>>, Option<&'rl Mat<'a, 'tl>>)> {
+        Ok((
+            if self.ref_amat.is_some() {
+                self.ref_amat
+            }
+            else
+            { 
+                self.owned_amat.as_ref()
+            },
+            if self.ref_pmat.is_some() {
+                self.ref_pmat
+            }
+            else
+            {
+                self.owned_pmat.as_ref()
+            }
+        ))
+    }
 
     /// Sets routine to use as preconditioner. 
     ///
@@ -203,7 +197,7 @@ impl<'a, 'tl> PC<'a, 'tl> {
     ///     * `xout` *(output)* - output vector
     pub fn shell_set_apply<F>(&mut self, user_f: F) -> Result<()>
     where
-        F: FnMut(&PC<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
+        F: FnMut(&PC<'a, 'tl, '_>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
     {
         // TODO: look at how rsmpi did the trampoline stuff:
         // https://github.com/rsmpi/rsmpi/blob/master/src/collective.rs#L1684
@@ -277,13 +271,13 @@ impl<'a, 'tl> PC<'a, 'tl> {
 }
 
 // Macro impls
-impl<'a> PC<'a, '_> {
+impl<'a> PC<'a, '_, '_> {
     wrap_simple_petsc_member_funcs! {
         PCSetFromOptions, pub set_from_options, takes mut, #[doc = "Sets PC options from the options database. This routine must be called before PCSetUp() if the user is to be allowed to set the preconditioner method."];
         PCSetUp, pub set_up, takes mut, #[doc = "Prepares for the use of a preconditioner."];
     }
 }
 
-impl_petsc_object_traits! { PC, pc_p, petsc_raw::_p_PC, '_ }
+impl_petsc_object_traits! { PC, pc_p, petsc_raw::_p_PC, '_, '_ }
 
-impl_petsc_view_func!{ PC, PCView, '_ }
+impl_petsc_view_func!{ PC, PCView, '_, '_ }

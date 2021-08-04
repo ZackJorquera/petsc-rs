@@ -41,7 +41,7 @@ pub struct SNES<'a, 'tl, 'bl> {
     world: &'a UserCommunicator,
     pub(crate) snes_p: *mut petsc_raw::_p_SNES,
 
-    ksp: Option<KSP<'a, 'tl>>,
+    ksp: Option<KSP<'a, 'tl, 'bl>>,
     linesearch: Option<LineSearch<'a>>,
     dm: Option<DM<'a, 'tl>>,
 
@@ -181,7 +181,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     /// Sets a [`KSP`](KSP) context for the SNES object to use.
     ///
     /// if you change the ksp by calling set again, then the original will be dropped.
-    pub fn set_ksp(&mut self, ksp: KSP<'a, 'tl>) -> Result<()>
+    pub fn set_ksp(&mut self, ksp: KSP<'a, 'tl, 'bl>) -> Result<()>
     {
         
         let ierr = unsafe { petsc_raw::SNESSetKSP(self.snes_p, ksp.ksp_p) };
@@ -200,12 +200,12 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     ///
     /// Note, this does not return a [`Result`](crate::Result) because it can never
     /// fail, instead it will return `None`.
-    pub fn try_get_ksp(&self) -> Option<&KSP<'a, 'tl>> {
+    pub fn try_get_ksp(&self) -> Option<&KSP<'a, 'tl, 'bl>> {
         self.ksp.as_ref()
     }
 
     /// Returns a reference to the [`KSP`](KSP) context.
-    pub fn get_ksp(&mut self) -> Result<&KSP<'a, 'tl>>
+    pub fn get_ksp(&mut self) -> Result<&KSP<'a, 'tl, 'bl>>
     {
         // TODO: should we even have a non mut one (or only `get_ksp_mut`)
 
@@ -228,7 +228,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     }
 
     /// Returns a mutable reference to the [`KSP`](KSP) context.
-    pub fn get_ksp_mut(&mut self) -> Result<&mut KSP<'a, 'tl>>
+    pub fn get_ksp_mut(&mut self) -> Result<&mut KSP<'a, 'tl, 'bl>>
     {
         if let Some(ref mut ksp) = self.ksp
         {

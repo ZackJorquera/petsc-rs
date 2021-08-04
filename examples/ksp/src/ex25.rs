@@ -114,8 +114,8 @@ fn main() -> petsc_rs::Result<()> {
 
     ksp.solve(None, &mut x)?;
 
-    let (a_mat,_) = ksp.get_operators()?;
     let b = ksp.get_rhs()?;
+    let (a_mat,_) = ksp.get_operators_or_create()?;
     let mut b2 = b.duplicate()?;
     Mat::mult(&a_mat,&x,&mut b2)?;
     b2.axpy(PetscScalar::from(-1.0), &b)?;
