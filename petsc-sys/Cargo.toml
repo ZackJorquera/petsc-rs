@@ -13,6 +13,7 @@ petsc-real-f32 = []
 petsc-int-i32 = []
 petsc-int-i64 = []
 petsc-use-complex = ["num-complex"]
+generate-enums = []
 
 [dependencies]
 mpi = {git = "https://github.com/rsmpi/rsmpi.git", rev = "82e1d35", default-features = false }
@@ -26,6 +27,5 @@ syn = { version = "1.0", features = ["full"] }
 quote = "1.0"
 proc-macro2 = "1.0"
 build-probe-mpi = {git = "https://github.com/rsmpi/rsmpi.git", rev = "82e1d35", default-features = false }
-semver = "1.0"
 build-probe-petsc = { path = "../build-probe-petsc" }
 regex = "1.5"

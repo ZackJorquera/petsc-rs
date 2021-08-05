@@ -576,7 +576,7 @@ fn main() -> petsc_rs::Result<()> {
         let mut local = dm.get_local_vector()?;
         dm.global_to_local(&u, InsertMode::INSERT_VALUES, &mut local)?;
         petsc_println!(petsc.world(), "Local Function:")?;
-        petsc_println_all!(petsc.world(), "[process {}]\n{:.5}", petsc.world().rank(), *local.view()?)?;
+        petsc_println_sync!(petsc.world(), "[process {}]\n{:.5}", petsc.world().rank(), *local.view()?)?;
         local.view_with(None)?;
     }
 
@@ -595,38 +595,38 @@ fn main() -> petsc_rs::Result<()> {
         let initial_guess: Box<dyn FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> petsc_rs::Result<()>>
             = if opt.nonz_init { Box::new(ecks) } else { Box::new(zero) };
         if opt.run_type == RunType::RUN_FULL {
-            snes.get_dm_mut()?.project_function(0.0, InsertMode::INSERT_VALUES, &mut u, [initial_guess])?;
+            snes.get_dm_or_create()?.project_function(0.0, InsertMode::INSERT_VALUES, &mut u, [initial_guess])?;
         }
         if opt.guess_vec_view {
             u.view_with(None)?;
         }
         snes.solve(None, &mut u)?;
         let soln = snes.get_solution()?;
-        let dm = snes.get_dm_mut()?;
+        let dm = snes.get_dm_or_create()?;
 
         if opt.show_solution {
             let mut local = dm.get_local_vector()?;
             dm.global_to_local(&soln, InsertMode::INSERT_VALUES, &mut local)?;
             petsc_println!(petsc.world(), "Solution:")?;
-            petsc_println_all!(petsc.world(), "[process {}]\n{:.5}", petsc.world().rank(), *u.view()?)?;
+            petsc_println_sync!(petsc.world(), "[process {}]\n{:.5}", petsc.world().rank(), *u.view()?)?;
             u.view_with(None)?;
         }
     } else if opt.run_type == RunType::RUN_PERF {
-        let mut r = snes.get_dm()?.create_global_vector()?;
+        let mut r = snes.get_dm_or_create()?.create_global_vector()?;
         snes.compute_function(&u, &mut r)?;
         r.chop(1.0e-10)?;
         let norm = r.norm(NormType::NORM_2)?;
         petsc_println!(petsc.world(), "Initial Residual:\n L_2 Residual: {:.5}", norm)?;
     } else {
         let tol = 1.0e-11;
-        let mut r = snes.get_dm()?.create_global_vector()?;
+        let mut r = snes.get_dm_or_create()?.create_global_vector()?;
         let exact_funcs: [Box<dyn FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> petsc_rs::Result<()>>; 1]
         = [Box::new(exact_func)];
         if !opt.quiet { 
             petsc_println!(petsc.world(), "Initial Guess:")?;
             u.view_with(None)?;
         }
-        let error = snes.get_dm_mut()?.compute_l2_diff(0.0, &u, exact_funcs)?;
+        let error = snes.get_dm_or_create()?.compute_l2_diff(0.0, &u, exact_funcs)?;
         if error < tol { petsc_println!(petsc.world(), "L_2 Error: < {:.1e}", tol)?; }
         else           { petsc_println!(petsc.world(), "L_2 Error: {:.5e}", error)?; }
         
@@ -667,7 +667,7 @@ fn main() -> petsc_rs::Result<()> {
                 };
 
                 a_mat.mult(&u, &mut b)?;
-                let ksp = snes.get_ksp_mut()?;
+                let ksp = snes.get_ksp_or_create()?;
                 ksp.set_operators(a_mat, j_mat)?;
                 ksp.solve(&b, &mut r)?;
                 r.axpy(-1.0, &u)?;
@@ -681,14 +681,14 @@ fn main() -> petsc_rs::Result<()> {
         u.view_with(None)?;
     }
     if opt.coeff_view {
-        if let Some(nu) = snes.get_dm()?.get_auxiliary_vec(None, 0)? {
+        if let Some(nu) = snes.get_dm_or_create()?.get_auxiliary_vec(None, 0)? {
             nu.view_with(None)?
         }
     }
 
     if opt.bd_integral {
         let exact = 10.0/3.0;
-        let dm = snes.get_dm_mut()?;
+        let dm = snes.get_dm_or_create()?;
         let l = dm.get_label("marker")?;
 
         let bd_int = dm.plex_compute_bd_integral_raw(&u, l.as_ref(), slice::from_ref(&1), bd_integral_2d)?;

@@ -1498,7 +1498,6 @@ impl<'a, 'tl> DM<'a, 'tl> {
         {
             let trampoline_data: Pin<&mut DMBoundaryFuncTrampolineData> = std::mem::transmute(ctx);
 
-            // TODO: is dim/nc the correct len?
             let x_slice = slice::from_raw_parts(x, dim as usize);
             let bcval_slice = slice::from_raw_parts_mut(bcval, nc as usize);
             
@@ -1511,7 +1510,6 @@ impl<'a, 'tl> DM<'a, 'tl> {
         {
             let trampoline_data: Pin<&mut DMBoundaryFuncTrampolineData> = std::mem::transmute(ctx);
 
-            // TODO: is dim/nc the correct len?
             let x_slice = slice::from_raw_parts(x, dim as usize);
             let bcval_slice = slice::from_raw_parts_mut(bcval, nc as usize);
             
@@ -2175,7 +2173,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     ///         Ok(())
     ///     })];
     /// dm.project_function_local(0.0, InsertMode::INSERT_ALL_VALUES, &mut local, funcs)?;
-    /// # petsc_println_all!(petsc.world(), "[Process {}] {:.5}", petsc.world().rank(), *local.view()?)?;
+    /// # petsc_println_sync!(petsc.world(), "[Process {}] {:.5}", petsc.world().rank(), *local.view()?)?;
     ///
     /// # // TODO: give explanation on whys the points are used and when
     /// assert!(local.view()?.slice(s![..]).abs_diff_eq(
@@ -2213,7 +2211,6 @@ impl<'a, 'tl> DM<'a, 'tl> {
         {
             let trampoline_data: Pin<&mut DMProjectFunctionTrampolineData> = std::mem::transmute(ctx);
 
-            // TODO: is dim/nc the correct len?
             let x_slice = slice::from_raw_parts(x, dim as usize);
             let u_slice = slice::from_raw_parts_mut(u, nf as usize);
             
@@ -2295,7 +2292,6 @@ impl<'a, 'tl> DM<'a, 'tl> {
             &localu_owned
         };
 
-        // TODO: will DMProjectFunctionLocal call the closure? 
         let ierr = unsafe { petsc_raw::DMProjectFieldLocal(
             self.dm_p, time, localu.vec_p, fn_ptrs.as_mut_ptr(),
             mode, localx.vec_p) };
@@ -2391,7 +2387,6 @@ impl<'a, 'tl> DM<'a, 'tl> {
         {
             let trampoline_data: Pin<&mut DMProjectFunctionTrampolineData> = std::mem::transmute(ctx);
 
-            // TODO: is dim/nc the correct len?
             let x_slice = slice::from_raw_parts(x, dim as usize);
             let u_slice = slice::from_raw_parts_mut(u, nf as usize);
             
@@ -2409,7 +2404,6 @@ impl<'a, 'tl> DM<'a, 'tl> {
             = vec![Some(dm_compute_ls_diff_trampoline); nf];
         let mut trampoline_data_refs = trampoline_datas.iter().map(|td| unsafe { std::mem::transmute(td.as_ref()) }).collect::<Vec<_>>();
 
-        // TODO: will DMProjectFunctionLocal call the closure? 
         let ierr = unsafe { petsc_raw::DMComputeL2Diff(
             self.dm_p, time, trampoline_funcs.as_mut_ptr(),
             trampoline_data_refs.as_mut_ptr(),
@@ -2500,9 +2494,11 @@ impl<'a, 'tl> DM<'a, 'tl> {
     }
 
     /// Mark all faces on the boundary 
-    pub fn plex_mark_boundary_faces(&mut self, val: PetscInt, label: &mut DMLabel) -> Result<()> {
-        // TODO: deal with PETSC_DETERMINE case for val
-        let ierr = unsafe { petsc_raw::DMPlexMarkBoundaryFaces(self.dm_p, val, label.dml_p) };
+    ///
+    /// If `val` is `None` then that marker values will be some value in the closure (or 1 if none are found).
+    pub fn plex_mark_boundary_faces(&mut self, val: impl Into<Option<PetscInt>>, label: &mut DMLabel) -> Result<()> {
+        let ierr = unsafe { petsc_raw::DMPlexMarkBoundaryFaces(
+            self.dm_p,val.into().unwrap_or(petsc_raw::PETSC_DETERMINE), label.dml_p) };
         Petsc::check_error(self.world, ierr)
     }
 
@@ -2607,7 +2603,6 @@ impl<'a, 'tl> DM<'a, 'tl> {
     // }
 
     /// Unsafe clone
-    // TODO: 
     pub unsafe fn clone_unchecked(&self) -> Result<DM<'a, 'tl>> {
         Ok(if self.type_compare(DMType::DMCOMPOSITE)? {
             let c = self.try_get_composite_dms()?.unwrap();
@@ -2835,7 +2830,8 @@ impl<'a, 'tl> DS<'a, 'tl> {
 
     /// Set the array of constants passed to point functions
     pub fn set_constants(&mut self, consts: &[PetscInt]) -> Result<()> {
-        // TODO: why does it take a `*mut _` for consts?
+        // why does it take a `*mut _` for consts? It doesn't really
+        // matter because it only does an array copy under the hood.
         let ierr = unsafe { petsc_raw::PetscDSSetConstants(self.ds_p, consts.len() as PetscInt, consts.as_ptr() as *mut _) };
         Petsc::check_error(self.world, ierr)
     }
@@ -2866,7 +2862,6 @@ impl<'a, 'tl> DS<'a, 'tl> {
         {
             let trampoline_data: Pin<&mut DSExactSolutionTrampolineData> = std::mem::transmute(ctx);
 
-            // TODO: is dim/nc the correct len?
             let x_slice = slice::from_raw_parts(x, dim as usize);
             let u_slice = slice::from_raw_parts_mut(u, nc as usize);
             

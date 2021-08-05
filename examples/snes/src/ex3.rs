@@ -88,9 +88,7 @@ fn main() -> petsc_rs::Result<()> {
     let mut snes = petsc.snes_create()?;
 
     snes.set_function(&mut r, |_snes, x, y| {
-        // Note, is the ex3.c file, this is a `DMGetLocalVector` not a `DMCreateLocalVector`.
-        // TODO: make it use `DMGetLocalVector` to be consistent with c examples
-        let mut x_local = da.create_local_vector()?;
+        let mut x_local = da.get_local_vector()?;
 
         da.global_to_local(x, InsertMode::INSERT_VALUES, &mut x_local)?;
 
@@ -150,7 +148,7 @@ fn main() -> petsc_rs::Result<()> {
     })?;
 
     if user_precond {
-        let pc = snes.get_ksp_mut()?.get_pc_mut()?;
+        let pc = snes.get_ksp_or_create()?.get_pc_or_create()?;
         pc.set_type(PCType::PCSHELL)?;
         // Identity preconditioner:
         pc.shell_set_apply(|_pc, xin, xout| xout.copy_data_from(xin) )?;

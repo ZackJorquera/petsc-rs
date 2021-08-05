@@ -2,7 +2,7 @@
 //!
 //! KSP users can set various preconditioning options at runtime via the options database 
 //! (e.g., -pc_type jacobi ). KSP users can also set PC options directly in application codes by 
-//! first extracting the PC context from the KSP context via [`KSP::get_pc()`](crate::ksp::KSP::get_pc()) and then directly
+//! first extracting the PC context from the KSP context via [`KSP::get_pc_or_create()`](crate::ksp::KSP::get_pc_or_create()) and then directly
 //! calling the PC routines listed below (e.g., [`PC::set_type()`]). PC components can be used directly
 //! to create and destroy solvers; this is not needed for users but is for library developers.
 //!
@@ -66,9 +66,8 @@ impl<'a, 'tl, 'bl> PC<'a, 'tl, 'bl> {
     /// Creates a preconditioner context.
     ///
     /// You will most likely create a preconditioner context from a solver type such as
-    /// from a Krylov solver, [`KSP`](crate::ksp::KSP), using the [`KSP::get_pc()`](crate::ksp::KSP::get_pc()) method.
-    ///
-    /// [`KSP::get_pc`]: KSP::get_pc
+    /// from a Krylov solver, [`KSP`](crate::ksp::KSP), using the
+    /// [`KSP::get_pc_or_create()`](crate::ksp::KSP::get_pc_or_create()) method.
     pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut pc_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::PCCreate(world.as_raw(), pc_p.as_mut_ptr()) };

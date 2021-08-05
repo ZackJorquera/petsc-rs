@@ -97,8 +97,8 @@ fn main() -> petsc_rs::Result<()> {
         KSP and PC contexts from the SNES context, we can then
         directly call any KSP and PC routines to set various options.
     */
-    let ksp = snes.get_ksp_mut()?;
-    let pc = ksp.get_pc_mut()?;
+    let ksp = snes.get_ksp_or_create()?;
+    let pc = ksp.get_pc_or_create()?;
     pc.set_type(PCType::PCNONE)?;
     ksp.set_tolerances(Some(1.0e-4), None, None, Some(20))?;
 

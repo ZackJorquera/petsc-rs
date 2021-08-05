@@ -6,7 +6,7 @@
 //! options database (e.g., specifying a trust region method via -snes_type newtontr ). SNES internally
 //! employs [KSP](crate::ksp) for the solution of its linear systems. SNES users can also set [`KSP`](KSP) options
 //! directly in application codes by first extracting the [`KSP`](KSP) context from the [`SNES`](crate::snes::SNES) context via
-//! [`SNES::get_ksp()`](#) and then directly calling various [`KSP`](KSP) (and [`PC`](crate::pc::PC)) routines
+//! [`SNES::get_ksp_or_create()`](#) and then directly calling various [`KSP`](KSP) (and [`PC`](crate::pc::PC)) routines
 //! (e.g., [`PC::set_type()`](#)).
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/SNES/index.html>
@@ -195,8 +195,8 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
 
     /// Returns an [`Option`] to a reference to the [`KSP`](KSP) context.
     ///
-    /// If you want PETSc to set the [`KSP`] you must call [`SNES::get_ksp()`]
-    /// or [`SNES::get_ksp_mut()`].
+    /// If you want PETSc to set the [`KSP`] you must call [`SNES::set_ksp()`]
+    /// or [`SNES::get_ksp_or_create()`].
     ///
     /// Note, this does not return a [`Result`](crate::Result) because it can never
     /// fail, instead it will return `None`.
@@ -204,32 +204,9 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
         self.ksp.as_ref()
     }
 
-    /// Returns a reference to the [`KSP`](KSP) context.
-    pub fn get_ksp(&mut self) -> Result<&KSP<'a, 'tl, 'bl>>
-    {
-        // TODO: should we even have a non mut one (or only `get_ksp_mut`)
-
-        if let Some(ref ksp) = self.ksp
-        {
-            Ok(ksp)
-        }
-        else
-        {
-            let mut ksp_p = MaybeUninit::uninit();
-            let ierr = unsafe { petsc_raw::SNESGetKSP(self.snes_p, ksp_p.as_mut_ptr()) };
-            Petsc::check_error(self.world, ierr)?;
-
-            // It is now ok to drop this because we incremented the C reference counter
-            self.ksp = Some(KSP::new(self.world, unsafe { ksp_p.assume_init() }));
-            unsafe { self.ksp.as_mut().unwrap().reference()?; }
-            
-            Ok(self.ksp.as_ref().unwrap())
-        }
-    }
-
-    /// Returns a mutable reference to the [`KSP`](KSP) context.
-    pub fn get_ksp_mut(&mut self) -> Result<&mut KSP<'a, 'tl, 'bl>>
-    {
+    /// Returns a mutable reference to the [`KSP`](KSP) context, or create a default [`KSP`](KSP)
+    /// if one has not been set.
+    pub fn get_ksp_or_create(&mut self) -> Result<&mut KSP<'a, 'tl, 'bl>> {
         if let Some(ref mut ksp) = self.ksp
         {
             Ok(ksp)
@@ -314,11 +291,6 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     where
         F: FnMut(&SNES<'a, 'tl, '_>, &Vector<'a>, &mut Vector<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl
     {
-        // TODO: should input_vec be consumed or passed by mut ref? We want to take mutable access for
-        // it until the SNES is dropped. so either way its not like we can return mutable access to the
-        // caller anyways. Or what if it is an `Rc<RefCell<Vector>>`, then we could remove the reference
-        // at runtime
-
         // TODO: look at how rsmpi did the trampoline stuff:
         // https://github.com/rsmpi/rsmpi/blob/master/src/collective.rs#L1684
         // They used libffi, that could be a safer way to do it.
@@ -369,14 +341,9 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
             let x = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: x_p });
             let mut f = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: f_p });
             
-            // TODO: is this safe, can we move the data in user_f by calling it
             (trampoline_data.get_mut().user_f)(&snes, &x, &mut f)
                 .map_or_else(|err| match err {
                     DomainOrPetscError::DomainErr => {
-                        // TODO: `set_function_domain_error` doesn't take mut, but i think it should (because it does
-                        // change the snes behind the pointer). However, it isn't the end of the world because, in the 
-                        // rust api, there is no way for the closure to access this value that is set by this function.
-                        // Or do we need to do something to account for interior mutability
                         let perr = snes.set_function_domain_error();
                         match perr {
                             Ok(_) => 0,
@@ -463,8 +430,6 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     where
         F: FnMut(&SNES<'a, 'tl, '_>, &Vector<'a>, &mut Mat<'a, 'tl>) -> std::result::Result<(), DomainOrPetscError> + 'tl,
     {
-        // TODO: should we make ap_mat an `Rc<RefCell<Mat>>`
-
         let closure_anchor = Box::new(user_f);
 
         let aj_mat_p = ap_mat.mat_p;
@@ -504,10 +469,6 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
             (trampoline_data.get_mut().user_f)(&snes, &x, &mut a_mat)
                 .map_or_else(|err| match err {
                     DomainOrPetscError::DomainErr => {
-                        // TODO: `set_jacobian_domain_error` doesn't take mut, but i think it should (because it does
-                        // change the snes behind the pointer). However, it isn't the end of the world because, in the 
-                        // rust api, there is no way for the closure to access this value that is set by this function.
-                        // Or do we need to do something to account for interior mutability
                         let perr = snes.set_jacobian_domain_error();
                         match perr {
                             Ok(_) => 0,
@@ -603,7 +564,6 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     where
         F: FnMut(&SNES<'a, 'tl, '_>, &Vector<'a>, &mut Mat<'a, 'tl>, &mut Mat<'a, 'tl>) -> std::result::Result<(), DomainOrPetscError> + 'tl
     {
-        // TODO: should we make a/p_mat an `Rc<RefCell<Mat>>`
         let closure_anchor = Box::new(user_f);
 
         let a_mat_p = a_mat.mat_p;
@@ -680,7 +640,6 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     where
         F: FnMut(&SNES<'a, 'tl, '_>, PetscInt, PetscReal) -> Result<()> + 'tl
     {
-        // TODO: should we make a/p_mat an `Rc<RefCell<Mat>>`
         let closure_anchor = Box::new(user_f);
 
         let trampoline_data = Box::pin(SNESMonitorTrampolineData { 
@@ -966,58 +925,11 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
 
         Ok(())
     }
-    
-    // TODO: should we add any of the following
-    // // TODO: would it be safe to clone the dm and give the clone to the snes?
-    // pub fn set_dm_from_mut(&mut self, dm: &mut DM<'a>) -> Result<()> {
-    //
-    //     let ierr = unsafe { petsc_raw::SNESSetDM(self.snes_p, dm.dm_p) };
-    //     Petsc::check_error(self.world, ierr)?;
-    //
-    //     let dm_owned = dm.clone();
-    //     let ierr = unsafe { petsc_raw::SNESSetDM(self.snes_p, dm_owned.dm_p) };
-    //     Petsc::check_error(self.world, ierr)?;
-    //
-    //     let _ = self.dm.take();
-    //     self.dm = Some(dm_owned);
-    //
-    //     Ok(())
-    // }
-    //
-    // // TODO: omg this is not safe, even for unsafe
-    // pub unsafe fn set_dm_from_ref(&mut self, dm: &DM<'a>) -> Result<()> {
-    //     let ierr = petsc_raw::SNESSetDM(self.snes_p, dm.dm_p);
-    //     Petsc::check_error(self.world, ierr)?;
-    //
-    //     let dm_owned = DM::new(dm.world, dm.dm_p);
-    //     let ierr = petsc_raw::PetscObjectReference(dm_owned.dm_p as *mut petsc_raw::_p_PetscObject);
-    //     Petsc::check_error(self.world, ierr)?;
-    //
-    //     let _ = self.dm.take();
-    //     self.dm = Some(dm_owned);
-    //
-    //     Ok(())
-    // }
-    //
-    // // TODO: this is not safe
-    // pub fn set_dm_from_mut2(&mut self, dm: &mut DM<'a>) -> Result<()> {
-    //     let ierr = unsafe { petsc_raw::SNESSetDM(self.snes_p, dm.dm_p) };
-    //     Petsc::check_error(self.world, ierr)?;
-    //
-    //     let dm_owned = DM::new(dm.world, dm.dm_p);
-    //     let ierr = unsafe { petsc_raw::PetscObjectReference(dm_owned.dm_p as *mut petsc_raw::_p_PetscObject) };
-    //     Petsc::check_error(self.world, ierr)?;
-    //
-    //     let _ = self.dm.take();
-    //     self.dm = Some(dm_owned);
-    //
-    //     Ok(())
-    // }
 
     /// Returns an [`Option`] to a reference to the [DM](DM).
     ///
-    /// If you want PETSc to set the [`DM`] you must call [`SNES::get_dm()`]
-    /// or [`SNES::get_dm_mut()`], otherwise you must call [`SNES::set_dm()`]
+    /// If you want PETSc to set the [`DM`] you must call
+    /// [`SNES::get_dm_or_create()`], otherwise you must call [`SNES::set_dm()`]
     /// for this to return a `Some`.
     ///
     /// Note, this does not return a [`Result`](crate::Result) because it can never
@@ -1043,7 +955,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     }
 
     /// Returns a mutable reference to the [DM](DM).
-    pub fn get_dm_mut(&mut self) -> Result<&mut DM<'a, 'tl>> {
+    pub fn get_dm_or_create(&mut self) -> Result<&mut DM<'a, 'tl>> {
         if self.dm.is_some() {
             Ok(self.dm.as_mut().unwrap())
         } else {
@@ -1061,7 +973,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     // TODO: should this be here or in DM
     /// Use DMPlex's internal FEM routines to compute SNES boundary values, residual, and Jacobian.
     pub fn dm_plex_local_fem(&mut self) -> Result<()> {
-        let dm = self.get_dm_mut()?;
+        let dm = self.get_dm_or_create()?;
         let ierr = unsafe { petsc_raw::DMPlexSetSNESLocalFEM(dm.dm_p,
             std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut()) };
         Petsc::check_error(self.world, ierr)
@@ -1072,6 +984,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     ///
     /// This is the vector `r` set with [`SNES::set_function()`].
     // TODO: is this a good api, i mean set_function takes in a mut ref not an Rc or ownership
+    // so we could have two refrences to the same vec once you drop the snes
     pub fn get_residual(&self) -> Result<Rc<Vector<'a>>> {
         let mut vec_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::SNESGetFunction(self.snes_p, vec_p.as_mut_ptr(),
@@ -1127,7 +1040,6 @@ impl<'a> SNES<'a, '_, '_> {
         SNESGetConvergedReason, pub get_converged_reason, output SNESConvergedReason, conv_reas, #[doc = "Gets the reason the SNES iteration was stopped."];
         SNESSetErrorIfNotConverged, pub set_error_if_not_converged, input bool, flg, takes mut, #[doc = "Causes [`SNES::solve()`] to generate an error if the solver has not converged.\n\n\
             Or the database key `-snes_error_if_not_converged` can be used.\n\nNormally PETSc continues if a linear solver fails to converge, you can call [`SNES::get_converged_reason()`] after a [`SNES::solve()`] to determine if it has converged."];
-        // TODO: these use interior mutability without UnsafeCell, is that ok? do we need to use UnsafeCell?
         SNESSetJacobianDomainError, pub(crate) set_jacobian_domain_error, takes mut, #[doc = "Tells [`SNES`] that compute jacobian does not make sense any more.\n\n\
             For example there is a negative element transformation. You probably want to use [`DomainErr`] instead of this function."];
         SNESSetFunctionDomainError, pub(crate) set_function_domain_error, takes mut, #[doc = "Tells [`SNES`] that the input vector to your SNES Function is not in the functions domain.\n\n\

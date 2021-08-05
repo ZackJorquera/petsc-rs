@@ -601,7 +601,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
         T1: IntoIterator<Item = PetscInt>,
         T2: IntoIterator<Item = PetscInt>,
     {
-        // TODO: make this return an ndarray
+        // TODO: make this return an ndarray, also it doesn't really matter
         let idxm_iter = idxm.into_iter();
         let idxm_array = idxm_iter.collect::<Vec<_>>();
         let mi = idxm_array.len();
@@ -650,6 +650,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// [`NullSpace::remove_from()`].
     // TODO: I don't like this api, we only force it to be a `Rc` because we dont want the caller editing
     // the nullspace after they set it (we don't actually use it to reference count).
+    // Or we should just store the nullspace object in the Mat
     pub fn set_nullspace(&mut self, nullspace: impl Into<Option<Rc<NullSpace<'a>>>>) -> Result<()> {
         let ierr = unsafe { petsc_raw::MatSetNullSpace(self.mat_p,
             nullspace.into().as_ref().map_or(std::ptr::null_mut(), |ns| ns.ns_p)) };
@@ -790,7 +791,6 @@ pub mod mat_shell {
         MATOP_MULT = 3,
         /// op for [`Mat::mult_transpose()`]
         MATOP_MULT_TRANSPOSE = 5,
-        // TODO: Does solve allow for the b vec to be NULL? if so then this should be here
         /// op for `MatSolve()`
         MATOP_SOLVE = 7,
         /// op for `MatSolveTranspose()`
@@ -906,9 +906,6 @@ pub mod mat_shell {
         // TODO: do we want a `destroy_func`? what would it even do. Is it just to drop things in the
         // context? if that is the case then we don't need this as rust will will call that drop on the
         // context type. It might still make sense to have it though, although.
-        // TODO: add duplicate operation, make sure it doesn't copy closure data. Also then add
-        // clone and duplicate methods for `MatShell` not `Mat`. I think we will have to
-        // have the duplicate be 100% rust as otherwise returning closures will be hard.
         data: Option<Box<T>>,
     }
 
@@ -1103,7 +1100,7 @@ pub mod mat_shell {
                     y_p: *mut petsc_raw::_p_Vec) -> petsc_raw::PetscErrorCode
                 {
                     let mut ctx = MaybeUninit::<*mut ::std::os::raw::c_void>::uninit();
-                    // TODO: why does this one take a void* but `PCShellGetContext` takes a void**?
+                    // why does this one take a void* but `PCShellGetContext` takes a void**?
                     // It looks like under the hood it is treated like a void** so idk
                     let ierr = petsc_raw::MatShellGetContext(mat_p, ctx.as_mut_ptr() as *mut _);
                     assert_eq!(ierr, 0);
@@ -1252,7 +1249,7 @@ pub mod mat_shell {
                     v_p: *mut petsc_raw::_p_Vec) -> petsc_raw::PetscErrorCode
                 {
                     let mut ctx = MaybeUninit::<*mut ::std::os::raw::c_void>::uninit();
-                    // TODO: why does this one take a void* but `PCShellGetContext` takes a void**?
+                    // why does this one take a void* but `PCShellGetContext` takes a void**?
                     // It looks like under the hood it is treated like a void** so idk
                     let ierr = petsc_raw::MatShellGetContext(mat_p, ctx.as_mut_ptr() as *mut _);
                     assert_eq!(ierr, 0);
@@ -1369,7 +1366,7 @@ pub mod mat_shell {
                     v1_p: *mut petsc_raw::_p_Vec, v2_p: *mut petsc_raw::_p_Vec, v3_p: *mut petsc_raw::_p_Vec) -> petsc_raw::PetscErrorCode
                 {
                     let mut ctx = MaybeUninit::<*mut ::std::os::raw::c_void>::uninit();
-                    // TODO: why does this one take a void* but `PCShellGetContext` takes a void**?
+                    // why does this one take a void* but `PCShellGetContext` takes a void**?
                     // It looks like under the hood it is treated like a void** so idk
                     let ierr = petsc_raw::MatShellGetContext(mat_p, ctx.as_mut_ptr() as *mut _);
                     assert_eq!(ierr, 0);
@@ -1540,7 +1537,7 @@ pub mod mat_shell {
                     v_p: *mut petsc_raw::_p_Vec, im: InsertMode) -> petsc_raw::PetscErrorCode
                 {
                     let mut ctx = MaybeUninit::<*mut ::std::os::raw::c_void>::uninit();
-                    // TODO: why does this one take a void* but `PCShellGetContext` takes a void**?
+                    // why does this one take a void* but `PCShellGetContext` takes a void**?
                     // It looks like under the hood it is treated like a void** so idk
                     let ierr = petsc_raw::MatShellGetContext(mat_p, ctx.as_mut_ptr() as *mut _);
                     assert_eq!(ierr, 0);
@@ -1626,7 +1623,7 @@ pub mod mat_shell {
         ///     let mut new_mat = Mat::create_shell(mat.world(), m, n, mg, ng, Box::new(mat_data.clone()))?;
         ///     // We can't clone closures so we have to re set them.
         ///     new_mat.shell_set_operation_mvv(MatOperation::MATOP_MULT, my_mat_mult)?;
-        ///     new_mat.shell_set_duplicate_operation(my_mat_duplicate)?;
+        ///     new_mat.shell_set_operation_duplicate(my_mat_duplicate)?;
         ///     Ok(new_mat)
         /// }
         ///
@@ -1656,7 +1653,7 @@ pub mod mat_shell {
         ///
         /// // set operations
         /// mat.shell_set_operation_mvv(MatOperation::MATOP_MULT, my_mat_mult)?;
-        /// mat.shell_set_duplicate_operation(my_mat_duplicate)?;
+        /// mat.shell_set_operation_duplicate(my_mat_duplicate)?;
         ///
         /// mat.mult(&x, &mut y)?;
         /// assert!(y.view()?.slice(s![..]).abs_diff_eq(&array![0.5, 1.2], 1e-15));
@@ -1671,7 +1668,7 @@ pub mod mat_shell {
         /// # Ok(())
         /// # }
         /// ```
-        pub fn shell_set_duplicate_operation<F>(&mut self, user_f: F) -> Result<()>
+        pub fn shell_set_operation_duplicate<F>(&mut self, user_f: F) -> Result<()>
         where
             F: Fn(&MatShell<'a, 'tl, T>, MatDuplicateOption) -> Result<MatShell<'a, 'tl, T>> + 'tl,
         {
@@ -1702,7 +1699,7 @@ pub mod mat_shell {
             Petsc::check_error(self.world, ierr)
         }
 
-        /// Duplicates a [`MatShell`] using the operation set with [`MatShell::shell_set_duplicate_operation()`].
+        /// Duplicates a [`MatShell`] using the operation set with [`MatShell::shell_set_operation_duplicate()`].
         ///
         /// Note, [`MatShell::clone()`] is the same as `x.duplicate(MatDuplicateOption::MAT_COPY_VALUES)`.
         ///

@@ -1,4 +1,3 @@
-// TODO: write macros to do some easy stuff
 #![macro_use]
 
 // TODO: make macro use `::std::*` or `crate::*` for everything
@@ -30,7 +29,7 @@
 /// that is defined as follows (from bindgen): 
 /// `pub unsafe fn VecSetABRetCD(arg1: Vec, arg2: PetscInt, arg3: PetscReal, arg4: *mut PetscReal, arg5: *mut PetscInt) -> PetscErrorCode`
 /// It takes in two inputs `arg2` and `arg3` and returns two outputs with `arg4` and
-/// `arg5` (through pointers). For refrence the rust `petsc-rs::Vector` type is defined as the following:
+/// `arg5` (through pointers). For refrence the rust `petsc_rs::Vector` type is defined as the following:
 /// ```ignore
 /// pub struct Vector<'a> {
 ///     pub(crate) world: &'a UserCommunicator,

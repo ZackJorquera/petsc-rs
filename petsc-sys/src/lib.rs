@@ -16,6 +16,10 @@
 //! You must be using the `complex-scalar` branch to enable this feature.
 //! - **`petsc-int-i32`** *(enabled by default)* — Sets the integer type, [`PetscInt`], to be `i32`.
 //! - **`petsc-int-i64`** — Sets the integer type, [`PetscInt`], to be `i64`.
+//! - **`generate-enums`** — Tells `petsc-sys` to generate enums from `#define`s in the headers. This is done for
+//! the error enum, [`PetscErrorCodeEnum`], and many type enums like [`MatTypeEnum`] and [`DMTypeEnum`]. The
+//! feature is used by `petsc-rs`, but if you are just using the `petsc-sys` raw bindings then this feature is
+//! most likely not needed as all the `#define`s are already ported as `pub const`s from bindgen.
 
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
@@ -24,6 +28,7 @@
 #![allow(missing_docs)]
 #![allow(deref_nullptr)] // this is done in bindgen tests
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+#[cfg(feature = "generate-enums")]
 include!(concat!(env!("OUT_DIR"), "/enums.rs"));
 
 #[cfg(feature = "petsc-use-complex")]
@@ -42,8 +47,8 @@ pub const PETSC_DEFAULT_REAL: PetscReal = PETSC_DEFAULT as PetscReal;
 #[cfg(feature = "petsc-use-complex")]
 impl Into<Complex<PetscReal>> for __BindgenComplex<PetscReal> {
     fn into(self) -> Complex<PetscReal> {
-        // This should be safe because `__BindgenComplex<T>` and `Complex<T>` are both
-        // memory layout compatible with an array [T; 2]
+        // SAFETY: `__BindgenComplex<T>` and `Complex<T>` are both
+        // memory layout compatible with [T; 2]
         unsafe { std::mem::transmute(self) }
     }
 }
@@ -51,8 +56,8 @@ impl Into<Complex<PetscReal>> for __BindgenComplex<PetscReal> {
 #[cfg(feature = "petsc-use-complex")]
 impl From<Complex<PetscReal>> for __BindgenComplex<PetscReal> {
     fn from(ct: Complex<PetscReal>) -> __BindgenComplex<PetscReal> {
-        // This should be safe because `__BindgenComplex` and `Complex` are both
-        // memory layout compatible with an array [T; 2]
+        // SAFETY: `__BindgenComplex<T>` and `Complex<T>` are both
+        // memory layout compatible with [T; 2]
         unsafe { std::mem::transmute(ct) }
     }
 }
@@ -76,9 +81,13 @@ impl From<bool> for PetscBool {
 }
 
 // TODO: add more, or maybe use a derive macro or something (maybe try strum_macros)
+#[cfg(feature = "generate-enums")] // DMBoundaryType is not "generated" but we dont want optional impls either
 impl std::str::FromStr for DMBoundaryType {
     type Err = std::io::Error;
     fn from_str(input: &str) -> std::result::Result<DMBoundaryType, std::io::Error> {
+        // SAFETY: `DMBoundaryTypes` is a c extern which is set to be of length 8 (with the
+        // last item being NULL) in `dm.c`. We only care about the first 5. Each of these
+        // entries are valid c strings.
         let dm_types_p = unsafe { DMBoundaryTypes.as_ptr() };
         let dm_types_slice =  unsafe { std::slice::from_raw_parts(dm_types_p, 5) };
         if input.to_uppercase().as_str() 
@@ -102,11 +111,12 @@ impl std::str::FromStr for DMBoundaryType {
     }
 }
 
+#[cfg(feature = "generate-enums")]
 impl std::fmt::Display for DMBoundaryType {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         // SAFETY: this c array is defined in dm.c and is defined to be of size 8.
         // But the header petscdm.h (and then bindgen) defines it as size 0 array.
-        // Thus we have to trick rust into thinking it is size 5, becayse that's all
+        // Thus we have to trick rust into thinking it is size 5, because that's all
         // we care about.
         let dm_types_p = unsafe { DMBoundaryTypes.as_ptr() };
         let dm_types_slice =  unsafe { std::slice::from_raw_parts(dm_types_p, 5) };
@@ -115,6 +125,7 @@ impl std::fmt::Display for DMBoundaryType {
     }
 }
 
+#[cfg(feature = "generate-enums")]
 impl Default for DMBoundaryType {
     fn default() -> Self { DMBoundaryType::DM_BOUNDARY_NONE }
 }

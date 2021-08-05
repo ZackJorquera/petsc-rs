@@ -119,7 +119,7 @@ fn main() -> petsc_rs::Result<()> {
           parameters could alternatively be specified at runtime via
           KSPSetFromOptions();
     */
-    let pc = ksp.get_pc_mut()?;
+    let pc = ksp.get_pc_or_create()?;
     pc.set_type(PCType::PCJACOBI)?;
     ksp.set_tolerances(Some(1.0e-5), None, None, None)?;
 

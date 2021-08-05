@@ -31,6 +31,7 @@ fn main() -> petsc_rs::Result<()> {
         .init()?;
 
     let n = petsc.options_try_get_int("-n")?.unwrap_or(10);
+    let show_solution = petsc.options_try_get_bool("-show_solution")?.unwrap_or(false);
 
     if petsc.world().size() != 1 {
         Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE,
@@ -90,7 +91,7 @@ fn main() -> petsc_rs::Result<()> {
     // - The following statements are optional; all of these
     //     parameters could alternatively be specified at runtime via
     //     `KSP::set_from_options()`.
-    let pc = ksp.get_pc_mut()?;
+    let pc = ksp.get_pc_or_create()?;
     pc.set_type(PCType::PCJACOBI)?;
     ksp.set_tolerances(1.0e-5, None, None, None)?;
 
@@ -114,6 +115,12 @@ fn main() -> petsc_rs::Result<()> {
     // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     //                Check the solution and clean up
     // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    if show_solution {
+        viewer.view(&x)?;
+        // Or we can do the following. Note, in a multi-process comm
+        // world we should instead use `petsc_println_sync!`.
+        println!("{}: {:.2}", x.get_name()?, *x.view()?);
+    }
     x.axpy(PetscScalar::from(-1.0), &u)?;
     let x_norm = x.norm(NormType::NORM_2)?;
     let iters = ksp.get_iteration_number()?;

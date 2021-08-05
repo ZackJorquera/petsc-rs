@@ -87,23 +87,26 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
 
     /// Sets the matrix associated with the linear system and a (possibly)
     /// different one associated with the preconditioner. Note, this is the same as
-    /// `ksp.get_pc_mut().set_operators()`.
+    /// `ksp.get_pc_or_create().set_operators()`.
     ///
     /// Passing a `None` for `a_mat` or `p_mat` removes the matrix that is currently used.
     pub fn set_operators(&mut self, a_mat: impl Into<Option<&'bl Mat<'a, 'tl>>>, p_mat: impl Into<Option<&'bl Mat<'a, 'tl>>>) -> Result<()>
     {
         let a_mat = a_mat.into();
         let p_mat = p_mat.into();
-        // TODO: should we call `KSPSetOperators`? or should we just call `PC::set_operators`
-        // The source for KSPSetOperators basically just calls PCSetOperators but does something with 
-        // `ksp->setupstage` so idk.
-        self.get_pc_mut()?.set_operators(a_mat, p_mat)
+        self.get_pc_or_create()?.set_operators(a_mat, p_mat)?;
+        // This is done in the C API `KSPSetOperators` function.
+        if unsafe { &mut *self.ksp_p }.setupstage == petsc_raw::KSPSetUpStage::KSP_SETUP_NEWRHS {
+            // so that next solve call will call PCSetUp() on new matrix
+            unsafe { &mut *self.ksp_p }.setupstage = petsc_raw::KSPSetUpStage::KSP_SETUP_NEWMATRIX;
+        }
+        Ok(())
     }
     
     /// Returns a [`Option`] of a reference to the [`PC`] context set.
     ///
-    /// If you want PETSc to set the [`PC`] you must call [`KSP::get_pc()`]
-    /// or [`KSP::get_pc_mut()`].
+    /// If you want PETSc to set the [`PC`] you must call [`KSP::set_pc()`]
+    /// or [`KSP::get_pc_or_create()`].
     ///
     /// Note, this does not return a [`Result`](crate::Result) because it can never
     /// fail, instead it will return `None`.
@@ -111,30 +114,9 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
         self.pc.as_ref()
     }
 
-    /// Returns a reference to the [`PC`] context set with [`KSP::set_pc()`].
-    pub fn get_pc<'b>(&'b mut self) -> Result<&'b PC<'a, 'tl, 'bl>>
-    {
-        // TODO: This shouldn't have to take a mut self (maybe we use a RefCell internally)
-
-        // Under the hood, if the pc is already set, i.e. with `set_pc`, then `KSPGetPC` just returns a pointer
-        // to that, so we can bypass calling KSPGetPC. However, there shouldn't be any problem with just calling
-        // `KSPGetPC` again as we incremented the reference of the PC we "own" so dropping it wont do anything.
-        if self.pc.is_some() {
-            Ok(self.pc.as_ref().unwrap())
-        } else {
-            let mut pc_p = MaybeUninit::uninit();
-            let ierr = unsafe { petsc_raw::KSPGetPC(self.ksp_p, pc_p.as_mut_ptr()) };
-            Petsc::check_error(self.world, ierr)?;
-
-            self.pc = Some(PC::new(self.world, unsafe { pc_p.assume_init() }));
-            unsafe { self.pc.as_mut().unwrap().reference()?; }
-
-            Ok(self.pc.as_ref().unwrap())
-        }
-    }
-
-    /// Returns a mutable reference to the [`PC`] context set with [`KSP::set_pc()`].
-    pub fn get_pc_mut<'b>(&'b mut self) -> Result<&'b mut PC<'a, 'tl, 'bl>>
+    /// Returns a mutable reference to the [`PC`] context set with [`KSP::set_pc()`],
+    /// or creates a default one if no [`PC`] has been set.
+    pub fn get_pc_or_create<'b>(&'b mut self) -> Result<&'b mut PC<'a, 'tl, 'bl>>
     {
         if self.pc.is_some() {
             Ok(self.pc.as_mut().unwrap())
@@ -152,8 +134,8 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
 
     /// Returns an [`Option`] to a reference to the [DM](DM).
     ///
-    /// If you want PETSc to set the [`DM`] you must call [`KSP::get_dm()`]
-    /// or [`KSP::get_dm_mut()`], otherwise you must call [`KSP::set_dm()`]
+    /// If you want PETSc to set the [`DM`] you must call
+    /// [`KSP::get_dm_or_create()`], otherwise you must call [`KSP::set_dm()`]
     /// for this to return a `Some`.
     ///
     /// Note, this does not return a [`Result`](crate::Result) because it can never
@@ -162,25 +144,9 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
         self.dm.as_ref()
     }
 
-    /// Returns a reference to the [DM](DM) that may be used by some [preconditioners](crate::pc).
-    pub fn get_dm<'b>(&'b mut self) -> Result<&'b DM<'a, 'tl>>
-    {
-        if self.dm.is_some() {
-            Ok(self.dm.as_ref().unwrap())
-        } else {
-            let mut dm_p = MaybeUninit::uninit();
-            let ierr = unsafe { petsc_raw::KSPGetDM(self.ksp_p, dm_p.as_mut_ptr()) };
-            Petsc::check_error(self.world, ierr)?;
-
-            self.dm = Some(DM::new(self.world, unsafe { dm_p.assume_init() }));
-            unsafe { self.dm.as_mut().unwrap().reference()?; }
-
-            Ok(self.dm.as_ref().unwrap())
-        }
-    }
-
-    /// Returns a mutable reference to the [DM](DM) that may be used by some [preconditioners](crate::pc).
-    pub fn get_dm_mut<'b>(&'b mut self) -> Result<&'b mut DM<'a, 'tl>>
+    /// Returns a mutable reference to the [DM](DM) that may be used by some [preconditioners](crate::pc),
+    /// or creates a default one if no [`DM`] has been set.
+    pub fn get_dm_or_create<'b>(&'b mut self) -> Result<&'b mut DM<'a, 'tl>>
     {
         if self.dm.is_some() {
             Ok(self.dm.as_mut().unwrap())
@@ -260,6 +226,7 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
         // sure to give them access in the closure.
         // TODO: it would be nice to determine this in the trampoline function as the caller could
         // set the dm after they set this closure (for now i think this is fine)
+        // Or we just always set the dm
         let trampoline_data = Box::pin(KSPComputeOperatorsTrampolineData { 
             world: self.world, user_f: closure_anchor, set_dm: self.dm.is_some() });
 
@@ -336,6 +303,7 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
         // sure to give them access in the closure.
         // TODO: it would be nice to determine this in the trampoline function as the caller could
         // set the dm after they set this closure (for now i think this is fine)
+        // or we just always set the dm
         let trampoline_data = Box::pin(KSPComputeRHSTrampolineData { 
             world: self.world, user_f: closure_anchor, set_dm: self.dm.is_some() });
 
@@ -398,7 +366,7 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
     /// then the operators are created in the PC and returned to the user. In this case, two DIFFERENT
     /// operators will be returned.
     pub fn get_operators_or_create<'rl>(&'rl mut self) -> Result<(&'rl Mat<'a, 'tl>, &'rl Mat<'a, 'tl>)> {
-        self.get_pc_mut()?.get_operators_or_create()
+        self.get_pc_or_create()?.get_operators_or_create()
     }
 
     /// Gets the matrix associated with the linear system and possibly a different

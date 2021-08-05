@@ -221,7 +221,7 @@ fn main() -> petsc_rs::Result<()> {
             let mut snes = SNES::create(petsc.world())?;
 
             if !pass_dm {
-                let pc = snes.get_ksp_mut()?.get_pc_mut()?;
+                let pc = snes.get_ksp_or_create()?.get_pc_or_create()?;
                 pc.field_split_set_is(Some("u"), isg.remove(0))?;
                 pc.field_split_set_is(Some("k"), isg.remove(0))?;
             } else {
@@ -319,7 +319,6 @@ fn form_func_u<'a>(_petsc: &Petsc, info: (PetscInt, PetscInt, PetscInt, PetscInt
     
     let hx = PetscScalar::from(1.0)/mx as PetscReal;
 
-    // TODO: is using `xs-gxs` right
     y_view.indexed_iter_mut().map(|(s, y)| (s[0], s[0]+(xs-gxs) as usize, y))
         .for_each(|(i, ii, y)| {
             let ii_k = ii + (xs - xs_k) as usize;

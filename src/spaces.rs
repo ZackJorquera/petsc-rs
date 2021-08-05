@@ -2,7 +2,7 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/SPACE/index.html>
 
-// TODO: should we add NullSpace to this file
+// TODO: should we add Mat::NullSpace to this file
 
 use std::mem::MaybeUninit;
 use crate::{

@@ -192,7 +192,8 @@ fn main() -> petsc_rs::Result<()> {
 
     //ksp.view_with(Some(&petsc.viewer_create_ascii_stdout()?))?;
     x.view_with(Some(&petsc.viewer_create_ascii_stdout()?))?;
-    petsc_println_all!(petsc.world(), "Process [{}]\n{:.5e}", petsc.world().rank(), *ksp.get_dm()?.da_vec_view(&x)?)?;
+    petsc_println_sync!(petsc.world(), "Process [{}]\n{:.5e}", petsc.world().rank(), 
+        *ksp.try_get_dm().unwrap().da_vec_view(&x)?)?;
 
     // return
     Ok(())

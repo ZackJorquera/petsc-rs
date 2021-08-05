@@ -10,7 +10,7 @@
 //! # Basic Usage
 //! 
 //! First, you will need to add `petsc-rs` to your `Cargo.toml`.
-//! ```text
+//! ```toml
 //! [dependencies]
 //! petsc-rs = { git = "https://github.com/ZackJorquera/petsc-rs/", branch = "main" }
 //! ```
@@ -130,9 +130,9 @@ pub mod prelude {
         PetscObject,
         PetscOptBuilder,
         petsc_println,
-        petsc_println_all,
+        petsc_println_sync,
         petsc_print,
-        petsc_print_all,
+        petsc_print_sync,
         vector::{Vector, VecOption, VectorType, },
         mat::{Mat, MatAssemblyType, MatOption, MatDuplicateOption, MatStencil, NullSpace, MatType,
             MatOperation, },
@@ -219,20 +219,20 @@ macro_rules! petsc_print {
 /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
 ///
 /// // will print multiple times, once for each processor
-/// Petsc::print_all(petsc.world(), format!("Hello parallel world of {} processes from process {}!\n",
+/// Petsc::print_sync(petsc.world(), format!("Hello parallel world of {} processes from process {}!\n",
 ///     petsc.world().size(), petsc.world().rank()))?;
 /// // or use:
-/// petsc_println_all!(petsc.world(), "Hello parallel world of {} processes from process {}!", 
+/// petsc_println_sync!(petsc.world(), "Hello parallel world of {} processes from process {}!", 
 ///     petsc.world().size(), petsc.world().rank())?;
 /// # Ok(())
 /// # }
 /// ```
 #[macro_export]
-macro_rules! petsc_println_all {
-    ($world:expr) => ( Petsc::print_all($world, "\n") );
+macro_rules! petsc_println_sync {
+    ($world:expr) => ( Petsc::print_sync($world, "\n") );
     ($world:expr, $($arg:tt)*) => ({
         let s = format!("{}\n", format_args!($($arg)*));
-        Petsc::print_all($world, s)
+        Petsc::print_sync($world, s)
     })
 }
 
@@ -245,12 +245,12 @@ macro_rules! petsc_println_all {
 /// Note, this macro creates a block that evaluates to a [`petsc_rs::Result`](Result), so the try operator, `?`,
 /// can and should be used.
 ///
-/// Also look at [`petsc_println_all!`].
+/// Also look at [`petsc_println_sync!`].
 #[macro_export]
-macro_rules! petsc_print_all {
+macro_rules! petsc_print_sync {
     ($world:expr, $($arg:tt)*) => ({
         let s = ::std::fmt::format(format_args!($($arg)*));
-        Petsc::print_all($world, s)
+        Petsc::print_sync($world, s)
     })
 }
 
@@ -669,12 +669,10 @@ impl Petsc {
         }
 
         // SAFETY: This should be safe as we expect the errors to be valid. All inputs are generated from
-        // Petsc functions, not user input. But we can't guarantee that they are all valid. 
-        // Note, there is no way to make sure PetscErrorKind uses `u32` under the hood, but it should
-        // use `u32` as long as there are no negative numbers and all variants fit in a u32 (which, right 
-        // now is the case). Also note, `petsc_raw::PetscErrorCodeEnum` is defined with the #[repr(u32)] 
-        // when it is create from bindgen, but this is subject to change if the c type changes.
-        let error_kind = unsafe { std::mem::transmute(ierr) }; // TODO: make not use unsafe 
+        // Petsc functions, not user input. But we can't guarantee that they are all valid.
+        // We also create the `PetscErrorCodeEnum` enum to have the same size and alignment as `i32`.
+        // Which is what petsc_raw::PetscErrorCode is.
+        let error_kind = unsafe { std::mem::transmute(ierr) };
         let error = PetscError { kind: error_kind, error: "".into() };
 
         let c_s_r = CString::new(error.error.to_string());
@@ -759,7 +757,7 @@ impl Petsc {
 
     /// Replacement for the `PetscSynchronizedPrintf` function in the C api.
     ///
-    /// You can also use the [`petsc_println_all!`] macro to have rust string formatting.
+    /// You can also use the [`petsc_println_sync!`] macro to have rust string formatting.
     ///
     /// Prints synchronized output from several processors. Output of the first processor is followed by
     /// that of the second, etc.
@@ -774,15 +772,15 @@ impl Petsc {
     /// # fn main() -> petsc_rs::Result<()> {
     /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
     ///
-    /// Petsc::print_all(petsc.world(), format!("Hello parallel world of {} processes from process {}!\n",
+    /// Petsc::print_sync(petsc.world(), format!("Hello parallel world of {} processes from process {}!\n",
     ///     petsc.world().size(), petsc.world().rank()))?;
     /// // or use:
-    /// petsc_println_all!(petsc.world(), "Hello parallel world of {} processes from process {}!", 
+    /// petsc_println_sync!(petsc.world(), "Hello parallel world of {} processes from process {}!", 
     ///     petsc.world().size(), petsc.world().rank())?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn print_all<C: Communicator, T: ToString>(world: &C, msg: T) -> Result<()> {
+    pub fn print_sync<C: Communicator, T: ToString>(world: &C, msg: T) -> Result<()> {
         let msg_cs = ::std::ffi::CString::new(msg.to_string()).expect("`CString::new` failed");
 
         // The first entry needs to be `%s` so that this function is not susceptible to printf injections.
@@ -1033,8 +1031,8 @@ pub unsafe trait PetscAsRawMut: PetscAsRaw {
     fn as_raw_mut(&mut self) -> *mut <Self as PetscAsRaw>::Raw;
 }
 
-/// The trait that is implemented for any PETSc Object [`petsc-rs::vector::Vector`](Vector), 
-/// [`petsc-rs::mat::Mat`](Mat), [`petsc-rs::ksp::KSP`](KSP), etc.
+/// The trait that is implemented for any PETSc Object [`petsc_rs::vector::Vector`](Vector), 
+/// [`petsc_rs::mat::Mat`](Mat), [`petsc_rs::ksp::KSP`](KSP), etc.
 pub trait PetscObject<'a, PT>: PetscAsRaw<Raw = *mut PT> {
     /// Gets the MPI communicator world for any [`PetscObject`] regardless of type;
     fn world(&self) -> &'a UserCommunicator;
@@ -1086,7 +1084,6 @@ pub trait PetscObject<'a, PT>: PetscAsRaw<Raw = *mut PT> {
 /// These are loose wrappers that are only intended to be accessed internally.
 pub(crate) trait PetscObjectPrivate<'a, PT>: PetscObject<'a, PT> {
     wrap_simple_petsc_member_funcs! {
-        // TODO: should these be unsafe? for is it fine not to because the are internal?
         PetscObjectReference, reference, takes mut, is unsafe, #[doc = "Indicates to any PetscObject that it is being referenced by another PetscObject. This increases the reference count for that object by one."];
         PetscObjectDereference, dereference, takes mut, is unsafe, #[doc = "Indicates to any PetscObject that it is being referenced by one less PetscObject. This decreases the reference count for that object by one."];
         PetscObjectGetReference, get_reference_count, output PetscInt, cnt, #[doc = "Gets the current reference count for any PETSc object."];
@@ -1160,7 +1157,6 @@ pub type PetscComplex = Complex<PetscReal>;
 #[cfg(not(any(feature = "petsc-use-complex", feature = "petsc-sys/petsc-use-complex")))]
 pub type PetscComplex = petsc_sys::PetscComplex;
 
-// TODO: I dont like how i have to do the doc string twice
 /// PETSc scalar type.
 ///
 /// Can represent either a real or complex number in varying levels of precision. The specific 

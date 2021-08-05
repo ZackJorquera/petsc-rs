@@ -37,7 +37,7 @@
 //!     4 5 8 9
 //!
 //! We can also print out the correct 2d DMDA vector using [`DM::da_vec_view()`] in the following way:
-//! `petsc_println_all!(petsc.world(), "(Process: {}) global vec:\n{:.1}", petsc.world().rank(), *dm.da_vec_view(&global)?);`
+//! `petsc_println_sync!(petsc.world(), "(Process: {}) global vec:\n{:.1}", petsc.world().rank(), *dm.da_vec_view(&global)?);`
 //!
 //! ```text
 //! (Process: 0) global vec: 
@@ -110,9 +110,9 @@ fn main() -> petsc_rs::Result<()> {
 
     dm.view_with(Some(&viewer))?;
     if view_global {
-        petsc_println_all!(petsc.world(), "(Process: {}) global vec (flat):\n{:0.1}", petsc.world().rank(), *global.view()?)?;
+        petsc_println_sync!(petsc.world(), "(Process: {}) global vec (flat):\n{:0.1}", petsc.world().rank(), *global.view()?)?;
 
-        petsc_println_all!(petsc.world(), "(Process: {}) global vec:\n{:0.1}", petsc.world().rank(), *dm.da_vec_view(&global)?)?;
+        petsc_println_sync!(petsc.world(), "(Process: {}) global vec:\n{:0.1}", petsc.world().rank(), *dm.da_vec_view(&global)?)?;
 
         // Note, this might print the vector in a different order than the above two
         global.view_with(Some(&viewer))?;

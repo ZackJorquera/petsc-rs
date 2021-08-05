@@ -5,6 +5,8 @@ use std::borrow::Cow;
 use std::env;
 use std::fs::File;
 use std::io::{Read, Write};
+use std::mem::{align_of, size_of};
+use std::os::raw::c_int;
 use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
@@ -34,7 +36,12 @@ fn rustfmt_string(code_str: &str) -> Cow<'_, str> {
     Cow::Borrowed(code_str)
 }
 
-fn create_enum_from_consts(name: Ident, items: Vec<ItemConst>, repr_type: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
+/// We have `repr_type` and `cast_type` be different in the case that we want the
+/// repr type to be `c_int`. The problem is, you can't do `#[repr(c_int)]`, so you
+/// have to do `#[repr(i32)]` however c_int isn't always the same as `i32` all the
+/// time. So this will cause an error if `c_int` (cast_type) isn't the same as `i32` (repr_type).
+/// We also add some tests to the test function.
+fn create_enum_from_consts(name: Ident, items: Vec<ItemConst>, repr_type: proc_macro2::TokenStream, cast_type: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
     let fn_ident = Ident::new(&format!("create_enum_from_consts_test_layout_{}", name), Span::call_site());
     let item_idents = items.into_iter().map(|i| i.ident);
     let item_idents2 = item_idents.clone();
@@ -43,12 +50,22 @@ fn create_enum_from_consts(name: Ident, items: Vec<ItemConst>, repr_type: proc_m
         #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
         pub enum #name {
             #(
-                #item_idents = #item_idents as #repr_type,
+                #item_idents = #item_idents as #cast_type,
             )*
         }
 
         #[test]
         fn #fn_ident() {
+            assert_eq!(
+                ::std::mem::size_of::<#name>(),
+                ::std::mem::size_of::<#cast_type>(),
+                concat!("Size of: ", stringify!(#name))
+            );
+            assert_eq!(
+                ::std::mem::align_of::<#name>(),
+                ::std::mem::align_of::<#cast_type>(),
+                concat!("Alignment of ", stringify!(#name))
+            );
             assert_eq!(
                 ::std::mem::size_of::<#name>(),
                 ::std::mem::size_of::<#repr_type>(),
@@ -61,7 +78,7 @@ fn create_enum_from_consts(name: Ident, items: Vec<ItemConst>, repr_type: proc_m
             );
             #(
                 assert_eq!(
-                    unsafe { ::std::mem::transmute::<#name, #repr_type>(#name::#item_idents2) },
+                    #name::#item_idents2 as #cast_type,
                     #item_idents2 as #repr_type,
                     concat!("Value of: ", stringify!(#name::#item_idents2))
                 );
@@ -94,8 +111,12 @@ fn create_type_enum_and_table(name: Ident, items: Vec<ItemConst>) -> proc_macro2
 
         impl ::std::fmt::Display for #enum_ident {
             fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+                // SAFETY: Because the values in the table we create from bindgen
+                // we know that they are null-terminated and should not contain any
+                // interior null bytes.
                 let type_cstr = unsafe {
-                    ::std::ffi::CStr::from_ptr(#table_ident[*self as usize].as_ptr() as *const _) };
+                    ::std::ffi::CStr::from_bytes_with_nul_unchecked(
+                        #table_ident[*self as usize]) };
                 write!(f, "{}", type_cstr.to_str().unwrap())
             }
         }
@@ -195,7 +216,8 @@ fn main() {
                     "CARGO_FEATURE_PETSC_REAL_F32",
                     "CARGO_FEATURE_PETSC_USE_COMPLEX",
                     "CARGO_FEATURE_PETSC_INT_I32",
-                    "CARGO_FEATURE_PETSC_INT_I64"].iter()
+                    "CARGO_FEATURE_PETSC_INT_I64",
+                    "CARGO_FEATURE_GENERATE_ENUMS"].iter()
         .map(|&x| env::var(x).ok().map(|o| if o == "1" { Some(x) } else { None }).flatten())
         .flatten().collect::<Vec<_>>();
 
@@ -209,6 +231,7 @@ fn main() {
     let use_complex_feature = features.contains(&"CARGO_FEATURE_PETSC_USE_COMPLEX");
     let int_features = features.iter().filter(|a| a.contains("PETSC_INT_"))
         .copied().collect::<Vec<_>>();
+    let generate_enums_feature = features.contains(&"CARGO_FEATURE_GENERATE_ENUMS");
     
     assert_eq!(real_features.len(),  1, 
         "There must be exactly one \"petsc-real-*\" feature enabled. There are {} enabled.",
@@ -338,14 +361,20 @@ fn main() {
             None
         }).collect::<Vec<_>>();
     
-    let enum_file = out_path.join("enums.rs");
-    let mut f = File::create(enum_file).unwrap();
-    // we want i32 because `PetscErrorCode` is i32 (or really it is c_int)
-    let code_string = format!("{}\n{}", 
-        create_enum_from_consts(Ident::new("PetscErrorCodeEnum", Span::call_site()), petsc_err_consts, quote!{i32}).into_token_stream(),
-        create_all_type_enums(&raw_const_items).into_token_stream());
-    // TODO: we should format the code
-    f.write(rustfmt_string(&code_string).as_bytes()).unwrap();
+    if generate_enums_feature {
+        let enum_file = out_path.join("enums.rs");
+        let mut f = File::create(enum_file).unwrap();
+        assert_eq!(size_of::<i32>(), size_of::<c_int>(), "Size of i32 and c_int");
+        assert_eq!(align_of::<i32>(), align_of::<c_int>(), "Align of i32 and c_int");
+        let code_string = format!("{}\n{}", 
+            // We want `i32` as the repr type because `PetscErrorCode` is `i32` (or really it is `c_int`)
+            // `c_int` isn't always a i32, and we cant do `#[repr(c_int)]` so we want detect the true
+            // type of c_int and use that. Right now we just hard code the repr type to be `i32` and cast to
+            // `c_int` so that we get compiler error when they differ. We also do the above asserts.
+            create_enum_from_consts(Ident::new("PetscErrorCodeEnum", Span::call_site()), petsc_err_consts, quote!{i32}, quote!{::std::os::raw::c_int}).into_token_stream(),
+            create_all_type_enums(&raw_const_items).into_token_stream());
+        f.write(rustfmt_string(&code_string).as_bytes()).unwrap();
+    }
 
     // do asserts
     match real_features[0]
