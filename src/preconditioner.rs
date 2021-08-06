@@ -76,7 +76,14 @@ impl<'a, 'tl, 'bl> PC<'a, 'tl, 'bl> {
         Ok(PC::new(world, unsafe { pc_p.assume_init() }))
     }
 
-    /// Builds PC for a particular preconditioner type
+    /// Builds [`PC`] for a particular preconditioner type (given as `&str`).
+    pub fn set_type_str(&mut self, pc_type: &str) -> Result<()> {
+        let cstring = CString::new(pc_type).expect("`CString::new` failed");
+        let ierr = unsafe { petsc_raw::PCSetType(self.pc_p, cstring.as_ptr()) };
+        Petsc::check_error(self.world, ierr)
+    }
+
+    /// Builds [`PC`] for a particular preconditioner type
     pub fn set_type(&mut self, pc_type: PCType) -> Result<()>
     {
         let cstring = petsc_raw::PCTYPE_TABLE[pc_type as usize];

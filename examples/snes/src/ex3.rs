@@ -209,7 +209,7 @@ fn main() -> petsc_rs::Result<()> {
     
     petsc_println!(petsc.world(), "Norm of error {:.5e} Iterations {}", norm, it_num)?;
     if test_jacobian_domain_error {
-        let snes_type = snes.get_type()?;
+        let snes_type = snes.get_type_str()?;
         petsc_println!(petsc.world(), "SNES type: {}", snes_type)?;
     }
 

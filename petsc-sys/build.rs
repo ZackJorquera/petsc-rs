@@ -305,6 +305,8 @@ fn main() {
         // bindings for.
         .header("src/petsc_wrapper.h")
 
+        .emit_builtins()
+
         .allowlist_function("[A-Z][a-zA-Z0-9]*(_Private)?")
         .allowlist_type("[A-Z][a-zA-Z0-9]*")
         .allowlist_var("[A-Z][a-zA-Z0-9]*")
@@ -313,10 +315,9 @@ fn main() {
         .opaque_type("FILE")
 
         // There is no need to make bindings for mpi types as that has already been done in the mpi crate
-        .blocklist_type("MPI\\w*")
-        .blocklist_type("ompi\\w*")
+        .blocklist_item("(O?MPI|o?mpi)[\\w_]*")
         .blocklist_item("FP\\w*") // we need this because PETSc defines FP_* things twice and we will get errors
-        .raw_line("use mpi::ffi::*;")
+        // .raw_line("use mpi::ffi::*;")
 
         // Tell cargo to not mangle the function names
         .trust_clang_mangling(false)

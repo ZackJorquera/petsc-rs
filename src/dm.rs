@@ -33,7 +33,7 @@ use crate::{
     PetscErrorKind,
     InsertMode,
     vector::{self, Vector, },
-    mat::{Mat, },
+    mat::{Mat, MatType, },
     indexset::{IS, },
     spaces::{Space, DualSpace, },
 };
@@ -56,6 +56,18 @@ pub struct DM<'a, 'tl> {
 
     ds: Option<DS<'a, 'tl>>,
 
+    // TODO: we need to do a lot more work on determining how to clone a DM on the rust
+    // side.
+    // Idea: We could reference count the trampoline data because under the hood
+    // the DMPLEX data is shallow copied and reference counted.
+    // However, the context variables that stores this trampoline data is in the DS so
+    // idk if this is the correct way to do this. Regardless I think we should move this
+    // to the DS.
+    // Even if this isn't copied when the DM is cloned, it probably wont matter in the short
+    // term as we never use old boundary data (unless this comment is out of date and we do).
+    // Right now, we just create the boundary data, give the pointer to C api and never use
+    // it again util it is dropped, so having the Rc just prolongs the time until drop.
+    // However, if this is the case we should remove the `Rc` as it could be unsafe.
     boundary_trampoline_data: Option<Vec<DMBoundaryTrampolineData<'tl>>>,
 
     #[allow(dead_code)]
@@ -246,14 +258,14 @@ struct DMBoundaryFieldTrampolineData<'tl> {
 // TODO: make use the real function stuff
 #[allow(dead_code)]
 struct DSResidualTrampolineData<'tl> {
-    user_f0: Option<Box<dyn FnMut() + 'tl>>,
-    user_f1: Option<Box<dyn FnMut() + 'tl>>,
+    user_f0: Option<Box<dyn Fn() + 'tl>>,
+    user_f1: Option<Box<dyn Fn() + 'tl>>,
 }
 
 #[allow(dead_code)]
 struct DSJacobianTrampolineData<'tl> {
-    user_f0: Option<Box<dyn FnMut() + 'tl>>,
-    user_f1: Option<Box<dyn FnMut() + 'tl>>,
+    user_f0: Option<Box<dyn Fn() + 'tl>>,
+    user_f1: Option<Box<dyn Fn() + 'tl>>,
 }
 
 struct DSExactSolutionTrampolineData<'tl> {
@@ -261,7 +273,8 @@ struct DSExactSolutionTrampolineData<'tl> {
 }
 
 struct DMProjectFunctionTrampolineData<'tl> {
-    user_f: Box<BCFuncDyn<'tl>>,
+    user_f: Box<dyn FnMut(PetscInt, PetscReal, &[PetscReal],
+    PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl>,
 }
 
 // TODO: should i use trait aliases. It doesn't really matter, but the Fn types are long
@@ -270,7 +283,7 @@ struct DMProjectFunctionTrampolineData<'tl> {
 // #[feature(trait_alias)]
 // pub trait BCEssentialFunc<'tl> = FnMut(PetscInt, PetscReal, &[PetscReal],
 //     PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl;
-type BCFuncDyn<'tl> = dyn FnMut(PetscInt, PetscReal, &[PetscReal],
+type BCFuncDyn<'tl> = dyn Fn(PetscInt, PetscReal, &[PetscReal],
     PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl;
 // #[feature(trait_alias)]
 // pub trait BCFieldFunc<'tl> = FnMut(PetscInt, PetscInt, PetscInt,
@@ -281,7 +294,7 @@ type BCFuncDyn<'tl> = dyn FnMut(PetscInt, PetscReal, &[PetscReal],
 //     &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
 //     &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
 //     PetscReal, &[PetscInt], PetscInt, &[PetscScalar], &mut [PetscScalar]) -> Result<()> + 'tl {}
-type BCFieldDyn<'tl> = dyn FnMut(PetscInt, PetscInt, PetscInt,
+type BCFieldDyn<'tl> = dyn Fn(PetscInt, PetscInt, PetscInt,
     &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
     &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
     PetscReal, &[PetscReal], PetscInt, &[PetscScalar], &mut [PetscScalar]) -> Result<()> + 'tl;
@@ -337,11 +350,25 @@ impl<'a, 'tl> DM<'a, 'tl> {
         Ok(DM::new(world, unsafe { dm_p.assume_init() }))
     }
 
+    /// Builds [`DM`] for a particular DM implementation (given as `&str`).
+    pub fn set_type_str(&mut self, dm_type: &str) -> Result<()> {
+        let cstring = CString::new(dm_type).expect("`CString::new` failed");
+        let ierr = unsafe { petsc_raw::DMSetType(self.dm_p, cstring.as_ptr()) };
+        Petsc::check_error(self.world, ierr)
+    }
+
     /// Builds a DM, for a particular DM implementation.
     pub fn set_type(&mut self, dm_type: DMType) -> Result<()> {
         // This could be use the macro probably 
         let option_cstr = petsc_raw::DMTYPE_TABLE[dm_type as usize];
         let ierr = unsafe { petsc_raw::DMSetType(self.dm_p, option_cstr.as_ptr() as *const _) };
+        Petsc::check_error(self.world, ierr)
+    }
+
+    /// Sets the type of [`Mat`] returned by [`DM::create_matrix()`].
+    pub fn set_mat_type(&mut self, mat_type: MatType) -> Result<()> {
+        let type_name_cs = ::std::ffi::CString::new(mat_type.to_string()).expect("`CString::new` failed");
+        let ierr = unsafe { petsc_raw::DMSetMatType(self.dm_p, type_name_cs.as_ptr()) };
         Petsc::check_error(self.world, ierr)
     }
 
@@ -1320,7 +1347,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     pub fn add_boundary_essential<F1>(&mut self, name: &str, label: &DMLabel, values: &[PetscInt],
         field: PetscInt, comps: &[PetscInt], bc_user_func: F1) -> Result<PetscInt>
     where
-        F1: FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+        F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
     {
         let mut bd = MaybeUninit::uninit();
 
@@ -1367,8 +1394,8 @@ impl<'a, 'tl> DM<'a, 'tl> {
     pub fn add_boundary_essential_with_dt<F1, F2>(&mut self, name: &str, label: &DMLabel, values: &[PetscInt],
         field: PetscInt, comps: &[PetscInt], bc_user_func: F1, bc_user_func_t: F2) -> Result<PetscInt>
     where
-        F1: FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
-        F2: FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+        F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+        F2: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
     {
         let mut bd = MaybeUninit::uninit();
 
@@ -1412,7 +1439,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     pub fn add_boundary_essential<F1>(&mut self, name: &str, labelname: &str, field: PetscInt,
         comps: &[PetscInt], ids: &[PetscInt], bc_user_func: F1) -> Result<()>
     where
-        F1: FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+        F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
     {
         let labelname_cs = CString::new(labelname).expect("`CString::new` failed");
 
@@ -1456,8 +1483,8 @@ impl<'a, 'tl> DM<'a, 'tl> {
     pub fn add_boundary_essential_with_dt<F1, F2>(&mut self, name: &str, labelname: &str, field: PetscInt,
         comps: &[PetscInt], ids: &[PetscInt], bc_user_func: F1, bc_user_func_t: F2) -> Result<()>
     where
-        F1: FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
-        F2: FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+        F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+        F2: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
     {
         let labelname_cs = CString::new(labelname).expect("`CString::new` failed");
 
@@ -1476,8 +1503,8 @@ impl<'a, 'tl> DM<'a, 'tl> {
     fn add_boundary_func_shared<F1, F2, F3>(&mut self, name: &str, field: PetscInt,
         comps: &[PetscInt], bc_user_func: F1, bc_user_func_t: Option<F2>, add_boundary_wrapper: F3) -> Result<()>
     where
-        F1: FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
-        F2: FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+        F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+        F2: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
         F3: FnOnce(*mut petsc_raw::_p_DM, *const ::std::os::raw::c_char, PetscInt,
             *const PetscInt, PetscInt, Option<unsafe extern "C" fn()>, Option<unsafe extern "C" fn()>,
             *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode,
@@ -1571,7 +1598,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     pub fn add_boundary_natural<F1>(&mut self, name: &str, label: &DMLabel, values: &[PetscInt],
         field: PetscInt, comps: &[PetscInt], bc_user_func: F1) -> Result<PetscInt>
     where
-        F1: FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+        F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
     {
         let mut bd = MaybeUninit::uninit();
 
@@ -1610,8 +1637,8 @@ impl<'a, 'tl> DM<'a, 'tl> {
     pub fn add_boundary_natural_with_dt<F1, F2>(&mut self, name: &str, label: &DMLabel, values: &[PetscInt],
         field: PetscInt, comps: &[PetscInt], bc_user_func: F1, bc_user_func_t: F2) -> Result<PetscInt>
     where
-        F1: FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
-        F2: FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+        F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+        F2: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
     {
         let mut bd = MaybeUninit::uninit();
 
@@ -1646,7 +1673,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     pub fn add_boundary_natural<F1>(&mut self, name: &str, labelname: &str, field: PetscInt,
         comps: &[PetscInt], ids: &[PetscInt], bc_user_func: F1) -> Result<()>
     where
-        F1: FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+        F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
     {
         let labelname_cs = CString::new(labelname).expect("`CString::new` failed");
 
@@ -1682,8 +1709,8 @@ impl<'a, 'tl> DM<'a, 'tl> {
     pub fn add_boundary_natural_with_dt<F1, F2>(&mut self, name: &str, labelname: &str, field: PetscInt,
         comps: &[PetscInt], ids: &[PetscInt], bc_user_func: F1, bc_user_func_t: F2) -> Result<()>
     where
-        F1: FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
-        F2: FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+        F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+        F2: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
     {
         let labelname_cs = CString::new(labelname).expect("`CString::new` failed");
 
@@ -2574,10 +2601,18 @@ impl<'a, 'tl> DM<'a, 'tl> {
         }
     }
 
-    /// Clones and return a `BorrowDM` that depends on the life time of self
+    /// Clones and return a [`BorrowDM`] that depends on the lifetime of self.
+    ///
+    /// You should only call this method if you are cloneing a [`DM`] that is a `DMPLEX`.
+    ///
+    /// The new [`BorrowDM`] will give you access to the DMPLEX data including closures
+    /// owned by the original [`DM`].
     pub fn clone_shallow(&self) -> Result<BorrowDM<'a, 'tl, '_>> {
         // The goal here is to make sure that the the dm we are cloning from lives longer that the new_dm
         // This insures that the closures are valid. We can do this by using `BorrowDM`.
+        // TODO: We should use some form of interior mutability to allow the use to still
+        // edit the original DM aslong as they dont drop it or change existing closures.
+        // IDK if this is possible.
     
         let mut new_dm = unsafe { self.clone_unchecked()? };
     
@@ -2586,28 +2621,32 @@ impl<'a, 'tl> DM<'a, 'tl> {
         if self.boundary_trampoline_data.is_some() {
             new_dm.boundary_trampoline_data = Some(vec![]);
         }
+        // new_dm.boundary_trampoline_data = self.boundary_trampoline_data.clone();
     
         Ok(BorrowDM { owned_dm: new_dm, _phantom: PhantomData })
     }
-    
-    // /// Clones everything but the closures, which can't be cloned.
-    // pub fn clone_without_closures(&self) -> Result<DM<'a, 'tl>> {
-    //     // The goal here is to make sure that the the dm we are cloning from lives longer that the new_dm
-    //     // This insures that the closures are valid. We can do this by using `BorrowDM`.
-    //
-    //     let new_dm = unsafe { self.clone_unchecked()? };
-    //
-    //     // remove func pointers from c struct.
-    //
-    //     Ok(new_dm)
-    // }
 
     /// Unsafe clone
+    ///
+    /// This is `unsafe` because for some DM implementations this is a shallow clone,
+    /// the result of which may share (referent counted) information with its parent.
+    /// For example, clone applied to a DMPLEX object will result in a new DMPLEX that
+    /// shares the topology with the original DMPLEX. It does not share the PetscSection
+    /// of the original DM.
+    ///
+    /// You can also call [`DM::clone`] which is panic is cases where DM:clone is invalid.
+    /// Or you can call [`DM::clone_shallow`] which will tie the new [`DM`]s lifetime to that
+    /// of the original.
+    ///
+    /// Note, the rust trampoline data is stored in a `RefCell`. 
+    // If we refrence count the trampoline data, including the closures and have everything
+    // in it be immutable, is this unsafe?
     pub unsafe fn clone_unchecked(&self) -> Result<DM<'a, 'tl>> {
         Ok(if self.type_compare(DMType::DMCOMPOSITE)? {
             let c = self.try_get_composite_dms()?.unwrap();
             DM::composite_create(self.world, c.iter().cloned())?
         } else if self.type_compare(DMType::DMPLEX)? {
+            // Note, DMPlex just refrence counts the underlying data and shollow copies.
             let mut dm2_p = MaybeUninit::uninit();
             let ierr = petsc_raw::DMClone(self.dm_p, dm2_p.as_mut_ptr());
             Petsc::check_error(self.world, ierr)?;
@@ -2619,6 +2658,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
                 new_fields.push(res);
             }
             dm.fields = Some(new_fields);
+            // dm.boundary_trampoline_data = self.boundary_trampoline_data.clone();
             dm
         } else {
             let mut dm2_p = MaybeUninit::uninit();
@@ -2626,6 +2666,29 @@ impl<'a, 'tl> DM<'a, 'tl> {
             Petsc::check_error(self.world, ierr)?;
             DM::new(self.world, dm2_p.assume_init())
         })
+    }
+    
+    /// Will clone the DM.
+    ///
+    /// This method is the exact same as [`DM::clone()`] but will return a [`Result`].
+    ///
+    /// Note, you can NOT clone a `DMPLEX`. This will panic.
+    /// Instead use [`DM::clone_shallow()`] or [`DM::clone_unchecked()`].
+    pub fn clone_result(&self) -> Result<DM<'a, 'tl>> {
+        // TODO: the docs say this is a shallow clone. How should we deal with this for rust
+        // (rust (and the caller) thinks/expects it is a deep clone)
+        // TODO: Also what should we do for DM composite type, i get an error when DMClone calls
+        // `DMGetDimension` and then `DMSetDimension` (the dim is -1).
+
+        // TODO: we don't need to do this. If the closure is defined with a static lifetime then
+        // we should be fine
+        if self.type_compare(DMType::DMPLEX)? {
+            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+                "You can not clone a DMPLEX with `DM::clone()`, use `DM::clone_shallow()` or `DM::clone_unchecked()` instead.")?;
+            // TODO: should we mpi_abort or something
+        }
+
+        unsafe { self.clone_unchecked() }
     }
 
     /// Iterates over self and recursive calls to [`DM::get_coarse_dm_mut()`] until we get a `None`
@@ -2849,7 +2912,7 @@ impl<'a, 'tl> DS<'a, 'tl> {
     ///     * `u` *(output)* - the solution field evaluated at the current point
     pub fn set_exact_solution<F>(&mut self, f: PetscInt, user_f: F) -> Result<()>
     where
-        F: FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl
+        F: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl
     {
         let closure_anchor = Box::new(user_f);
 
@@ -2894,28 +2957,15 @@ impl<'a, 'tl> DerefMut for BorrowDM<'a, 'tl, '_> {
     }
 }
 
-impl<'a> Clone for DM<'a, '_> {
+impl<'a, 'tl> Clone for DM<'a, 'tl> {
     /// Will clone the DM.
     ///
-    /// Note, you can NOT clone a DM once you have called [`DM::add_boundary_essential()`]
-    /// or [`DM::add_boundary_field()`](#). This will panic. This is because you can't clone a closure.
-    /// Instead use [`DM::clone_shallow()`]
+    /// This method is the exact same as [`DM::clone_result()`] but will unwrap on the [`Result`].
+    ///
+    /// Note, you can NOT clone a `DMPLEX`. This will panic.
+    /// Instead use [`DM::clone_shallow()`] or [`DM::clone_unchecked()`].
     fn clone(&self) -> Self {
-        // TODO: the docs say this is a shallow clone. How should we deal with this for rust
-        // (rust (and the caller) thinks/expects it is a deep clone)
-        // TODO: Also what should we do for DM composite type, i get an error when DMClone calls
-        // `DMGetDimension` and then `DMSetDimension` (the dim is -1).
-
-        // TODO: we don't need to do this. If the closure is defined with a static lifetime then
-        // we should be fine
-        if self.boundary_trampoline_data.is_some() {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
-                "You can not clone a DM once you set boundaries with non-static closures.").unwrap();
-            // TODO: should we mpi_abort or something
-
-        }
-
-        unsafe { self.clone_unchecked() }.unwrap()
+        self.clone_result().unwrap()
     }
 }
 

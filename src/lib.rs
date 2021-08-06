@@ -5,7 +5,7 @@
 //!
 //! PETSc, pronounced PET-see (/ˈpɛt-siː/), is a suite of data structures and routines for the scalable
 //! (parallel) solution of scientific applications modeled by partial differential equations. PETSc supports
-//! MPI through the [rsmpi](https://github.com/rsmpi/rsmpi) crate.
+//! MPI through the `mpi` crate from [`rsmpi`](https://github.com/rsmpi/rsmpi).
 //!
 //! # Basic Usage
 //! 
@@ -623,6 +623,15 @@ impl Drop for Petsc {
 }
 
 impl Petsc {
+    /// Major version of the PETSc library being used
+    pub const VERSION_MAJOR: usize = petsc_raw::PETSC_VERSION_MAJOR as usize;
+    /// Minor version of the PETSc library being used
+    pub const VERSION_MINOR: usize = petsc_raw::PETSC_VERSION_MINOR as usize;
+    /// Subminor/patch version of the PETSc library being used
+    pub const VERSION_SUBMINOR: usize = petsc_raw::PETSC_VERSION_SUBMINOR as usize;
+    /// If the PETSc library is release (`true`) or pre-release (`false`)
+    pub const VERSION_RELEASE: bool = petsc_raw::PETSC_VERSION_RELEASE != 0;
+
     /// Creates a [`PetscBuilder`] which allows you to specify arguments when calling [`PetscInitialize`](petsc_raw::PetscInitialize).
     pub fn builder() -> PetscBuilder {
         PetscBuilder::default()

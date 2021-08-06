@@ -2,7 +2,7 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/Vec/index.html>
 
-use std::{marker::PhantomData, ops::{Deref, DerefMut}};
+use std::{ffi::{CStr, CString}, marker::PhantomData, ops::{Deref, DerefMut}};
 use std::mem::{MaybeUninit, ManuallyDrop};
 use crate::{
     Petsc,
@@ -107,6 +107,21 @@ impl<'a> Vector<'a> {
         Petsc::check_error(world, ierr)?;
 
         Ok(Vector { world, vec_p: unsafe { vec_p.assume_init() } })
+    }
+
+    /// Builds a [`Vector`], for a particular vector implementation.  (given as `&str`).
+    pub fn set_type_str(&mut self, vec_type: &str) -> Result<()> {
+        let cstring = CString::new(vec_type).expect("`CString::new` failed");
+        let ierr = unsafe { petsc_raw::VecSetType(self.vec_p, cstring.as_ptr()) };
+        Petsc::check_error(self.world, ierr)
+    }
+
+    /// Builds a [`Vector`], for a particular vector implementation.
+    pub fn set_type(&mut self, vec_type: VectorType) -> Result<()>
+    {
+        let cstring = petsc_raw::VECTYPE_TABLE[vec_type as usize];
+        let ierr = unsafe { petsc_raw::VecSetType(self.vec_p, cstring.as_ptr() as *const _) };
+        Petsc::check_error(self.world, ierr)
     }
 
     /// Creates a new vector of the same type as an existing vector.
@@ -610,6 +625,18 @@ impl<'a> Vector<'a> {
     /// Determines whether a PETSc [`Vector`] is of a particular type.
     pub fn type_compare(&self, type_kind: VectorType) -> Result<bool> {
         self.type_compare_str(&type_kind.to_string())
+    }
+
+    /// Gets the [`Vector`] type name (as a [`String`]). 
+    pub fn get_type_str(&self) -> Result<String> {
+        // TODO: return enum
+        let mut s_p = MaybeUninit::uninit();
+        let ierr = unsafe { petsc_raw::VecGetType(self.vec_p, s_p.as_mut_ptr()) };
+        Petsc::check_error(self.world, ierr)?;
+        
+        let c_str: &CStr = unsafe { CStr::from_ptr(s_p.assume_init()) };
+        let str_slice: &str = c_str.to_str().unwrap();
+        Ok(str_slice.to_owned())
     }
 }
 

@@ -103,7 +103,7 @@ fn main() -> petsc_rs::Result<()> {
     pack.composite_scatter(&x, &mut local_vecs)?;
     let (k_loc, u_loc) = (local_vecs.pop().unwrap(), local_vecs.pop().unwrap());
 
-    let dms = pack.composite_dms().unwrap();
+    let dms = pack.composite_dms()?;
 
     match problem_type {
         0 => {

@@ -20,6 +20,12 @@
 //! the error enum, [`PetscErrorCodeEnum`], and many type enums like [`MatTypeEnum`] and [`DMTypeEnum`]. The
 //! feature is used by `petsc-rs`, but if you are just using the `petsc-sys` raw bindings then this feature is
 //! most likely not needed as all the `#define`s are already ported as `pub const`s from bindgen.
+//!
+//!
+//! # MPI
+//!
+//! This create will not generate any MPI bindings. Instead it uses the `mpi-sys` crate from
+//! [`rsmpi`](https://github.com/rsmpi/rsmpi).
 
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
@@ -27,6 +33,9 @@
 #![allow(non_snake_case)]
 #![allow(missing_docs)]
 #![allow(deref_nullptr)] // this is done in bindgen tests
+
+use mpi_sys::*;
+
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 #[cfg(feature = "generate-enums")]
 include!(concat!(env!("OUT_DIR"), "/enums.rs"));
