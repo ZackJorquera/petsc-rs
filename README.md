@@ -14,11 +14,11 @@ To use `petsc-rs` from a Rust package, the following can be put in your `Cargo.t
 petsc-rs = { git = "https://github.com/ZackJorquera/petsc-rs/", branch = "main" }
 ```
 
-In order for `petsc-rs` to work correctly, you need to [download PETSc](https://petsc.org/release/download/). Note, `petsc-rs` requires PETSc version `3.15` or the main branch (prerelease version `3.16-dev.0`). Using the main branch is unstable as new breaking changes could be added. Regardless, `petsc-rs` will automatically detect what version of PETSc you are using and build the correct wrappers. If the version of PETSc you are using is not supported, then `petsc-rs` will fail to build.
+In order for `petsc-rs` to work correctly, you need to [download PETSc](https://petsc.org/release/download/). Note, `petsc-rs` requires PETSc version `3.15` or the main branch (prerelease version `3.16-dev.0`). Using the main branch is unstable as new breaking changes could be added (`petsc-rs` has been tested using commit [`ee14c70`](https://gitlab.com/petsc/petsc/tree/ee14c7024d937659fa3550ba1b9a77d7ae2cc83e) of PETSc). Regardless, `petsc-rs` will automatically detect what version of PETSc you are using and build the correct wrappers. If the version of PETSc you are using is not supported, then `petsc-rs` will fail to build.
 
 Next, you need to [configure and install PETSc](https://petsc.org/release/install/). I haven't tested all the different ways to install PETSc, but the following I know works for `petsc-rs`. Note, it is required that you install an MPI library globally and not have PETSc install it for you. This is needed by the [rsmpi](https://github.com/rsmpi/rsmpi) crate (look at its [requirements](https://github.com/rsmpi/rsmpi#requirements) for more information). Im using `openmpi` 3.1.3, which gives me `mpicc` and `mpicxx`.
 ```text
-./configure --with-cc=mpicc --with-cxx=mpicxx --download-f2cblaslapack --download-triangle --with-fc=0
+./configure --with-cc=mpicc --with-cxx=mpicxx --download-f2cblaslapack --with-fc=0
 make all check
 ```
 

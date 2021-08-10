@@ -89,7 +89,8 @@ impl From<bool> for PetscBool {
     }
 }
 
-// TODO: add more, or maybe use a derive macro or something (maybe try strum_macros)
+// TODO: add more trait impls. Maybe use a derive macro or something (maybe try strum_macros)
+// or we would add something to the `build.rs`. Also add these trait impls for more enums/types.
 #[cfg(feature = "generate-enums")] // DMBoundaryType is not "generated" but we dont want optional impls either
 impl std::str::FromStr for DMBoundaryType {
     type Err = std::io::Error;

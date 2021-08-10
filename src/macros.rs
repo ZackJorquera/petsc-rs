@@ -146,7 +146,7 @@ $(
             $( $param_name $(.$as_raw_fn())?.into() , )*
             $( $tmp_ident.as_mut_ptr() as *mut _ ),*
         )};
-        Petsc::check_error(self.world(), ierr)?;
+        chkerrq!(self.world(), ierr)?;
 
         $($( 
             let _ = self.$member.take();
@@ -178,12 +178,13 @@ $(
                 $arg2,
                 $arg3.map(|o| o.as_ptr()).unwrap_or(::std::ptr::null()) 
             ),+ ) };
-        Petsc::check_error(self.world(), ierr)
+        chkerrq!(self.world(), ierr)
     }
 )*
     };
 }
 
+/// Implements [`PetscAsRaw`], [`PetscAsRawMut`], [`PetscObject`], [`PetscObjectPrivate`], and [`viewer::PetscViewable`].
 macro_rules! impl_petsc_object_traits {
     {$(
         $struct_name:ident, $raw_ptr_var:ident, $raw_ptr_ty:ty, $raw_view_func:ident $(, $add_lt:lifetime)* ;
@@ -227,9 +228,46 @@ macro_rules! impl_petsc_object_traits {
                     owned_viewer.as_ref().unwrap()
                 };
                 let ierr = unsafe { crate::petsc_raw::$raw_view_func(self.as_raw(), viewer.as_raw()) };
-                Petsc::check_error(self.world(), ierr)
+                chkerrq!(self.world(), ierr)
             }
         }
     )*
     };
+}
+
+/// This macro returns the name of the enclosing function. As the internal
+/// implementation is based on the [`std::any::type_name`], this macro
+/// derives all the limitations of this function.
+///
+/// Rust doesn't have a built in way of doing this yet: <https://github.com/rust-lang/rfcs/issues/1743>.
+///
+/// From: <https://stackoverflow.com/a/40234666/9664285>
+/// and <https://docs.rs/stdext/0.3.1/src/stdext/macros.rs.html#63-74>
+// TODO: should we just use the stdext crate?
+macro_rules! function_name {
+    () => {{
+        // IDK why rust thinks these functions are never used.
+        #[allow(dead_code)]
+        fn f() {}
+        #[allow(dead_code)]
+        fn type_name_of<T>(_: T) -> &'static str {
+            std::any::type_name::<T>()
+        }
+        let name = type_name_of(f);
+        &name[..name.len() - 3]
+    }}
+}
+
+/// Calls [`Petsc::check_error()`] with the line number, function name, and file name added.
+///
+/// Because [`Petsc::check_error`] and [`function_name!`] are not exposed to create users
+/// this macro is only intended for internal use.
+///
+/// Note, this wraps the [`Petsc::check_error()`] in an unsafe block, but is by no means a safe API.
+// TODO: remove the unsafe block, make the caller use the unsafe block.
+macro_rules! chkerrq {
+    ($world:expr, $ierr_code:expr) => ({
+        #[allow(unused_unsafe)]
+        unsafe { Petsc::check_error($world, line!() as i32, function_name!(), file!(), $ierr_code) }
+    });
 }

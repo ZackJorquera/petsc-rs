@@ -142,14 +142,14 @@ pub use petsc_raw::SNESConvergedReason;
 impl<'a> Drop for SNES<'a, '_, '_> {
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::SNESDestroy(&mut self.snes_p as *mut _) };
-        let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
+        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
 impl Drop for LineSearch<'_> {
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::SNESLineSearchDestroy(&mut self.ls_p as *mut _) };
-        let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
+        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
@@ -167,7 +167,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut snes_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::SNESCreate(world.as_raw(), snes_p.as_mut_ptr()) };
-        Petsc::check_error(world, ierr)?;
+        chkerrq!(world, ierr)?;
 
         Ok(SNES::new(world, unsafe { snes_p.assume_init() }))
     }
@@ -179,7 +179,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     {
         
         let ierr = unsafe { petsc_raw::SNESSetKSP(self.snes_p, ksp.ksp_p) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         let _ = self.ksp.take();
         self.ksp = Some(ksp);
@@ -209,7 +209,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
         {
             let mut ksp_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::SNESGetKSP(self.snes_p, ksp_p.as_mut_ptr()) };
-            Petsc::check_error(self.world, ierr)?;
+            chkerrq!(self.world, ierr)?;
 
             // It is now ok to drop this because we incremented the C reference counter
             self.ksp = Some(KSP::new(self.world, unsafe { ksp_p.assume_init() }));
@@ -323,7 +323,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
 
             let mut dm_p = MaybeUninit::uninit();
             let ierr = petsc_raw::SNESGetDM(snes_p, dm_p.as_mut_ptr());
-            if ierr != 0 { let _ = Petsc::check_error(trampoline_data.world, ierr); return ierr; }
+            if ierr != 0 { let _ = chkerrq!(trampoline_data.world, ierr); return ierr; }
             let mut dm = DM::new(trampoline_data.world, dm_p.assume_init());
             let ierr = DM::set_inner_values(&mut dm);
             if ierr != 0 { return ierr; }
@@ -348,7 +348,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
         let ierr = unsafe { petsc_raw::SNESSetFunction(
             self.snes_p, input_vec_p, Some(snes_function_trampoline), 
             std::mem::transmute(trampoline_data.as_ref())) }; // this will also erase the lifetimes
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
         
         self.function_trampoline_data = Some(trampoline_data);
 
@@ -445,7 +445,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
 
             let mut dm_p = MaybeUninit::uninit();
             let ierr = petsc_raw::SNESGetDM(snes_p, dm_p.as_mut_ptr());
-            if ierr != 0 { let _ = Petsc::check_error(trampoline_data.world, ierr); return ierr; }
+            if ierr != 0 { let _ = chkerrq!(trampoline_data.world, ierr); return ierr; }
             let mut dm = DM::new(trampoline_data.world, dm_p.assume_init());
             let ierr = DM::set_inner_values(&mut dm);
             if ierr != 0 { return ierr; }
@@ -470,7 +470,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
         let ierr = unsafe { petsc_raw::SNESSetJacobian(
             self.snes_p, aj_mat_p, aj_mat_p, Some(snes_jacobian_single_trampoline), 
             std::mem::transmute(trampoline_data.as_ref())) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
         
         self.jacobian_trampoline_data = Some(SNESJacobianTrampolineData::SingleMat(trampoline_data));
 
@@ -576,7 +576,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
 
             let mut dm_p = MaybeUninit::uninit();
             let ierr = petsc_raw::SNESGetDM(snes_p, dm_p.as_mut_ptr());
-            if ierr != 0 { let _ = Petsc::check_error(trampoline_data.world, ierr); return ierr; }
+            if ierr != 0 { let _ = chkerrq!(trampoline_data.world, ierr); return ierr; }
             let mut dm = DM::new(trampoline_data.world, dm_p.assume_init());
             let ierr = DM::set_inner_values(&mut dm);
             if ierr != 0 { return ierr; }
@@ -602,7 +602,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
         let ierr = unsafe { petsc_raw::SNESSetJacobian(
             self.snes_p, a_mat_p, p_mat_p, Some(snes_jacobian_double_trampoline), 
             std::mem::transmute(trampoline_data.as_ref())) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
         
         self.jacobian_trampoline_data = Some(SNESJacobianTrampolineData::DoubleMat(trampoline_data));
 
@@ -651,7 +651,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
             self.snes_p, Some(snes_monitor_trampoline), 
             std::mem::transmute(trampoline_data.as_ref()), 
             None) }; // We dont need to tell C the drop function because rust will take care of it for us.
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
         
         self.monitor_tramoline_data = Some(trampoline_data);
 
@@ -666,7 +666,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
         } else {
             let mut ls_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::SNESGetLineSearch(self.snes_p, ls_p.as_mut_ptr()) };
-            Petsc::check_error(self.world, ierr)?;
+            chkerrq!(self.world, ierr)?;
 
             self.linesearch = Some(LineSearch { world: self.world, ls_p: unsafe { ls_p.assume_init() } });
             unsafe { self.linesearch.as_mut().unwrap().reference()?; }
@@ -683,7 +683,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
         } else {
             let mut ls_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::SNESGetLineSearch(self.snes_p, ls_p.as_mut_ptr()) };
-            Petsc::check_error(self.world, ierr)?;
+            chkerrq!(self.world, ierr)?;
 
             self.linesearch = Some(LineSearch { world: self.world, ls_p: unsafe { ls_p.assume_init() } });
             unsafe { self.linesearch.as_mut().unwrap().reference()?; }
@@ -738,12 +738,12 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
             let ls = ManuallyDrop::new(LineSearch { world: trampoline_data.world, ls_p });
             let mut snes_p = MaybeUninit::uninit();
             let ierr = petsc_raw::SNESLineSearchGetSNES(ls_p, snes_p.as_mut_ptr());
-            if ierr != 0 { let _ = Petsc::check_error(trampoline_data.world, ierr); return ierr; }
+            if ierr != 0 { let _ = chkerrq!(trampoline_data.world, ierr); return ierr; }
             let mut snes = ManuallyDrop::new(SNES::new(trampoline_data.world, snes_p.assume_init()));
 
             let mut dm_p = MaybeUninit::uninit();
             let ierr = petsc_raw::SNESGetDM(snes_p.assume_init(), dm_p.as_mut_ptr());
-            if ierr != 0 { let _ = Petsc::check_error(trampoline_data.world, ierr); return ierr; }
+            if ierr != 0 { let _ = chkerrq!(trampoline_data.world, ierr); return ierr; }
             let mut dm = DM::new(trampoline_data.world, dm_p.assume_init());
             let ierr = DM::set_inner_values(&mut dm);
             if ierr != 0 { return ierr; }
@@ -767,7 +767,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
         let ierr = unsafe { petsc_raw::SNESLineSearchSetPostCheck(
             self.linesearch.as_ref().unwrap().ls_p, Some(snes_linesearch_set_post_check_trampoline), 
             std::mem::transmute(trampoline_data.as_ref())) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
         
         self.linecheck_post_check_trampoline_data = Some(trampoline_data);
 
@@ -817,12 +817,12 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
             let ls = ManuallyDrop::new(LineSearch { world: trampoline_data.world, ls_p });
             let mut snes_p = MaybeUninit::uninit();
             let ierr = petsc_raw::SNESLineSearchGetSNES(ls_p, snes_p.as_mut_ptr());
-            if ierr != 0 { let _ = Petsc::check_error(trampoline_data.world, ierr); return ierr; }
+            if ierr != 0 { let _ = chkerrq!(trampoline_data.world, ierr); return ierr; }
             let mut snes = ManuallyDrop::new(SNES::new(trampoline_data.world, snes_p.assume_init()));
 
             let mut dm_p = MaybeUninit::uninit();
             let ierr = petsc_raw::SNESGetDM(snes_p.assume_init(), dm_p.as_mut_ptr());
-            if ierr != 0 { let _ = Petsc::check_error(trampoline_data.world, ierr); return ierr; }
+            if ierr != 0 { let _ = chkerrq!(trampoline_data.world, ierr); return ierr; }
             let mut dm = DM::new(trampoline_data.world, dm_p.assume_init());
             let ierr = DM::set_inner_values(&mut dm);
             if ierr != 0 { return ierr; }
@@ -843,7 +843,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
         let ierr = unsafe { petsc_raw::SNESLineSearchSetPreCheck(
             self.linesearch.as_ref().unwrap().ls_p, Some(snes_linesearch_set_pre_check_trampoline), 
             std::mem::transmute(trampoline_data.as_ref())) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
         
         self.linecheck_pre_check_trampoline_data = Some(trampoline_data);
 
@@ -864,7 +864,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     pub fn solve<'vl, 'val: 'vl>(&self, b: impl Into<Option<&'vl Vector<'val>>>, x: &mut Vector) -> Result<()>
     {
         let ierr = unsafe { petsc_raw::SNESSolve(self.snes_p, b.into().map_or(std::ptr::null_mut(), |v| v.vec_p), x.vec_p) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Gets the [`SNES`] method type and name (as a [`String`]). 
@@ -872,7 +872,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
         // TODO: return enum
         let mut s_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::SNESGetType(self.snes_p, s_p.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
         
         let c_str: &CStr = unsafe { CStr::from_ptr(s_p.assume_init()) };
         let str_slice: &str = c_str.to_str().unwrap();
@@ -883,7 +883,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     pub fn get_solution(&self) -> Result<Rc<Vector<'a>>> {
         let mut vec_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::SNESGetSolution(self.snes_p, vec_p.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         let mut vec = Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } };
         unsafe { vec.reference()?; }
@@ -897,7 +897,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     pub fn set_dm(&mut self, dm: DM<'a, 'tl>) -> Result<()> {
         
         let ierr = unsafe { petsc_raw::SNESSetDM(self.snes_p, dm.dm_p) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         let _ = self.dm.take();
         self.dm = Some(dm);
@@ -924,7 +924,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
         } else {
             let mut dm_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::SNESGetDM(self.snes_p, dm_p.as_mut_ptr()) };
-            Petsc::check_error(self.world, ierr)?;
+            chkerrq!(self.world, ierr)?;
 
             self.dm = Some(DM::new(self.world, unsafe { dm_p.assume_init() }));
             unsafe { self.dm.as_mut().unwrap().reference()?; }
@@ -940,7 +940,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
         } else {
             let mut dm_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::SNESGetDM(self.snes_p, dm_p.as_mut_ptr()) };
-            Petsc::check_error(self.world, ierr)?;
+            chkerrq!(self.world, ierr)?;
 
             self.dm = Some(DM::new(self.world, unsafe { dm_p.assume_init() }));
             unsafe { self.dm.as_mut().unwrap().reference()?; }
@@ -955,7 +955,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
         let dm = self.get_dm_or_create()?;
         let ierr = unsafe { petsc_raw::DMPlexSetSNESLocalFEM(dm.dm_p,
             std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut()) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Returns the vector where the function is stored (i.e. the residual) or creates one
@@ -968,7 +968,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
         let mut vec_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::SNESGetFunction(self.snes_p, vec_p.as_mut_ptr(),
             std::ptr::null_mut(), std::ptr::null_mut()) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         let mut vec = Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } };
         unsafe { vec.reference()?; }
@@ -983,7 +983,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     /// so users would not generally call this routine themselves.
     pub fn compute_function(&mut self, x: &Vector, y: &mut Vector) -> Result<()> {
         let ierr = unsafe { petsc_raw::SNESComputeFunction(self.snes_p, x.vec_p, y.vec_p) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Computes the Jacobian matrices that has been set with [`SNES::set_jacobian()`]
@@ -994,7 +994,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     pub fn compute_jacobian<'ml, 'mal: 'ml, 'mtl: 'ml>(&mut self, x: &Vector, a_mat: &mut Mat, p_mat: impl Into<Option<&'ml mut Mat<'mal, 'mtl>>>) -> Result<()> {
         let ierr = unsafe { petsc_raw::SNESComputeJacobian(self.snes_p, x.vec_p, a_mat.mat_p,
             p_mat.into().map_or(a_mat.mat_p, |p| p.mat_p)) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Determines whether a PETSc [`SNES`] is of a particular type.

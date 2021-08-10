@@ -10,7 +10,8 @@
 //!
 //! Also: <https://petsc.org/release/docs/manualpages/DMDA/DMDA.html#DMDA>
 
-// TODO: use `PetscObjectTypeCompare` to make sure we are using the correct type of DM
+// TODO: use `PetscObjectTypeCompare` (`DM::type_compare`) to make sure we are using the correct type of DM
+// for different functions.
 
 use core::slice;
 use std::marker::PhantomData;
@@ -302,35 +303,35 @@ type BCFieldDyn<'tl> = dyn Fn(PetscInt, PetscInt, PetscInt,
 impl<'a> Drop for DM<'a, '_> {
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::DMDestroy(&mut self.dm_p as *mut _) };
-        let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
+        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
 impl<'a> Drop for DMLabel<'a> {
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::DMLabelDestroy(&mut self.dml_p as *mut _) };
-        let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
+        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
 impl<'a> Drop for FEDisc<'a, '_> {
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::PetscFEDestroy(&mut self.fe_p as *mut _) };
-        let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
+        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
 impl<'a> Drop for DS<'a, '_> {
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::PetscDSDestroy(&mut self.ds_p as *mut _) };
-        let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
+        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
 impl<'a> Drop for WeakForm<'a> {
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::PetscWeakFormDestroy(&mut self.wf_p as *mut _) };
-        let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
+        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
@@ -345,7 +346,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut dm_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMCreate(world.as_raw(), dm_p.as_mut_ptr()) };
-        Petsc::check_error(world, ierr)?;
+        chkerrq!(world, ierr)?;
 
         Ok(DM::new(world, unsafe { dm_p.assume_init() }))
     }
@@ -354,7 +355,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     pub fn set_type_str(&mut self, dm_type: &str) -> Result<()> {
         let cstring = CString::new(dm_type).expect("`CString::new` failed");
         let ierr = unsafe { petsc_raw::DMSetType(self.dm_p, cstring.as_ptr()) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Builds a DM, for a particular DM implementation.
@@ -362,14 +363,14 @@ impl<'a, 'tl> DM<'a, 'tl> {
         // This could be use the macro probably 
         let option_cstr = petsc_raw::DMTYPE_TABLE[dm_type as usize];
         let ierr = unsafe { petsc_raw::DMSetType(self.dm_p, option_cstr.as_ptr() as *const _) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Sets the type of [`Mat`] returned by [`DM::create_matrix()`].
     pub fn set_mat_type(&mut self, mat_type: MatType) -> Result<()> {
         let type_name_cs = ::std::ffi::CString::new(mat_type.to_string()).expect("`CString::new` failed");
         let ierr = unsafe { petsc_raw::DMSetMatType(self.dm_p, type_name_cs.as_ptr()) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Creates an object that will manage the communication of one-dimensional regular array data
@@ -392,7 +393,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         let mut dm_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMDACreate1d(world.as_raw(), bx, nx,
             dof, s, lx.map_or(std::ptr::null(), |lx| lx.as_ptr()), dm_p.as_mut_ptr()) };
-        Petsc::check_error(world, ierr)?;
+        chkerrq!(world, ierr)?;
 
         Ok(DM::new(world, unsafe { dm_p.assume_init() }))
     }
@@ -426,7 +427,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         let mut dm_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMDACreate2d(world.as_raw(), bx, by, stencil_type, nx, ny, px, py,
             dof, s, lx.map_or(std::ptr::null(), |lx| lx.as_ptr()), ly.map_or(std::ptr::null(), |ly| ly.as_ptr()), dm_p.as_mut_ptr()) };
-        Petsc::check_error(world, ierr)?;
+        chkerrq!(world, ierr)?;
 
         Ok(DM::new(world, unsafe { dm_p.assume_init() }))
     }
@@ -464,7 +465,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         let ierr = unsafe { petsc_raw::DMDACreate3d(world.as_raw(), bx, by, bz, stencil_type, nx, ny, nz, px, py, pz,
             dof, s, lx.map_or(std::ptr::null(), |lx| lx.as_ptr()), ly.map_or(std::ptr::null(), |ly| ly.as_ptr()),
             lz.map_or(std::ptr::null(), |lz| lz.as_ptr()), dm_p.as_mut_ptr()) };
-        Petsc::check_error(world, ierr)?;
+        chkerrq!(world, ierr)?;
 
         Ok(DM::new(world, unsafe { dm_p.assume_init() }))
     }
@@ -476,14 +477,14 @@ impl<'a, 'tl> DM<'a, 'tl> {
     {
         let mut dm_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMCompositeCreate(world.as_raw(), dm_p.as_mut_ptr()) };
-        Petsc::check_error(world, ierr)?;
+        chkerrq!(world, ierr)?;
 
         let mut dm = DM::new(world, unsafe { dm_p.assume_init() });
 
         let dms = dms.into_iter().collect::<Vec<_>>();
         let _num_dm = dms.iter().map(|this_dm| {
             let ierr = unsafe { petsc_raw::DMCompositeAddDM(dm.dm_p, this_dm.dm_p) };
-            Petsc::check_error(dm.world, ierr).map(|_| 1)
+            chkerrq!(dm.world, ierr).map(|_| 1)
         }).sum::<Result<PetscInt>>()?;
 
         dm.composite_dms = Some(dms);
@@ -496,7 +497,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     pub fn plex_create(world: &'a UserCommunicator) -> Result<Self> {
         let mut dm_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMPlexCreate(world.as_raw(), dm_p.as_mut_ptr()) };
-        Petsc::check_error(world, ierr)?;
+        chkerrq!(world, ierr)?;
 
         Ok(DM::new(world, unsafe { dm_p.assume_init() }))
     }
@@ -537,7 +538,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             faces.as_ref().map_or(std::ptr::null(), |f| f.as_ptr()), lower.as_ref().map_or(std::ptr::null(), |l| l.as_ptr()),
             upper.as_ref().map_or(std::ptr::null(), |u| u.as_ptr()), periodicity.as_ref().map_or(std::ptr::null(), |p| p.as_ptr()),
             interpolate.into(), dm_p.as_mut_ptr()) };
-        Petsc::check_error(world, ierr)?;
+        chkerrq!(world, ierr)?;
 
         Ok(DM::new(world, unsafe { dm_p.assume_init() }))
     }
@@ -548,7 +549,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         let mut dm_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMPlexCreateFromFile(world.as_raw(), filename_cs.as_ptr(),
             interpolate.into(), dm_p.as_mut_ptr()) };
-        Petsc::check_error(world, ierr)?;
+        chkerrq!(world, ierr)?;
 
         Ok(DM::new(world, unsafe { dm_p.assume_init() }))
     }
@@ -557,7 +558,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     pub fn create_global_vector(&self) -> Result<Vector<'a>> {
         let mut vec_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMCreateGlobalVector(self.dm_p, vec_p.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
         
         Ok(Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } })
     }
@@ -568,7 +569,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     pub fn create_local_vector(&self) -> Result<Vector<'a>> {
         let mut vec_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMCreateLocalVector(self.dm_p, vec_p.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
         
         Ok(Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } })
     }
@@ -589,14 +590,14 @@ impl<'a, 'tl> DM<'a, 'tl> {
         // we should be using UnsafeCell for something).
         let mut vec_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMGetLocalVector(self.dm_p, vec_p.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         // We dont want to drop the vec through Vector::drop
         let vec = ManuallyDrop::new(Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } });
         
         Ok(vector::BorrowVectorMut::new(vec, Some(Box::new(move |borrow_vec| {
             let ierr = unsafe { petsc_raw::DMRestoreLocalVector(self.dm_p, &mut borrow_vec.vec_p as *mut _) };
-            let _ = Petsc::check_error(borrow_vec.world, ierr); // TODO: should I unwrap ?
+            let _ = chkerrq!(borrow_vec.world, ierr); // TODO: should I unwrap ?
         }))))
     }
 
@@ -650,7 +651,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     pub fn create_matrix(&self) -> Result<Mat<'a, 'tl>> {
         let mut mat_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMCreateMatrix(self.dm_p, mat_p.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
         
         Ok(Mat::new(self.world, unsafe { mat_p.assume_init() }))
     }
@@ -658,9 +659,9 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// Updates global vectors from local vectors.
     pub fn global_to_local(&self, global: &Vector<'a>, mode: InsertMode, local: &mut Vector<'a>) -> Result<()> {
         let ierr = unsafe { petsc_raw::DMGlobalToLocalBegin(self.dm_p, global.vec_p, mode, local.vec_p) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
         let ierr = unsafe { petsc_raw::DMGlobalToLocalEnd(self.dm_p, global.vec_p, mode, local.vec_p) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Updates local vectors from global vectors.
@@ -670,9 +671,9 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// for DMDA, in that case simply compute the values directly into a global vector instead of a local one.
     pub fn local_to_global(&self, local: &Vector<'a>, mode: InsertMode, global: &mut Vector<'a>) -> Result<()> {
         let ierr = unsafe { petsc_raw::DMLocalToGlobalBegin(self.dm_p, local.vec_p, mode, global.vec_p) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
         let ierr = unsafe { petsc_raw::DMLocalToGlobalEnd(self.dm_p, local.vec_p, mode, global.vec_p) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Returns a multi-dimension immutable view that shares data with the underlying vector and is indexed using
@@ -871,7 +872,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
 
         let mut array = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::VecGetArrayRead(vec.vec_p, array.as_mut_ptr() as *mut _) };
-        Petsc::check_error(vec.world, ierr)?;
+        chkerrq!(vec.world, ierr)?;
 
         //let dims = [(gxm*dof) as usize, gym as usize, gzm as usize];
         let dims_r = [gzm as usize, gym as usize, (gxm*dof) as usize];
@@ -982,7 +983,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
 
         let mut array = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::VecGetArray(vec.vec_p, array.as_mut_ptr() as *mut _) };
-        Petsc::check_error(vec.world, ierr)?;
+        chkerrq!(vec.world, ierr)?;
 
         let dims_r = [gzm as usize, gym as usize, (gxm*dof) as usize];
 
@@ -1006,7 +1007,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         let name_cs = CString::new(name).expect("`CString::new` failed");
         
         let ierr = unsafe { petsc_raw::DMDASetFieldName(self.dm_p, nf, name_cs.as_ptr()) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
     
     /// Gets the ranges of indices in the x, y and z direction that are owned by each process 
@@ -1032,7 +1033,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         let ierr = unsafe { petsc_raw::DMDAGetOwnershipRanges(self.dm_p, lx.as_mut_ptr(),
             if dim >= 2 { ly.as_mut_ptr() } else { std::ptr::null_mut() }, 
             if dim >= 3 { lz.as_mut_ptr() } else { std::ptr::null_mut() } ) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         // SAFETY: Petsc says these are arrays of length comm size
         let lx_vec = {
@@ -1076,7 +1077,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         let is_dm_comp = self.type_compare(DMType::DMCOMPOSITE)?;
         if is_dm_comp {
             let ierr = unsafe { petsc_raw::DMCompositeAddDM(self.dm_p, dm.dm_p) };
-            Petsc::check_error(dm.world, ierr)?;
+            chkerrq!(dm.world, ierr)?;
 
             if let Some(c) = self.composite_dms.as_mut() {
                 c.push(dm);
@@ -1101,7 +1102,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
 
             assert_eq!(lvecs_p.len(), c.len());
             let ierr = unsafe { petsc_raw::DMCompositeScatterArray(self.dm_p, gvec.vec_p, lvecs_p.as_mut_ptr()) };
-            Petsc::check_error(self.world, ierr)
+            chkerrq!(self.world, ierr)
         } else {
             Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                 format!("There are no composite dms set, line: {}", line!()))
@@ -1121,7 +1122,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
 
             let ierr = unsafe { petsc_raw::DMCompositeGetAccessArray(self.dm_p, gvec.vec_p,
                 c.len() as PetscInt, wanted.as_ptr(), vec_ps.as_mut_ptr()) };
-            Petsc::check_error(self.world, ierr)?;
+            chkerrq!(self.world, ierr)?;
 
             let gvec_rc = Rc::new(&*gvec);
             Ok(vec_ps.into_iter().zip(wanted).map(move |(v_p, i)| {
@@ -1132,7 +1133,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
                     let ierr = unsafe { petsc_raw::DMCompositeRestoreAccessArray(
                         self.dm_p, gvec_rc.vec_p, 1, std::slice::from_ref(&i).as_ptr(),
                         std::slice::from_mut(&mut borrow_vec.vec_p).as_mut_ptr()) };
-                    let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap ?
+                    let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap ?
                 })))
             }).collect())
 
@@ -1153,7 +1154,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             let mut is_array_p = MaybeUninit::uninit();
             let len = c.len();
             let ierr = unsafe { petsc_raw::DMCompositeGetGlobalISs(self.dm_p, is_array_p.as_mut_ptr()) };
-            Petsc::check_error(self.world, ierr)?;
+            chkerrq!(self.world, ierr)?;
 
             let is_slice = unsafe { slice::from_raw_parts(is_array_p.assume_init(), len) };
 
@@ -1165,7 +1166,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             // Note, `PetscFree` is a macro around `PetscTrFree`
             let ierr = unsafe { (petsc_raw::PetscTrFree.unwrap())(is_array_p.assume_init() as *mut _,
                 line!() as i32, cs_fn_name.as_ptr(), cs_file_name.as_ptr()) };
-            Petsc::check_error(self.world, ierr)?;
+            chkerrq!(self.world, ierr)?;
 
             Ok(ret_vec)
         } else {
@@ -1191,7 +1192,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             let mut is_array_p = MaybeUninit::uninit();
             let len = c.len();
             let ierr = unsafe { petsc_raw::DMCompositeGetLocalISs(self.dm_p, is_array_p.as_mut_ptr()) };
-            Petsc::check_error(self.world, ierr)?;
+            chkerrq!(self.world, ierr)?;
 
             let is_slice = unsafe { slice::from_raw_parts(is_array_p.assume_init(), len) };
 
@@ -1202,7 +1203,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             
             let ierr = unsafe { (petsc_raw::PetscTrFree.unwrap())(is_array_p.assume_init() as *mut _,
                 line!() as i32, cs_fn_name.as_ptr(), cs_file_name.as_ptr()) };
-            Petsc::check_error(self.world, ierr)?;
+            chkerrq!(self.world, ierr)?;
 
             Ok(ret_vec)
         } else {
@@ -1234,7 +1235,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             let label: Option<DMLabel> = label.into();
             let ierr = unsafe { petsc_raw::DMAddField(self.dm_p, label.as_ref().map_or(std::ptr::null_mut(),
                 |l| l.dml_p), field.as_raw()) };
-            Petsc::check_error(self.world, ierr)?;
+            chkerrq!(self.world, ierr)?;
 
             if let Some(f) = self.fields.as_mut() {
                 f.push((label, FieldPriv::Known(field)));
@@ -1262,7 +1263,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             let len = dm.composite_get_num_dms_petsc().unwrap();
             let mut dms_p = vec![std::ptr::null_mut(); len as usize]; // TODO: use MaybeUninit if we can
             let ierr = petsc_raw::DMCompositeGetEntriesArray(dm.dm_p, dms_p.as_mut_ptr());
-            if ierr != 0 { let _ = Petsc::check_error(dm.world, ierr); return ierr; }
+            if ierr != 0 { let _ = chkerrq!(dm.world, ierr); return ierr; }
 
             if let Some(mut old_dms) = dm.composite_dms.take() {
                 while !old_dms.is_empty() {
@@ -1290,7 +1291,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     pub fn create_label(&mut self, name: &str) -> Result<()> {
         let name_cs = CString::new(name).expect("`CString::new` failed");
         let ierr = unsafe { petsc_raw::DMCreateLabel(self.dm_p, name_cs.as_ptr()) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Return the label of a given name if present
@@ -1306,7 +1307,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         let name_cs = CString::new(name).expect("`CString::new` failed");
         let mut dm_label = MaybeUninit::<*mut petsc_raw::_p_DMLabel>::uninit();
         let ierr = unsafe { petsc_raw::DMGetLabel(self.dm_p, name_cs.as_ptr(), dm_label.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         let dm_label = NonNull::new(unsafe { dm_label.assume_init() } );
 
@@ -1568,7 +1569,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             unsafe { std::mem::transmute(bc_func_t_essential_trampoline_fn_ptr) }, 
             unsafe { std::mem::transmute(trampoline_data.as_ref()) }
         );
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
         
         if let Some(ref mut boundary_trampoline_data_vec) = self.boundary_trampoline_data {
             boundary_trampoline_data_vec.push(DMBoundaryTrampolineData::BCFunc(trampoline_data));
@@ -1897,7 +1898,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             unsafe { std::mem::transmute(bc_user_func_t) }, 
             std::ptr::null_mut()
         );
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
     
         Ok(())
     }
@@ -1967,7 +1968,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             std::mem::transmute(bc_user_func),
             std::mem::transmute(bc_user_func_t), 
             std::ptr::null_mut(), bd.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         Ok(unsafe { bd.assume_init() })
     }
@@ -2035,7 +2036,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             labelname_cs.as_ptr(), field, comps.len() as i32, comps.as_ptr(),
             std::mem::transmute(bc_user_func), std::mem::transmute(bc_user_func_t),
             ids.len() as PetscInt, ids.as_ptr(), std::ptr::null_mut()) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Create the discrete systems for the DM based upon the fields added to the DM
@@ -2043,11 +2044,11 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// Note, If the label has a DS defined, it will be replaced. Otherwise, it will be added to the DM.
     pub fn create_ds(&mut self) -> Result<()> {
         let ierr = unsafe { petsc_raw::DMCreateDS(self.dm_p) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         let mut ds_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMGetDS(self.dm_p, ds_p.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         self.ds = Some(DS::new(self.world, unsafe { ds_p.assume_init() }));
         unsafe { self.ds.as_mut().unwrap().reference()?; }
@@ -2058,7 +2059,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// Remove all discrete systems from the DM.
     pub fn clear_ds(&mut self) -> Result<()> {
         let ierr = unsafe { petsc_raw::DMClearDS(self.dm_p) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         let _ = self.ds.take();
         
@@ -2102,7 +2103,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         let mut db = ::std::mem::MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMGetPeriodicity(self.dm_p, per.as_mut_ptr(),
             max_cell.as_mut_ptr(), l.as_mut_ptr(), db.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         // TODO: is this correct?
         if unsafe { per.assume_init() }.into() {
@@ -2143,6 +2144,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// // now this example only works when `PetscScalar` is `PetscReal`. It will fail
     /// // to compile if `PetscScalar` is `PetscComplex`. Also, this example will only
     /// // work when using PETSc `v3.16-dev.0`, it will also fail to compile otherwise.
+    /// assert!(!Petsc::VERSION_RELEASE && Petsc::VERSION_MAJOR == 3, Petsc::VERSION_MINOR == 16);
     ///
     /// let mut dm = DM::plex_create_box_mesh(petsc.world(), 2, true, (2,2,0), None, (6.0,6.0,0.0), None, true)?;
     /// dm.set_name("Mesh")?;
@@ -2260,7 +2262,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             self.dm_p, time, trampoline_funcs.as_mut_ptr(),
             trampoline_data_refs.as_mut_ptr(),
             mode, local.vec_p) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         Ok(())
     }
@@ -2322,7 +2324,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         let ierr = unsafe { petsc_raw::DMProjectFieldLocal(
             self.dm_p, time, localu.vec_p, fn_ptrs.as_mut_ptr(),
             mode, localx.vec_p) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         Ok(())
     }
@@ -2369,7 +2371,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         let ierr = unsafe { petsc_raw::DMProjectField(
             self.dm_p, time, u.vec_p, fn_ptrs.as_mut_ptr(),
             mode, x.vec_p) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         Ok(())
     }
@@ -2435,7 +2437,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             self.dm_p, time, trampoline_funcs.as_mut_ptr(),
             trampoline_data_refs.as_mut_ptr(),
             u_h.vec_p, diff.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         Ok(unsafe { diff.assume_init() })
     }
@@ -2465,7 +2467,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             vals.as_ref().map_or(petsc_raw::PETSC_DETERMINE, |&vl| vl.len() as PetscInt),
             vals.as_ref().map_or(std::ptr::null(), |&vl| vl.as_ptr()),
             fn_ptr, integral.as_mut_ptr(), std::ptr::null_mut()) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         Ok(unsafe { integral.assume_init() })
     }
@@ -2477,7 +2479,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         } else {
             let mut dm2_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::DMGetCoordinateDM(self.dm_p, dm2_p.as_mut_ptr()) };
-            Petsc::check_error(self.world, ierr)?;
+            chkerrq!(self.world, ierr)?;
 
             let mut coord_dm = DM::new(self.world, unsafe { dm2_p.assume_init() });
             unsafe { coord_dm.reference()?; }
@@ -2494,7 +2496,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     //     } else {
     //         let mut dm2_p = MaybeUninit::uninit();
     //         let ierr = unsafe { petsc_raw::DMGetCoordinateDM(self.dm_p, dm2_p.as_mut_ptr()) };
-    //         Petsc::check_error(self.world, ierr)?;
+    //         chkerrq!(self.world, ierr)?;
     //
     //         self.coord_dm = Some(Box::new(DM::new(self.world, unsafe { dm2_p.assume_init() })));
     //         unsafe { self.coord_dm.as_mut().unwrap().reference()?; }
@@ -2506,7 +2508,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// Sets the DM that prescribes coordinate layout and scatters between global and local coordinates 
     pub fn set_coordinate_dm(&mut self, coord_dm: Rc<DM<'a, 'tl>>) -> Result<()> {
         let ierr = unsafe { petsc_raw::DMSetCoordinateDM(self.dm_p, coord_dm.dm_p) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
         self.coord_dm = Some(coord_dm);
         Ok(())
     }
@@ -2516,7 +2518,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         let labelname_cs = CString::new(labelname).expect("`CString::new` failed");
         let mut res = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMHasLabel(self.dm_p, labelname_cs.as_ptr(), res.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
         Ok(unsafe { res.assume_init().into() })
     }
 
@@ -2526,13 +2528,13 @@ impl<'a, 'tl> DM<'a, 'tl> {
     pub fn plex_mark_boundary_faces(&mut self, val: impl Into<Option<PetscInt>>, label: &mut DMLabel) -> Result<()> {
         let ierr = unsafe { petsc_raw::DMPlexMarkBoundaryFaces(
             self.dm_p,val.into().unwrap_or(petsc_raw::PETSC_DETERMINE), label.dml_p) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Copy the fields and discrete systems for one [`DM`] into this [`DM`]
     pub fn copy_disc_from(&mut self, other: &DM) -> Result<()> {
         let ierr = unsafe { petsc_raw::DMCopyDisc(other.dm_p, self.dm_p) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         let nf = self.get_num_fields()?;
         let mut new_fields = vec![];
@@ -2550,7 +2552,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         let mut dml_p = MaybeUninit::uninit();
         let mut f_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMGetField(self.dm_p, f, dml_p.as_mut_ptr(), f_p.as_mut_ptr() as *mut _) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         let dm_label = NonNull::new(unsafe { dml_p.assume_init() } );
         let mut label = dm_label.map(|nn_dml_p| DMLabel { world: self.world, dml_p: nn_dml_p.as_ptr() });
@@ -2570,7 +2572,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         } else {
             let mut dm2_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::DMGetCoarseDM(self.dm_p, dm2_p.as_mut_ptr()) };
-            Petsc::check_error(self.world, ierr)?;
+            chkerrq!(self.world, ierr)?;
 
             let dm_nn_p = NonNull::new(unsafe { dm2_p.assume_init() } );
             self.coarse_dm = dm_nn_p.map(|dm_nn_p| Box::new(DM::new(self.world, dm_nn_p.as_ptr())));
@@ -2589,7 +2591,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         } else {
             let mut dm2_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::DMGetCoarseDM(self.dm_p, dm2_p.as_mut_ptr()) };
-            Petsc::check_error(self.world, ierr)?;
+            chkerrq!(self.world, ierr)?;
 
             let dm_nn_p = NonNull::new(unsafe { dm2_p.assume_init() } );
             self.coarse_dm = dm_nn_p.map(|dm_nn_p| Box::new(DM::new(self.world, dm_nn_p.as_ptr())));
@@ -2649,7 +2651,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             // Note, DMPlex just refrence counts the underlying data and shollow copies.
             let mut dm2_p = MaybeUninit::uninit();
             let ierr = petsc_raw::DMClone(self.dm_p, dm2_p.as_mut_ptr());
-            Petsc::check_error(self.world, ierr)?;
+            chkerrq!(self.world, ierr)?;
             let mut dm = DM::new(self.world, dm2_p.assume_init());
             let nf = dm.get_num_fields()?;
             let mut new_fields = vec![];
@@ -2663,7 +2665,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         } else {
             let mut dm2_p = MaybeUninit::uninit();
             let ierr = petsc_raw::DMClone(self.dm_p, dm2_p.as_mut_ptr());
-            Petsc::check_error(self.world, ierr)?;
+            chkerrq!(self.world, ierr)?;
             DM::new(self.world, dm2_p.assume_init())
         })
     }
@@ -2726,7 +2728,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         let mut vec_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMGetAuxiliaryVec(self.dm_p, label.into().as_raw(), value,
             vec_p.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         let vec_p_nn = NonNull::new(unsafe { vec_p.assume_init() } );
         let mut vec = vec_p_nn.map(|nn_vec_p| Vector { world: self.world, vec_p: nn_vec_p.as_ptr() });
@@ -2747,7 +2749,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         let name_cs = CString::new(name).expect("`CString::new` failed");
         let mut is_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMGetLabelIdIS(self.dm_p, name_cs.as_ptr(), is_p.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         let nn_is_p = NonNull::new(unsafe { is_p.assume_init() } );
         Ok(nn_is_p.map(|nn_is_p| IS { world: self.world, is_p: nn_is_p.as_ptr() }))
@@ -2778,7 +2780,7 @@ impl<'a> FEDisc<'a, '_> {
         let ierr = unsafe { petsc_raw::PetscFECreateDefault(world.as_raw(), dim, nc, is_simplex.into(),
             cstring.as_ref().map_or(std::ptr::null(), |p| p.as_ptr()), qorder.into().unwrap_or(petsc_raw::PETSC_DETERMINE),
             fe_p.as_mut_ptr()) };
-        Petsc::check_error(world, ierr)?;
+        chkerrq!(world, ierr)?;
 
         Ok(FEDisc::new(world, unsafe { fe_p.assume_init() }))
     }
@@ -2786,7 +2788,7 @@ impl<'a> FEDisc<'a, '_> {
     /// Copy both volumetric and surface quadrature from `other`.
     pub fn copy_quadrature_from(&mut self, other: &FEDisc) -> Result<()> {
         let ierr = unsafe { petsc_raw::PetscFECopyQuadrature(other.fe_p, self.fe_p) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Determines whether a PETSc [`FEDisc`] is of a particular type.
@@ -2835,7 +2837,7 @@ impl<'a, 'tl> DS<'a, 'tl> {
             name_cs.as_mut_ptr(), dml_p.as_mut_ptr(), nv.as_mut_ptr(), values_p.as_mut_ptr(),
             field.as_mut_ptr(), nc.as_mut_ptr(), comps_p.as_mut_ptr(), std::ptr::null_mut(),
             std::ptr::null_mut(), std::ptr::null_mut() ) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         // TODO: should we return refrences to wf and label?
         let mut wf = WeakForm { world: self.world, wf_p: unsafe { wf_p.assume_init() } };
@@ -2880,7 +2882,7 @@ impl<'a, 'tl> DS<'a, 'tl> {
             name_cs.as_mut_ptr(), label_cs.as_mut_ptr(), field.as_mut_ptr(), nc.as_mut_ptr(),
             comps_p.as_mut_ptr(),  std::ptr::null_mut(), std::ptr::null_mut(), nids.as_mut_ptr(),
             ids_p.as_mut_ptr(), std::ptr::null_mut() ) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         // TODO: should we return refrences to wf and label?
         let name = unsafe { CStr::from_ptr(name_cs.assume_init()) }.to_str().unwrap();
@@ -2896,7 +2898,7 @@ impl<'a, 'tl> DS<'a, 'tl> {
         // why does it take a `*mut _` for consts? It doesn't really
         // matter because it only does an array copy under the hood.
         let ierr = unsafe { petsc_raw::PetscDSSetConstants(self.ds_p, consts.len() as PetscInt, consts.as_ptr() as *mut _) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Set the pointwise exact solution function for a given test field
@@ -2935,7 +2937,7 @@ impl<'a, 'tl> DS<'a, 'tl> {
         let ierr = unsafe { petsc_raw::PetscDSSetExactSolution(
             self.ds_p, f, Some(ds_exact_solution_trampoline), 
             std::mem::transmute(trampoline_data.as_ref())) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
         
         self.exact_soln_trampoline_data = Some(trampoline_data);
 

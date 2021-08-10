@@ -63,7 +63,7 @@ struct KSPComputeRHSTrampolineData<'a, 'tl> {
 impl<'a> Drop for KSP<'a, '_, '_> {
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::KSPDestroy(&mut self.ksp_p as *mut _) };
-        let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
+        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
@@ -79,7 +79,7 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
     pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut ksp_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::KSPCreate(world.as_raw(), ksp_p.as_mut_ptr()) };
-        Petsc::check_error(world, ierr)?;
+        chkerrq!(world, ierr)?;
 
         Ok(KSP::new(world, unsafe { ksp_p.assume_init() }))
     }
@@ -88,14 +88,14 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
     pub fn set_type_str(&mut self, ksp_type: &str) -> Result<()> {
         let cstring = CString::new(ksp_type).expect("`CString::new` failed");
         let ierr = unsafe { petsc_raw::KSPSetType(self.ksp_p, cstring.as_ptr()) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Builds [`KSP`] for a particular solver.
     pub fn set_type(&mut self, ksp_type: KSPType) -> Result<()> {
         let cstring = petsc_raw::KSPTYPE_TABLE[ksp_type as usize];
         let ierr = unsafe { petsc_raw::KSPSetType(self.ksp_p, cstring.as_ptr() as *const _) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Sets the matrix associated with the linear system and a (possibly)
@@ -103,10 +103,7 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
     /// `ksp.get_pc_or_create().set_operators()`.
     ///
     /// Passing a `None` for `a_mat` or `p_mat` removes the matrix that is currently used.
-    pub fn set_operators(&mut self, a_mat: impl Into<Option<&'bl Mat<'a, 'tl>>>, p_mat: impl Into<Option<&'bl Mat<'a, 'tl>>>) -> Result<()>
-    {
-        let a_mat = a_mat.into();
-        let p_mat = p_mat.into();
+    pub fn set_operators(&mut self, a_mat: impl Into<Option<&'bl Mat<'a, 'tl>>>, p_mat: impl Into<Option<&'bl Mat<'a, 'tl>>>) -> Result<()> {
         self.get_pc_or_create()?.set_operators(a_mat, p_mat)?;
         // This is done in the C API `KSPSetOperators` function.
         if unsafe { &mut *self.ksp_p }.setupstage == petsc_raw::KSPSetUpStage::KSP_SETUP_NEWRHS {
@@ -136,7 +133,7 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
         } else {
             let mut pc_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::KSPGetPC(self.ksp_p, pc_p.as_mut_ptr()) };
-            Petsc::check_error(self.world, ierr)?;
+            chkerrq!(self.world, ierr)?;
 
             self.pc = Some(PC::new(self.world, unsafe { pc_p.assume_init() }));
             unsafe { self.pc.as_mut().unwrap().reference()?; }
@@ -166,7 +163,7 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
         } else {
             let mut dm_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::KSPGetDM(self.ksp_p, dm_p.as_mut_ptr()) };
-            Petsc::check_error(self.world, ierr)?;
+            chkerrq!(self.world, ierr)?;
 
             self.dm = Some(DM::new(self.world, unsafe { dm_p.assume_init() }));
             unsafe { self.dm.as_mut().unwrap().reference()?; }
@@ -193,14 +190,14 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
         let ierr = unsafe { petsc_raw::KSPSetTolerances(
             self.ksp_p, rtol.into().unwrap_or(petsc_raw::PETSC_DEFAULT_REAL), atol.into().unwrap_or(petsc_raw::PETSC_DEFAULT_REAL),
             dtol.into().unwrap_or(petsc_raw::PETSC_DEFAULT_REAL), max_iters.into().unwrap_or(petsc_raw::PETSC_DEFAULT_INTEGER)) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Solves linear system.
     pub fn solve<'vl, 'val: 'vl>(&self, b: impl Into<Option<&'vl Vector<'val>>>, x: &mut Vector) -> Result<()>
     {
         let ierr = unsafe { petsc_raw::KSPSolve(self.ksp_p, b.into().map_or(std::ptr::null_mut(), |v| v.vec_p), x.vec_p) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Sets the routine to compute the linear operators
@@ -256,7 +253,7 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
 
             let mut dm_p = MaybeUninit::uninit();
             let ierr = petsc_raw::KSPGetDM(ksp_p, dm_p.as_mut_ptr());
-            if ierr != 0 { let _ = Petsc::check_error(trampoline_data.world, ierr); return ierr; }
+            if ierr != 0 { let _ = chkerrq!(trampoline_data.world, ierr); return ierr; }
             let mut dm = DM::new(trampoline_data.world, dm_p.assume_init());
             let ierr = DM::set_inner_values(&mut dm);
             if ierr != 0 { return ierr; }
@@ -272,7 +269,7 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
         let ierr = unsafe { petsc_raw::KSPSetComputeOperators(
             self.ksp_p, Some(ksp_compute_operators_trampoline), 
             std::mem::transmute(trampoline_data.as_ref())) }; // this will also erase the lifetimes
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
         
         self.compute_operators_trampoline_data = Some(trampoline_data);
 
@@ -325,7 +322,7 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
 
             let mut dm_p = MaybeUninit::uninit();
             let ierr = petsc_raw::KSPGetDM(ksp_p, dm_p.as_mut_ptr());
-            if ierr != 0 { let _ = Petsc::check_error(trampoline_data.world, ierr); return ierr; }
+            if ierr != 0 { let _ = chkerrq!(trampoline_data.world, ierr); return ierr; }
             let mut dm = DM::new(trampoline_data.world, dm_p.assume_init());
             let ierr = DM::set_inner_values(&mut dm);
             if ierr != 0 { return ierr; }
@@ -340,7 +337,7 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
         let ierr = unsafe { petsc_raw::KSPSetComputeRHS(
             self.ksp_p, Some(ksp_compute_rhs_trampoline), 
             std::mem::transmute(trampoline_data.as_ref())) }; // this will also erase the lifetimes
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
         
         self.compute_rhs_trampoline_data = Some(trampoline_data);
 
@@ -351,7 +348,7 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
     pub fn get_rhs(&self) -> Result<Rc<Vector<'a>>> {
         let mut vec_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::KSPGetRhs(self.ksp_p, vec_p.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         let mut vec = Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } };
         unsafe { vec.reference()?; }

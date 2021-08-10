@@ -31,7 +31,7 @@ pub struct Space<'a> {
 impl Drop for Space<'_> {
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::PetscSpaceDestroy(&mut self.s_p as *mut _) };
-        let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
+        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
@@ -46,7 +46,7 @@ pub struct DualSpace<'a, 'tl> {
 impl Drop for DualSpace<'_, '_> {
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::PetscDualSpaceDestroy(&mut self.ds_p as *mut _) };
-        let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
+        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
@@ -58,7 +58,7 @@ impl<'a> Space<'a> {
         let mut s_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::PetscSpaceCreate(
             world.as_raw(), s_p.as_mut_ptr()) };
-        Petsc::check_error(world, ierr)?;
+        chkerrq!(world, ierr)?;
 
         Ok(Space { world, s_p: unsafe { s_p.assume_init() } })
     }
@@ -67,7 +67,7 @@ impl<'a> Space<'a> {
     pub fn set_type_str(&mut self, space_type: &str) -> Result<()> {
         let cstring = CString::new(space_type).expect("`CString::new` failed");
         let ierr = unsafe { petsc_raw::PetscSpaceSetType(self.s_p, cstring.as_ptr()) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Builds a particular [`Space`].
@@ -75,7 +75,7 @@ impl<'a> Space<'a> {
         // This could be use the macro probably 
         let option_str = petsc_raw::PETSCSPACETYPE_TABLE[space_type as usize];
         let ierr = unsafe { petsc_raw::PetscSpaceSetType(self.s_p, option_str.as_ptr() as *const _) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Determines whether a PETSc [`Space`] is of a particular type.
@@ -92,7 +92,7 @@ impl<'a, 'tl> DualSpace<'a, 'tl> {
         let mut ds_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::PetscDualSpaceCreate(
             world.as_raw(), ds_p.as_mut_ptr()) };
-        Petsc::check_error(world, ierr)?;
+        chkerrq!(world, ierr)?;
 
         Ok(DualSpace { world, ds_p: unsafe { ds_p.assume_init() }, dm: None })
     }
@@ -101,7 +101,7 @@ impl<'a, 'tl> DualSpace<'a, 'tl> {
     pub fn set_type_str(&mut self, ds_type: &str) -> Result<()> {
         let cstring = CString::new(ds_type).expect("`CString::new` failed");
         let ierr = unsafe { petsc_raw::PetscDualSpaceSetType(self.ds_p, cstring.as_ptr()) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Builds a particular [`DualSpace`].
@@ -109,7 +109,7 @@ impl<'a, 'tl> DualSpace<'a, 'tl> {
         // This could be use the macro probably 
         let option_str = petsc_raw::PETSCDUALSPACETYPE_TABLE[ds_type as usize];
         let ierr = unsafe { petsc_raw::PetscDualSpaceSetType(self.ds_p, option_str.as_ptr() as *const _) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Create a DMPLEX with the appropriate FEM reference cell 
@@ -117,7 +117,7 @@ impl<'a, 'tl> DualSpace<'a, 'tl> {
         let mut dm_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::PetscDualSpaceCreateReferenceCell(self.ds_p,
             dim, simplex.into(), dm_p.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         Ok(DM::new(self.world, unsafe { dm_p.assume_init() }))
     }

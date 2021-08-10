@@ -120,7 +120,7 @@ pub fn probe<'a>(atleast_version: impl Into<Option<&'a str>>) -> PetscProber {
 impl PetscProber {
     pub fn get_version_from_consts(&self) -> Version
     {
-        // This code tries to emulate the code at: https://github.com/petsc/petsc/blob/e4f26ec/setup.py#L247
+        // This code tries to emulate the code at: https://gitlab.com/petsc/petsc/blob/e4f26ec/setup.py#L247-L265
 
         // Looks at all variables named `PETSC_VERSION_*` to create version
         let (mut ver, prerel) = self.build_data.iter()

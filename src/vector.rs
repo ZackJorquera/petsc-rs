@@ -72,7 +72,7 @@ pub struct BorrowVector<'a, 'bv> {
 impl<'a> Drop for Vector<'a> {
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::VecDestroy(&mut self.vec_p as *mut _) };
-        let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
+        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
@@ -104,7 +104,7 @@ impl<'a> Vector<'a> {
     pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut vec_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::VecCreate(world.as_raw(), vec_p.as_mut_ptr()) };
-        Petsc::check_error(world, ierr)?;
+        chkerrq!(world, ierr)?;
 
         Ok(Vector { world, vec_p: unsafe { vec_p.assume_init() } })
     }
@@ -113,7 +113,7 @@ impl<'a> Vector<'a> {
     pub fn set_type_str(&mut self, vec_type: &str) -> Result<()> {
         let cstring = CString::new(vec_type).expect("`CString::new` failed");
         let ierr = unsafe { petsc_raw::VecSetType(self.vec_p, cstring.as_ptr()) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Builds a [`Vector`], for a particular vector implementation.
@@ -121,7 +121,7 @@ impl<'a> Vector<'a> {
     {
         let cstring = petsc_raw::VECTYPE_TABLE[vec_type as usize];
         let ierr = unsafe { petsc_raw::VecSetType(self.vec_p, cstring.as_ptr() as *const _) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Creates a new vector of the same type as an existing vector.
@@ -133,7 +133,7 @@ impl<'a> Vector<'a> {
     pub fn duplicate(&self) -> Result<Vector<'a>> {
         let mut vec2_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::VecDuplicate(self.vec_p, vec2_p.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         Ok(Vector { world: self.world, vec_p: unsafe { vec2_p.assume_init() } })
     }
@@ -155,7 +155,7 @@ impl<'a> Vector<'a> {
         let ierr = unsafe { petsc_raw::VecSetSizes(
             self.vec_p, local_size.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
             global_size.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER)) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Inserts or adds values into certain locations of a vector.
@@ -225,7 +225,7 @@ impl<'a> Vector<'a> {
 
         let ni = ix.len() as PetscInt;
         let ierr = unsafe { petsc_raw::VecSetValues(self.vec_p, ni, ix.as_ptr(), v.as_ptr() as *mut _, iora) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Allows you to give an iter that will be use to make a series of calls to [`Vector::set_values()`].
@@ -386,7 +386,7 @@ impl<'a> Vector<'a> {
         let mut out_vec = vec![PetscScalar::default();ni];
 
         let ierr = unsafe { petsc_raw::VecGetValues(self.vec_p, ni as PetscInt, ix_array.as_ptr(), out_vec[..].as_mut_ptr() as *mut _) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         Ok(out_vec)
     }
@@ -436,7 +436,7 @@ impl<'a> Vector<'a> {
         let mut low = MaybeUninit::<PetscInt>::uninit();
         let mut high = MaybeUninit::<PetscInt>::uninit();
         let ierr = unsafe { petsc_raw::VecGetOwnershipRange(self.vec_p, low.as_mut_ptr(), high.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         Ok(unsafe { low.assume_init()..high.assume_init() })
     }
@@ -449,7 +449,7 @@ impl<'a> Vector<'a> {
     pub fn get_ownership_ranges(&self) -> Result<Vec<std::ops::Range<PetscInt>>> {
         let mut array = MaybeUninit::<*const PetscInt>::uninit();
         let ierr = unsafe { petsc_raw::VecGetOwnershipRanges(self.vec_p, array.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         // SAFETY: Petsc says it is an array of length size+1
         let slice_from_array = unsafe { 
@@ -470,7 +470,7 @@ impl<'a> Vector<'a> {
     /// used in some internal functions in PETSc.
     pub fn copy_data_from(&mut self, x: &Vector) -> Result<()> {
         let ierr = unsafe { petsc_raw::VecCopy(x.vec_p, self.vec_p) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Create an immutable view of the this processor's portion of the vector.
@@ -632,7 +632,7 @@ impl<'a> Vector<'a> {
         // TODO: return enum
         let mut s_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::VecGetType(self.vec_p, s_p.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
         
         let c_str: &CStr = unsafe { CStr::from_ptr(s_p.assume_init()) };
         let str_slice: &str = c_str.to_str().unwrap();
@@ -656,14 +656,14 @@ impl<'a> Clone for Vector<'a> {
 impl Drop for VectorViewMut<'_, '_> {
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::VecRestoreArray(self.vec.vec_p, &mut self.array as *mut _) };
-        let _ = Petsc::check_error(self.vec.world, ierr); // TODO: should I unwrap or what idk?
+        let _ = chkerrq!(self.vec.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
 impl Drop for VectorView<'_, '_> {
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::VecRestoreArray(self.vec.vec_p, &mut self.array as *mut _ as *mut _) };
-        let _ = Petsc::check_error(self.vec.world, ierr); // TODO: should I unwrap or what idk?
+        let _ = chkerrq!(self.vec.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
@@ -672,7 +672,7 @@ impl<'a, 'b> VectorViewMut<'a, 'b> {
     fn new(vec: &'b mut Vector<'a>) -> Result<Self> {
         let mut array = MaybeUninit::<*mut PetscScalar>::uninit();
         let ierr = unsafe { petsc_raw::VecGetArray(vec.vec_p, array.as_mut_ptr() as *mut *mut _) };
-        Petsc::check_error(vec.world, ierr)?;
+        chkerrq!(vec.world, ierr)?;
 
         let ndarray = unsafe { 
             ArrayViewMut::from_shape_ptr(ndarray::IxDyn(&[vec.get_local_size().unwrap() as usize]), array.assume_init()) };
@@ -686,7 +686,7 @@ impl<'a, 'b> VectorView<'a, 'b> {
     fn new(vec: &'b Vector<'a>) -> Result<Self> {
         let mut array = MaybeUninit::<*const PetscScalar>::uninit();
         let ierr = unsafe { petsc_raw::VecGetArrayRead(vec.vec_p, array.as_mut_ptr() as *mut *const _) };
-        Petsc::check_error(vec.world, ierr)?;
+        chkerrq!(vec.world, ierr)?;
 
         let ndarray = unsafe { 
             ArrayView::from_shape_ptr(ndarray::IxDyn(&[vec.get_local_size().unwrap() as usize]), array.assume_init()) };

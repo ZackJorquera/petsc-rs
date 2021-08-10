@@ -52,7 +52,7 @@ impl<'a> Drop for PC<'a, '_, '_> {
     // Note, this should only be called if the PC context was created with `PCCreate`.
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::PCDestroy(&mut self.pc_p as *mut _) };
-        let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
+        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
@@ -71,7 +71,7 @@ impl<'a, 'tl, 'bl> PC<'a, 'tl, 'bl> {
     pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut pc_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::PCCreate(world.as_raw(), pc_p.as_mut_ptr()) };
-        Petsc::check_error(world, ierr)?;
+        chkerrq!(world, ierr)?;
 
         Ok(PC::new(world, unsafe { pc_p.assume_init() }))
     }
@@ -80,7 +80,7 @@ impl<'a, 'tl, 'bl> PC<'a, 'tl, 'bl> {
     pub fn set_type_str(&mut self, pc_type: &str) -> Result<()> {
         let cstring = CString::new(pc_type).expect("`CString::new` failed");
         let ierr = unsafe { petsc_raw::PCSetType(self.pc_p, cstring.as_ptr()) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Builds [`PC`] for a particular preconditioner type
@@ -88,7 +88,7 @@ impl<'a, 'tl, 'bl> PC<'a, 'tl, 'bl> {
     {
         let cstring = petsc_raw::PCTYPE_TABLE[pc_type as usize];
         let ierr = unsafe { petsc_raw::PCSetType(self.pc_p, cstring.as_ptr() as *const _) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
     
     /// Sets the matrix associated with the linear system and a (possibly)
@@ -102,7 +102,7 @@ impl<'a, 'tl, 'bl> PC<'a, 'tl, 'bl> {
         let ierr = unsafe { petsc_raw::PCSetOperators(self.pc_p,
             a_mat.as_ref().map_or(std::ptr::null_mut(), |m| m.mat_p), 
             p_mat.as_ref().map_or(std::ptr::null_mut(), |m| m.mat_p)) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
 
         // drop everything as it is getting replaced. (note under the hood MatDestroy is called on both of
         // them each time `PCSetOperators` is called).
@@ -133,7 +133,7 @@ impl<'a, 'tl, 'bl> PC<'a, 'tl, 'bl> {
             if self.owned_amat.is_none() {
                 let mut a_mat_p = MaybeUninit::zeroed();
                 let ierr = unsafe { petsc_raw::PCGetOperators(self.pc_p, a_mat_p.as_mut_ptr(), std::ptr::null_mut()) };
-                Petsc::check_error(self.world, ierr)?;
+                chkerrq!(self.world, ierr)?;
 
                 let mut mat = Mat::new(self.world, unsafe { a_mat_p.assume_init() });
                 // We only call this if amat has not been set which means that PETSc will create a new mat
@@ -152,7 +152,7 @@ impl<'a, 'tl, 'bl> PC<'a, 'tl, 'bl> {
             if self.owned_pmat.is_none() {
                 let mut p_mat_p = MaybeUninit::zeroed();
                 let ierr = unsafe { petsc_raw::PCGetOperators(self.pc_p, std::ptr::null_mut(), p_mat_p.as_mut_ptr()) };
-                Petsc::check_error(self.world, ierr)?;
+                chkerrq!(self.world, ierr)?;
 
                 let mut mat = Mat::new(self.world, unsafe { p_mat_p.assume_init() });
                 // We only call this if pmat has not been set which means that PETSc will create a new mat
@@ -216,8 +216,10 @@ impl<'a, 'tl, 'bl> PC<'a, 'tl, 'bl> {
         unsafe extern "C" fn pc_shell_set_apply_trampoline(pc_p: *mut petsc_raw::_p_PC, xin_p: *mut petsc_raw::_p_Vec,
             xout_p: *mut petsc_raw::_p_Vec) -> petsc_raw::PetscErrorCode
         {
-            let mut ctx = MaybeUninit::uninit();
-            let ierr = petsc_raw::PCShellGetContext(pc_p, ctx.as_mut_ptr());
+            // Note, the function signature of PCShellGetContext has changed in v3.16-dev.0,
+            // The following should work for both v3.16-dev.0 and v3.15
+            let mut ctx = MaybeUninit::<*mut ::std::os::raw::c_void>::uninit();
+            let ierr = petsc_raw::PCShellGetContext(pc_p, ctx.as_mut_ptr() as *mut _);
             assert_eq!(ierr, 0);
 
             // SAFETY: We construct ctx to be a Pin<Box<KSPComputeOperatorsTrampolineData>> but pass it in as a *void
@@ -241,10 +243,10 @@ impl<'a, 'tl, 'bl> PC<'a, 'tl, 'bl> {
 
         let ierr = unsafe { petsc_raw::PCShellSetApply(
             self.pc_p, Some(pc_shell_set_apply_trampoline)) };
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
         let ierr = unsafe { petsc_raw::PCShellSetContext(self.pc_p,
             std::mem::transmute(trampoline_data.as_ref())) }; // this will also erase the lifetimes
-        Petsc::check_error(self.world, ierr)?;
+        chkerrq!(self.world, ierr)?;
         
         self.shell_set_apply_trampoline_data = Some(trampoline_data);
 
@@ -263,7 +265,7 @@ impl<'a, 'tl, 'bl> PC<'a, 'tl, 'bl> {
 
         let ierr = unsafe { petsc_raw::PCFieldSplitSetIS(
             self.pc_p, splitname_cs.map(|cs| cs.as_ptr()).unwrap_or(std::ptr::null()), is.is_p) };
-        Petsc::check_error(self.world, ierr)
+        chkerrq!(self.world, ierr)
     }
 
     /// Determines whether a PETSc [`PC`] is of a particular type.

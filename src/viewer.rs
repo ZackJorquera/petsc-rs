@@ -34,7 +34,7 @@ pub struct Viewer<'a> {
 impl<'a> Drop for Viewer<'a> {
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::PetscViewerDestroy(&mut self.viewer_p as *mut _) };
-        let _ = Petsc::check_error(self.world, ierr); // TODO: should I unwrap or what idk?
+        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
     }
 }
 
@@ -47,7 +47,7 @@ impl<'a> Viewer<'a> {
         // reference count.
         let mut viewer_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_sys::PetscViewerASCIIGetStdout(world.as_raw(), viewer_p.as_mut_ptr()) };
-        Petsc::check_error(world, ierr)?;
+        chkerrq!(world, ierr)?;
 
         let mut viewer = Viewer { world, viewer_p: unsafe { viewer_p.assume_init() } };
         unsafe { viewer.reference()?; }

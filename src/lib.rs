@@ -84,6 +84,11 @@ use std::ops::{Deref, Bound, RangeBounds};
 use std::os::raw::{c_char, c_int};
 use std::vec;
 
+/// The raw C language PETSc API
+///
+/// Documented on the [PETSc Documentation page](https://petsc.org/release/documentation/).
+// TODO: should this be public? Should we rename to `ffi`? Or should we just reexport petsc-sys?
+// Or just keep it the same?
 pub(crate) mod petsc_raw {
     pub use petsc_sys::*;
 }
@@ -151,8 +156,6 @@ pub mod prelude {
 
 #[cfg(feature = "petsc-use-complex")]
 use num_complex::Complex;
-
-// https://petsc.org/release/docs/manualpages/Sys/index.html
 
 /// Prints to standard out with a new line, only from the first processor in the communicator.
 ///
@@ -266,8 +269,11 @@ pub struct PetscError {
     pub(crate) error: Box<dyn std::error::Error + Send + Sync>,
 }
 
-pub use petsc_raw::PetscErrorType as PetscErrorType;
-pub use petsc_raw::PetscErrorCodeEnum as PetscErrorKind;
+
+/// A list specifying types of PETSc errors.
+pub type PetscErrorType = petsc_raw::PetscErrorType;
+/// A list specifying kinds of PETSc errors.
+pub type PetscErrorKind = petsc_raw::PetscErrorCodeEnum;
 pub use petsc_raw::InsertMode;
 
 /// Helper struct which allows you to call [`PetscInitialize`] with optional parameters.
@@ -377,7 +383,7 @@ impl PetscBuilder
             _arg_data: self.args.as_ref().map(|_| (argc_boxed, cstr_args_owned, c_args_owned, c_args_boxed)),
             drop_world_first
         };
-        Petsc::check_error(petsc.world(), ierr)?;
+        chkerrq!(petsc.world(), ierr)?;
 
         Ok(petsc)
     }
@@ -455,7 +461,7 @@ impl<'pl, 'pool, 'strlt> PetscOptBuilder<'pl, 'pool, 'strlt> {
             prefix_cs.map_or(std::ptr::null() , |cs| cs.as_ptr()),
             mess_cs.as_ptr(),
             sec_cs.map_or(std::ptr::null() , |cs| cs.as_ptr())) };
-        Petsc::check_error(petsc.world(), ierr)?;
+        chkerrq!(petsc.world(), ierr)?;
         Ok(Self { petsc, petsc_opt_obj, _str_phantom: PhantomData })
     }
 
@@ -480,7 +486,7 @@ impl<'pl, 'pool, 'strlt> PetscOptBuilder<'pl, 'pool, 'strlt> {
             petsc_raw::PetscOptionsInt_Private(self.petsc_opt_obj.as_mut_ptr(), opt_cs.as_ptr(),
             text_cs.as_ptr(), man_cs.as_ptr(), default, opt_val.as_mut_ptr(), set.as_mut_ptr(),
             lb, ub) };
-        Petsc::check_error(self.petsc.world(), ierr)?;
+        chkerrq!(self.petsc.world(), ierr)?;
 
         Ok(if unsafe { set.assume_init().into() } { unsafe { opt_val.assume_init() } } 
             else { default } )
@@ -497,7 +503,7 @@ impl<'pl, 'pool, 'strlt> PetscOptBuilder<'pl, 'pool, 'strlt> {
             petsc_raw::PetscOptionsInt_Private(self.petsc_opt_obj.as_mut_ptr(), opt_cs.as_ptr(),
             text_cs.as_ptr(), man_cs.as_ptr(), default, opt_val.as_mut_ptr(), set.as_mut_ptr(),
             PetscInt::MIN, PetscInt::MAX) };
-        Petsc::check_error(self.petsc.world(), ierr)?;
+        chkerrq!(self.petsc.world(), ierr)?;
 
         Ok(if unsafe { set.assume_init().into() } { unsafe { opt_val.assume_init() } } 
             else { default } )
@@ -516,7 +522,7 @@ impl<'pl, 'pool, 'strlt> PetscOptBuilder<'pl, 'pool, 'strlt> {
         let ierr = unsafe { 
             petsc_raw::PetscOptionsBool_Private(self.petsc_opt_obj.as_mut_ptr(), opt_cs.as_ptr(),
             text_cs.as_ptr(), man_cs.as_ptr(), default.into(), opt_val.as_mut_ptr(), set.as_mut_ptr()) };
-        Petsc::check_error(self.petsc.world(), ierr)?;
+        chkerrq!(self.petsc.world(), ierr)?;
 
         Ok(if unsafe { set.assume_init().into() } { unsafe { opt_val.assume_init().into() } } 
             else { default } )
@@ -532,7 +538,7 @@ impl<'pl, 'pool, 'strlt> PetscOptBuilder<'pl, 'pool, 'strlt> {
         let ierr = unsafe { 
             petsc_raw::PetscOptionsReal_Private(self.petsc_opt_obj.as_mut_ptr(), opt_cs.as_ptr(),
             text_cs.as_ptr(), man_cs.as_ptr(), default, opt_val.as_mut_ptr(), set.as_mut_ptr()) };
-        Petsc::check_error(self.petsc.world(), ierr)?;
+        chkerrq!(self.petsc.world(), ierr)?;
 
         Ok(if unsafe { set.assume_init().into() } { unsafe { opt_val.assume_init() } } 
             else { default } )
@@ -553,7 +559,7 @@ impl<'pl, 'pool, 'strlt> PetscOptBuilder<'pl, 'pool, 'strlt> {
             petsc_raw::PetscOptionsString_Private(self.petsc_opt_obj.as_mut_ptr(), opt_cs.as_ptr(),
             text_cs.as_ptr(), man_cs.as_ptr(), default_cs.as_ptr(), buf.as_mut_ptr() as *mut _,
             BUF_LEN as u64, set.as_mut_ptr()) };
-        Petsc::check_error(self.petsc.world(), ierr)?;
+        chkerrq!(self.petsc.world(), ierr)?;
 
         Ok(if unsafe { set.assume_init().into() } {
             let nul_term = buf.iter().position(|&v| v == 0).unwrap();
@@ -583,7 +589,7 @@ impl<'pl, 'pool, 'strlt> PetscOptBuilder<'pl, 'pool, 'strlt> {
 impl Drop for PetscOptBuilder<'_, '_, '_> {
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::PetscOptionsEnd_Private(self.petsc_opt_obj.as_mut_ptr()) };
-        let _ = Petsc::check_error( self.petsc.world(), ierr); // TODO: should I unwrap or what idk?
+        let _ = chkerrq!( self.petsc.world(), ierr); // TODO: should I unwrap or what idk?
     }
 }
 
@@ -650,7 +656,7 @@ impl Petsc {
         let ierr = unsafe { petsc_raw::PetscInitializeNoArguments() };
         let petsc = Self { world: ManuallyDrop::new(mpi::topology::SystemCommunicator::world().duplicate()),
             _arg_data: None, drop_world_first: true };
-        Petsc::check_error(petsc.world(), ierr)?;
+        chkerrq!(petsc.world(), ierr)?;
 
         Ok(petsc)
     }
@@ -669,9 +675,12 @@ impl Petsc {
     }
 
     /// Internal error checker
+    ///
     /// replacement for the CHKERRQ macro in the C api
+    ///
+    /// unsafe because `ierr` MUST be memory equivalent to a valid [`petsc_raw::PetscErrorCodeEnum`] or `0`.
     #[doc(hidden)]
-    pub(crate) fn check_error<C: Communicator>(world: &C, ierr: petsc_raw::PetscErrorCode) -> Result<()> {
+    pub(crate) unsafe fn check_error<C: Communicator>(world: &C, line: i32, func_name: &str, file_name: &str, ierr: petsc_raw::PetscErrorCode) -> Result<()> {
         // Return early if code is clean
         if ierr == 0 {
             return Ok(());
@@ -681,18 +690,16 @@ impl Petsc {
         // Petsc functions, not user input. But we can't guarantee that they are all valid.
         // We also create the `PetscErrorCodeEnum` enum to have the same size and alignment as `i32`.
         // Which is what petsc_raw::PetscErrorCode is.
-        let error_kind = unsafe { std::mem::transmute(ierr) };
+        let error_kind = std::mem::transmute(ierr);
         let error = PetscError { kind: error_kind, error: "".into() };
 
         let c_s_r = CString::new(error.error.to_string());
+        let file_cs = CString::new(file_name).expect("`CString::new` failed");
+        let func_cs = CString::new(func_name).expect("`CString::new` failed");
 
-        // TODO: add file macro and line macro if possible
-        // might not matter because in debug rust will give stack trace
-        unsafe {
-            let _ = petsc_raw::PetscError(world.as_raw(), -1, std::ptr::null(), 
-                std::ptr::null(), ierr, PetscErrorType::PETSC_ERROR_REPEAT,
-                c_s_r.as_ref().map(|s| s.as_ptr()).unwrap_or(std::ptr::null()));
-        }
+        let _ = petsc_raw::PetscError(world.as_raw(), line, func_cs.as_ptr(), 
+            file_cs.as_ptr(), ierr, PetscErrorType::PETSC_ERROR_REPEAT,
+            c_s_r.as_ref().map(|s| s.as_ptr()).unwrap_or(std::ptr::null()));
 
         return Err(error);
     }
@@ -721,8 +728,10 @@ impl Petsc {
 
         let c_s_r = CString::new(error.error.to_string());
 
-        // TODO: add file petsc func, and line if possible
-        // might not matter because in debug rust will give stack trace
+        // TODO: It would be nice to get line number, func name, and file name from the caller,
+        // however, it might be better for us to use results to build a stack trace, and
+        // then it wouldn't really matter what we do here.
+        // Regardless, the error handling needs a lot of work to be as functional as C PETSc.
         unsafe {
             let _ = petsc_raw::PetscError(world.as_raw(), -1, std::ptr::null(), 
                 std::ptr::null(), error_kind as petsc_raw::PetscErrorCode,
@@ -761,7 +770,7 @@ impl Petsc {
         let ps = CString::new("%s").unwrap();
 
         let ierr = unsafe { petsc_raw::PetscPrintf(world.as_raw(), ps.as_ptr(), msg_cs.as_ptr()) };
-        Petsc::check_error(world, ierr)
+        chkerrq!(world, ierr)
     }
 
     /// Replacement for the `PetscSynchronizedPrintf` function in the C api.
@@ -796,10 +805,10 @@ impl Petsc {
         let ps = CString::new("%s").unwrap();
 
         let ierr = unsafe { petsc_raw::PetscSynchronizedPrintf(world.as_raw(), ps.as_ptr(), msg_cs.as_ptr()) };
-        Petsc::check_error(world, ierr)?;
+        chkerrq!(world, ierr)?;
 
         let ierr = unsafe { petsc_raw::PetscSynchronizedFlush(world.as_raw(), petsc_raw::PETSC_STDOUT) };
-        Petsc::check_error(world, ierr)
+        chkerrq!(world, ierr)
     }
 
     /// Gets the integer value for a particular option in the database.
@@ -810,7 +819,7 @@ impl Petsc {
         let ierr = unsafe { 
             petsc_raw::PetscOptionsGetInt(std::ptr::null_mut(), std::ptr::null(),
             name_cs.as_ptr(), opt_val.as_mut_ptr(), set.as_mut_ptr()) };
-        Petsc::check_error(self.world(), ierr)?;
+        chkerrq!(self.world(), ierr)?;
 
         Ok(if unsafe { set.assume_init().into() } { Some(unsafe { opt_val.assume_init() }) } 
             else { None } )
@@ -827,7 +836,7 @@ impl Petsc {
         let ierr = unsafe { 
             petsc_raw::PetscOptionsGetBool(std::ptr::null_mut(), std::ptr::null(),
             name_cs.as_ptr(), opt_val.as_mut_ptr(), set.as_mut_ptr()) };
-        Petsc::check_error(self.world(), ierr)?;
+        chkerrq!(self.world(), ierr)?;
 
         Ok(if unsafe { set.assume_init().into() } { Some(unsafe { opt_val.assume_init().into() }) } 
             else { None } )
@@ -841,7 +850,7 @@ impl Petsc {
         let ierr = unsafe { 
             petsc_raw::PetscOptionsGetReal(std::ptr::null_mut(), std::ptr::null(),
             name_cs.as_ptr(), opt_val.as_mut_ptr(), set.as_mut_ptr()) };
-        Petsc::check_error(self.world(), ierr)?;
+        chkerrq!(self.world(), ierr)?;
 
         Ok(if unsafe { set.assume_init().into() } { Some(unsafe { opt_val.assume_init() }) } 
             else { None } )
@@ -859,7 +868,7 @@ impl Petsc {
         let ierr = unsafe { 
             petsc_raw::PetscOptionsGetString(std::ptr::null_mut(), std::ptr::null(),
             name_cs.as_ptr(), buf.as_mut_ptr() as *mut _, BUF_LEN as u64, set.as_mut_ptr()) };
-        Petsc::check_error(self.world(), ierr)?;
+        chkerrq!(self.world(), ierr)?;
 
         Ok(if unsafe { set.assume_init().into() } {
             let nul_term = buf.iter().position(|&v| v == 0).unwrap();
@@ -1051,7 +1060,7 @@ pub trait PetscObject<'a, PT>: PetscAsRaw<Raw = *mut PT> {
         let name_cs = ::std::ffi::CString::new(name).expect("`CString::new` failed");
         
         let ierr = unsafe { crate::petsc_raw::PetscObjectSetName(self.as_raw() as *mut crate::petsc_raw::_p_PetscObject, name_cs.as_ptr()) };
-        Petsc::check_error(self.world(), ierr)
+        chkerrq!(self.world(), ierr)
     }
 
     /// Gets a string name associated with a PETSc object.
@@ -1059,7 +1068,7 @@ pub trait PetscObject<'a, PT>: PetscAsRaw<Raw = *mut PT> {
         let mut c_buf = ::std::mem::MaybeUninit::<*const ::std::os::raw::c_char>::uninit();
         
         let ierr = unsafe { crate::petsc_raw::PetscObjectGetName(self.as_raw() as *mut crate::petsc_raw::_p_PetscObject, c_buf.as_mut_ptr()) };
-        Petsc::check_error(self.world(), ierr)?;
+        chkerrq!(self.world(), ierr)?;
 
         let c_str = unsafe { ::std::ffi::CStr::from_ptr(c_buf.assume_init()) };
         crate::Result::Ok(c_str.to_string_lossy().to_string())
@@ -1076,7 +1085,7 @@ pub trait PetscObject<'a, PT>: PetscAsRaw<Raw = *mut PT> {
             self.as_raw() as *mut _, type_name_cs.as_ptr(),
             tmp.as_mut_ptr()
         )};
-        Petsc::check_error(self.world(), ierr)?;
+        chkerrq!(self.world(), ierr)?;
 
         crate::Result::Ok(unsafe { tmp.assume_init() }.into())
     }
@@ -1086,7 +1095,7 @@ pub trait PetscObject<'a, PT>: PetscAsRaw<Raw = *mut PT> {
         let name_cs = ::std::ffi::CString::new(prefix).expect("`CString::new` failed");
         
         let ierr = unsafe { crate::petsc_raw::PetscObjectSetOptionsPrefix(self.as_raw() as *mut crate::petsc_raw::_p_PetscObject, name_cs.as_ptr()) };
-        Petsc::check_error(self.world(), ierr)
+        chkerrq!(self.world(), ierr)
     }
 }
 
