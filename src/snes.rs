@@ -6,7 +6,7 @@
 //! options database (e.g., specifying a trust region method via -snes_type newtontr ). SNES internally
 //! employs [KSP](crate::ksp) for the solution of its linear systems. SNES users can also set [`KSP`](KSP) options
 //! directly in application codes by first extracting the [`KSP`](KSP) context from the [`SNES`](crate::snes::SNES) context via
-//! [`SNES::get_ksp_or_create()`](#) and then directly calling various [`KSP`](KSP) (and [`PC`](crate::pc::PC)) routines
+//! [`SNES::get_ksp_or_create()`] and then directly calling various [`KSP`](KSP) (and [`PC`](crate::pc::PC)) routines
 //! (e.g., [`PC::set_type()`](#)).
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/SNES/index.html>
@@ -284,9 +284,9 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
         F: FnMut(&SNES<'a, 'tl, '_>, &Vector<'a>, &mut Vector<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl
     {
         // TODO: look at how rsmpi did the trampoline stuff:
-        // https://github.com/rsmpi/rsmpi/blob/master/src/collective.rs#L1684
+        // https://github.com/rsmpi/rsmpi/blob/82e1d357/src/collective.rs#L1684
         // They used libffi, that could be a safer way to do it.
-        
+
         let input_vec = input_vec.into();
 
         let closure_anchor = Box::new(user_f);

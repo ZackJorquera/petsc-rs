@@ -4,7 +4,7 @@
 //! 
 //! KSP users can set various Krylov subspace options at runtime via the options database 
 //! (e.g., -ksp_type cg ). KSP users can also set KSP options directly in application by directly calling
-//! the KSP routines listed below (e.g., [`KSP::set_type()`](#) ). KSP components can be used directly to
+//! the KSP routines listed below (e.g., [`KSP::set_type()`]). KSP components can be used directly to
 //! create and destroy solvers; this is not needed for users but is intended for library developers.
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/KSP/index.html>
@@ -225,7 +225,7 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
         F: FnMut(&KSP<'a, 'tl, '_>, &mut Mat<'a, 'tl>, &mut Mat<'a, 'tl>) -> Result<()> + 'tl
     {
         // TODO: look at how rsmpi did the trampoline stuff:
-        // https://github.com/rsmpi/rsmpi/blob/master/src/collective.rs#L1684
+        // https://github.com/rsmpi/rsmpi/blob/82e1d357/src/collective.rs#L1684
         // They used libffi, that could be a safer way to do it.
 
         let closure_anchor = Box::new(user_f);
@@ -297,7 +297,7 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
         F: FnMut(&KSP<'a, '_, '_>, &mut Vector<'a>) -> Result<()> + 'tl
     {
         // TODO: look at how rsmpi did the trampoline stuff:
-        // https://github.com/rsmpi/rsmpi/blob/master/src/collective.rs#L1684
+        // https://github.com/rsmpi/rsmpi/blob/82e1d357/src/collective.rs#L1684
         // They used libffi, that could be a safer way to do it.
 
         let closure_anchor = Box::new(user_f);

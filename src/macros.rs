@@ -241,9 +241,9 @@ macro_rules! impl_petsc_object_traits {
 ///
 /// Rust doesn't have a built in way of doing this yet: <https://github.com/rust-lang/rfcs/issues/1743>.
 ///
-/// From: <https://stackoverflow.com/a/40234666/9664285>
+/// The code for this macro is from: <https://stackoverflow.com/a/40234666/9664285>
 /// and <https://docs.rs/stdext/0.3.1/src/stdext/macros.rs.html#63-74>
-// TODO: should we just use the stdext crate?
+// TODO: should we just use the stdext crate? it is light weight.
 macro_rules! function_name {
     () => {{
         // IDK why rust thinks these functions are never used.

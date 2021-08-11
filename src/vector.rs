@@ -31,14 +31,14 @@ pub struct Vector<'a> {
     pub(crate) vec_p: *mut petsc_raw::_p_Vec, // I could use Vec which is the same thing, but i think using a pointer is more clear
 }
 
-/// A immutable view of a Vector with Deref to [`ndarray::ArrayView`].
+/// A immutable view of a Vector with [`Deref`] to [`ndarray::ArrayView`].
 pub struct VectorView<'a, 'b> {
     pub(crate) vec: &'b Vector<'a>,
     pub(crate) array: *const PetscScalar,
     pub(crate) ndarray: ArrayView<'b, PetscScalar, ndarray::IxDyn>,
 }
 
-/// A mutable view of a Vector with Deref to [`ndarray::ArrayViewMut`].
+/// A mutable view of a Vector with [`DerefMut`] to [`ndarray::ArrayViewMut`].
 pub struct VectorViewMut<'a, 'b> {
     pub(crate) vec: &'b mut Vector<'a>,
     pub(crate) array: *mut PetscScalar,
@@ -91,7 +91,7 @@ impl Drop for BorrowVector<'_, '_> {
 pub use petsc_raw::VecOption;
 
 impl<'a> Vector<'a> {
-    /// Creates an empty vector object. The type can then be set with [`Vector::set_type`](#), or [`Vector::set_from_options`].
+    /// Creates an empty vector object. The type can then be set with [`Vector::set_type`], or [`Vector::set_from_options`].
     /// Same as [`Petsc::vec_create`].
     ///
     /// ```

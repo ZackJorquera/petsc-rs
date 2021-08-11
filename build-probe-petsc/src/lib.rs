@@ -1,23 +1,20 @@
-extern crate bindgen;
-extern crate syn;
-
 use std::env;
 use std::path::Path;
 
-use quote::ToTokens;
 use regex::Regex;
 use semver::{Prerelease, Version};
 
-pub static CONSTS_TO_GET_REGEX: [&str; 2] = [
-    "PETSC_USE_.+",
-    "PETSC_VERSION_.+",
-];
-
 pub struct PetscProber {
     pub lib: pkg_config::Library,
-    pub build_data: Vec<(String, String)>,
+    pub petscversion_data: String,
+    pub petscconf_data: String,
 }
 
+/// Wrapper around [`pkg_config::Config::probe()`].
+///
+/// Use [`PetscProber.lib`] to get data from [`pkg_config`].
+///
+/// Also read in the headers `petscversion.h` and `petscconf.h`.
 pub fn probe<'a>(atleast_version: impl Into<Option<&'a str>>) -> PetscProber {
     println!("cargo:rerun-if-env-changed=PETSC_DIR");
     println!("cargo:rerun-if-env-changed=PETSC_ARCH");
@@ -74,68 +71,58 @@ pub fn probe<'a>(atleast_version: impl Into<Option<&'a str>>) -> PetscProber {
 
     eprintln!("lib found: {:?}", lib);
 
-    let mut bindings = bindgen::Builder::default();
+    let mut petscversion_h = None;
+    let mut petscconf_h = None;
 
     for dir in &lib.include_paths {
         println!("cargo:rerun-if-changed={}", dir.to_string_lossy());
-        bindings = bindings.clang_arg(format!("-I{}", dir.to_string_lossy()));
+
+        if petscversion_h.is_none() {
+            let header_path = dir.join("petscversion.h");
+            if header_path.exists() { petscversion_h = Some(header_path) } 
+        }
+        if petscconf_h.is_none() {
+            let header_path = dir.join("petscconf.h");
+            if header_path.exists() { petscconf_h = Some(header_path) } 
+        }
     }
 
-    let bindings = bindings
-        // The input header we would like to generate
-        // bindings for.
-        .header_contents("phantom_header.h", "#include <petscconf.h>\n#include <petscversion.h>\n")
-        // Tell cargo to invalidate the built crate whenever any of the
-        // included header files changed.
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks))
-        // Generate Comments
-        .generate_comments(true)
-        // Finish the builder and generate the bindings.
-        .generate()
-        // Unwrap the Result and panic on failure.
-        .expect("Unable to generate bindings");
+    let petscversion_h = petscversion_h.expect("Could not find `petscversion.h`.");
+    let petscconf_h = petscconf_h.expect("Could not find `petscconf.h`.");
 
-    let out_string = bindings.to_string();
-    
-    let raw = syn::parse_str::<syn::File>(&out_string).expect("Could not parse generated bindings");
+    // These are both small files so it doesn't matter that much, but maybe we
+    // should wrap them with `Lazy` so they are are read only if they are used.
+    // Note, `std::lazy::Lazy` is not stable yet.
+    let petscversion_data = std::fs::read_to_string(petscversion_h).unwrap();
+    let petscconf_data = std::fs::read_to_string(petscconf_h).unwrap();
 
-    let petsc_consts_to_get_as_regex_string = CONSTS_TO_GET_REGEX.join("|");
-    let petsc_consts_to_get_as_regex = Regex::new(&petsc_consts_to_get_as_regex_string).unwrap();
-    let petsc_consts = raw.items.iter()
-        .filter_map(|item| match item {
-            syn::Item::Const(c_item) => match c_item.expr.as_ref() {
-                syn::Expr::Lit(lit) =>
-                    Some((format!("{}", c_item.ident.to_token_stream()),
-                        format!("{}", lit.lit.to_token_stream()))),
-                _ => None,
-            },
-            _ => None
-        })
-        .filter(|(ident, _)| petsc_consts_to_get_as_regex.is_match(ident))
-        .collect::<Vec<_>>();
-
-    return PetscProber { lib, build_data: petsc_consts };
+    return PetscProber { lib, petscversion_data, petscconf_data };
 }
 
 impl PetscProber {
-    pub fn get_version_from_consts(&self) -> Version
-    {
+    /// Gets the [`Version`] of  PETSc from the header files. This might be different from the version
+    /// in [`PetscProber.lib.version`]
+    pub fn get_version_from_headers(&self) -> Version {
         // This code tries to emulate the code at: https://gitlab.com/petsc/petsc/blob/e4f26ec/setup.py#L247-L265
+        let major = Regex::new(r"#define\s+PETSC_VERSION_MAJOR\s+(\d+)").unwrap();
+        let minor = Regex::new(r"#define\s+PETSC_VERSION_MINOR\s+(\d+)").unwrap();
+        let subminor = Regex::new(r"#define\s+PETSC_VERSION_SUBMINOR\s+(\d+)").unwrap();
+        let release = Regex::new(r"#define\s+PETSC_VERSION_RELEASE\s+([-]*\d+)").unwrap();
 
-        // Looks at all variables named `PETSC_VERSION_*` to create version
-        let (mut ver, prerel) = self.build_data.iter()
-            .fold((Version::new(0,0,0), false), |(mut ver, prerel), (ident, lit)| 
-                if ident == "PETSC_VERSION_MAJOR" {
-                    ver.major = lit.parse().unwrap();
+        // We dont need to do a fold here, but it looks cool :)
+        let (mut ver, prerel) = self.petscversion_data.lines()
+            .fold((Version::new(0,0,0), false), |(mut ver, prerel), line| 
+                if let Some(caps) =  major.captures(line) {
+                    ver.major = caps.get(1).unwrap().as_str().parse().unwrap();
                     (ver, prerel)
-                } else if ident == "PETSC_VERSION_MINOR" {
-                    ver.minor = lit.parse().unwrap();
+                } else if let Some(caps) =  minor.captures(line) {
+                    ver.minor = caps.get(1).unwrap().as_str().parse().unwrap();
                     (ver, prerel)
-                } else if ident == "PETSC_VERSION_SUBMINOR" {
-                    ver.patch = lit.parse().unwrap();
+                } else if let Some(caps) =  subminor.captures(line) {
+                    ver.patch = caps.get(1).unwrap().as_str().parse().unwrap();
                     (ver, prerel)
-                } else if ident == "PETSC_VERSION_RELEASE" {
-                    let isrel: u32 = lit.parse().unwrap();
+                } else if let Some(caps) =  release.captures(line) {
+                    let isrel: u32 = caps.get(1).unwrap().as_str().parse().unwrap();
                     (ver, isrel == 0)
                 } else { 
                     (ver, prerel)
@@ -150,7 +137,11 @@ impl PetscProber {
         ver
     }
 
-    pub fn consts_contains(&self, ident: impl ToString) -> bool {
-        self.build_data.contains(&(ident.to_string(), "1".into()))
+    /// Checks to see if a `#define <ident> 1` exists the headers.
+    pub fn defines_contains(&self, ident: impl ToString) -> bool {
+        let re_match = Regex::new(&format!("#define\\s+{}\\s+1", ident.to_string())).unwrap();
+
+        self.petscconf_data.lines().any(|line| re_match.is_match(line))
+            || self.petscversion_data.lines().any(|line| re_match.is_match(line))
     }
 }

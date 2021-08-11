@@ -436,7 +436,7 @@ fn create_bc_label(dm: &mut DM, labelname: &str, _opt: &Opt) -> petsc_rs::Result
 fn setup_aux_dm(dm: &mut DM, fe_aux: &Option<FEDisc>, opt: &Opt, kgrid: &Option<Vec<i32>>) -> petsc_rs::Result<()> {
     let dim = dm.get_dimension()?;
     let simplex = dm.plex_is_simplex()?;
-    let coord_dm = dm.get_coordinate_dm()?;
+    let coord_dm = dm.get_coordinate_dm_or_create()?;
     if let Some(fe_aux) = fe_aux {
         // clone the fe_aux
         let this_fe_aux = if opt.variable_coefficient == CoeffType::COEFF_FIELD || opt.variable_coefficient == CoeffType::COEFF_CHECKERBOARD_1 {
@@ -601,12 +601,8 @@ fn main() -> petsc_rs::Result<()> {
             u.view_with(None)?;
         }
         snes.solve(None, &mut u)?;
-        let soln = snes.get_solution()?;
-        let dm = snes.get_dm_or_create()?;
 
         if opt.show_solution {
-            let mut local = dm.get_local_vector()?;
-            dm.global_to_local(&soln, InsertMode::INSERT_VALUES, &mut local)?;
             petsc_println!(petsc.world(), "Solution:")?;
             petsc_println_sync!(petsc.world(), "[process {}]\n{:.5}", petsc.world().rank(), *u.view()?)?;
             u.view_with(None)?;

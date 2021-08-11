@@ -629,13 +629,32 @@ impl Drop for Petsc {
 }
 
 impl Petsc {
-    /// Major version of the PETSc library being used
+    /// Major version of the PETSc library being used.
+    ///
+    /// Same as [`petsc_sys::PETSC_VERSION_MAJOR`].
     pub const VERSION_MAJOR: usize = petsc_raw::PETSC_VERSION_MAJOR as usize;
-    /// Minor version of the PETSc library being used
+
+    /// Minor version of the PETSc library being used.
+    ///
+    /// Same as [`petsc_sys::PETSC_VERSION_MINOR`].
+    ///
+    /// This value is only "correct" if PETSc is using a release version. If, however,
+    /// the version of PETSc was `v3.16-dev.0`, this value would still be `15` not `16`.
+    /// This is because when the version is calculated the minor version is increase by
+    /// one if the version is pre-release.
     pub const VERSION_MINOR: usize = petsc_raw::PETSC_VERSION_MINOR as usize;
-    /// Subminor/patch version of the PETSc library being used
+
+    /// Subminor/patch version of the PETSc library being used.
+    ///
+    /// Same as [`petsc_sys::PETSC_VERSION_SUBMINOR`].
+    ///
+    /// This value is only "correct" if PETSc is using a release version. If the version
+    /// of PETSc is pre-release then this value should be `0`, but wont nessaserally be `0`.
     pub const VERSION_SUBMINOR: usize = petsc_raw::PETSC_VERSION_SUBMINOR as usize;
-    /// If the PETSc library is release (`true`) or pre-release (`false`)
+
+    /// If the PETSc library is release (`true`) or pre-release (`false`).
+    ///
+    /// Same as [`petsc_sys::PETSC_VERSION_RELEASE`] but casted to a `bool`.
     pub const VERSION_RELEASE: bool = petsc_raw::PETSC_VERSION_RELEASE != 0;
 
     /// Creates a [`PetscBuilder`] which allows you to specify arguments when calling [`PetscInitialize`](petsc_raw::PetscInitialize).
@@ -939,7 +958,7 @@ impl Petsc {
     ///
     /// Note, it will use the default comm world from [`Petsc::world()`].
     ///
-    /// The type can then be set with [`Vector::set_type`](#), or [`Vector::set_from_options`].
+    /// The type can then be set with [`Vector::set_type`], or [`Vector::set_from_options`].
     ///
     /// Note, this is the same as using [`Vector::create(petsc.world())`](Vector::create).
     ///

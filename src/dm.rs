@@ -18,6 +18,7 @@ use std::marker::PhantomData;
 use std::mem::{MaybeUninit, ManuallyDrop};
 use std::ffi::{CString, CStr};
 use std::ops::{Deref, DerefMut};
+use std::path::Path;
 use std::pin::Pin;
 use std::ptr::NonNull;
 use std::rc::Rc;
@@ -75,7 +76,7 @@ pub struct DM<'a, 'tl> {
     aux_vec: Option<Vector<'a>>,
 }
 
-/// Object which encapsulates a subset of the mesh from of a [`DM`]
+/// Object which encapsulates a subset of the mesh from a [`DM`]
 pub struct DMLabel<'a> {
     pub(crate) world: &'a UserCommunicator,
     pub(crate) dml_p: *mut petsc_raw::_p_DMLabel,
@@ -189,7 +190,7 @@ impl<'a, 'tl> Into<Field<'a, 'tl>> for DMField<'a> {
 }
 
 /// PETSc object that manages a discrete system, which is a set of
-/// discretizations + continuum equations from a PetscWeakForm.
+/// discretizations + continuum equations from a [`WeakForm`].
 pub struct DS<'a, 'tl> {
     pub(crate) world: &'a UserCommunicator,
     pub(crate) ds_p: *mut petsc_raw::_p_PetscDS,
@@ -279,22 +280,9 @@ struct DMProjectFunctionTrampolineData<'tl> {
 }
 
 // TODO: should i use trait aliases. It doesn't really matter, but the Fn types are long
-// pub trait BCEssentialFuncWrapper<'tl>: FnMut(PetscInt, PetscReal, &[PetscReal],
-//     PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl {}
-// #[feature(trait_alias)]
-// pub trait BCEssentialFunc<'tl> = FnMut(PetscInt, PetscReal, &[PetscReal],
-//     PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl;
 type BCFuncDyn<'tl> = dyn Fn(PetscInt, PetscReal, &[PetscReal],
     PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl;
-// #[feature(trait_alias)]
-// pub trait BCFieldFunc<'tl> = FnMut(PetscInt, PetscInt, PetscInt,
-//     &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
-//     &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
-//     PetscReal, &[PetscInt], PetscInt, &[PetscScalar], &mut [PetscScalar]) -> Result<()> + 'tl;
-// pub trait BCFieldFunc<'tl>: FnMut(PetscInt, PetscInt, PetscInt,
-//     &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
-//     &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
-//     PetscReal, &[PetscInt], PetscInt, &[PetscScalar], &mut [PetscScalar]) -> Result<()> + 'tl {}
+// Because the C method that uses this method doesn't have a context, we cant use this
 type BCFieldDyn<'tl> = dyn Fn(PetscInt, PetscInt, PetscInt,
     &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
     &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
@@ -342,7 +330,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             ds: None, coord_dm: None, coarse_dm: None, aux_vec: None, }
     }
 
-    /// Creates an empty DM object. The type can then be set with [`DM::set_type()`].
+    /// Creates an empty [`DM`] object. The type can then be set with [`DM::set_type()`].
     pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut dm_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMCreate(world.as_raw(), dm_p.as_mut_ptr()) };
@@ -358,7 +346,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         chkerrq!(self.world, ierr)
     }
 
-    /// Builds a DM, for a particular DM implementation.
+    /// Builds a [`DM`], for a particular DM implementation.
     pub fn set_type(&mut self, dm_type: DMType) -> Result<()> {
         // This could be use the macro probably 
         let option_cstr = petsc_raw::DMTYPE_TABLE[dm_type as usize];
@@ -521,6 +509,10 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// * `periodicity` - The boundary type for the X,Y,Z direction, or `None` for [`DM_BOUNDARY_NONE`](petsc_raw::DMBoundaryType::DM_BOUNDARY_NONE)
     /// for all directions. Note, if `dim` is less than 3 than the unneeded values are ignored.
     /// * `interpolate` - Flag to create intermediate mesh pieces (edges, faces)
+    ///
+    /// # Example
+    ///
+    /// Look at example for [`DM::project_function_local()`].
     pub fn plex_create_box_mesh(world: &'a UserCommunicator, dim: PetscInt, simplex: bool,
         faces: impl Into<Option<(PetscInt, PetscInt, PetscInt)>>,
         lower: impl Into<Option<(PetscReal, PetscReal, PetscReal)>>,
@@ -543,9 +535,9 @@ impl<'a, 'tl> DM<'a, 'tl> {
         Ok(DM::new(world, unsafe { dm_p.assume_init() }))
     }
 
-    /// This takes a filename and produces a DM
-    pub fn plex_create_from_file(world: &'a UserCommunicator, file_name: &str, interpolate: bool) -> Result<Self> {
-        let filename_cs = CString::new(file_name).expect("`CString::new` failed");
+    /// Creates a [`DM`] from a mesh file.
+    pub fn plex_create_from_file(world: &'a UserCommunicator, file_name: impl AsRef<Path>, interpolate: bool) -> Result<Self> {
+        let filename_cs = CString::new(file_name.as_ref().to_str().expect("`Path::to_str` failed")).expect("`CString::new` failed");
         let mut dm_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::DMPlexCreateFromFile(world.as_raw(), filename_cs.as_ptr(),
             interpolate.into(), dm_p.as_mut_ptr()) };
@@ -563,7 +555,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         Ok(Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } })
     }
 
-    // TODO: what do these do? and is the world usage correct? Like do we use the
+    // TODO: Is the world usage correct? Like do we use the
     // world of the DM or just a single processes from it? or does it not matter?
     /// Creates a local vector from a DM object
     pub fn create_local_vector(&self) -> Result<Vector<'a>> {
@@ -579,7 +571,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// This vector has spaces for the ghost values. 
     ///
     /// The vector values are NOT initialized and may have garbage in them, so you may need to zero them.
-    /// This is intended to be used for vectors you need for a short time, like within a single function
+    /// This is intended to be used if you need a vector for a short time, like within a single function
     /// call. For vectors that you intend to keep around (for example in a C struct) or pass around large
     /// parts of your code you should use [`DM::create_local_vector()`]. 
     pub fn get_local_vector(&self) -> Result<vector::BorrowVectorMut<'a, '_>> {
@@ -588,7 +580,19 @@ impl<'a, 'tl> DM<'a, 'tl> {
         // Therefor we don't need to worry about this being called multiple times and causing
         // problems. At least I think we don't (it feels like interior mutability so i wonder if
         // we should be using UnsafeCell for something).
+
+        // TODO: The way this is setup causes problems, once you get the local vector it is tied to the
+        // lifetime of the ref self, which means that you can't mutate the vector with the same DM you
+        // used to create it even if the DM is only used immutably (i.e. `DM::da_vec_view_mut` wont work).
+        // But I don't see why it shouldn't work. We could maybe pass the self reference as an output which
+        // allow us to use it with the vector because they would be tied with the original self reference
+        // not each other.
         let mut vec_p = MaybeUninit::uninit();
+        // TODO: under the hood this does mutate the C struct but we dont take mut ref, is that a problem?
+        // I dont think it is as the borrow rules are followed, i.e., we could theoretically used a `RefCell`
+        // around `localin` and `localout` (the two arrays mutated), and we would be fine. Although, there
+        // is interior mutability with out an `UnsafeCell` and idk if that will cause problems even if it is
+        // safe.
         let ierr = unsafe { petsc_raw::DMGetLocalVector(self.dm_p, vec_p.as_mut_ptr()) };
         chkerrq!(self.world, ierr)?;
 
@@ -765,11 +769,11 @@ impl<'a, 'tl> DM<'a, 'tl> {
     ///     assert_eq!(g_view.slice(s![.., ..]).dim(), rhs_array.dim());
     ///     assert_eq!(g_view.slice(s![.., ..]), rhs_array);
     /// } else if petsc.world().size() == 2 {
-    ///     let rhs_array = array![[0.0, 3.0], 
-    ///                            [1.0, 4.0], 
-    ///                            [2.0, 5.0],
-    ///                            [6.0, 8.0],
-    ///                            [7.0, 9.0]];
+    ///     let rhs_array = array![[0.0, 3.0],  // |
+    ///                            [1.0, 4.0],  // | Process 1
+    ///                            [2.0, 5.0],  // |
+    ///                            [6.0, 8.0],  // }
+    ///                            [7.0, 9.0]]; // } Process 2
     ///     assert_eq!(g_view.slice(s![.., ..]).dim(),
     ///         rhs_array.slice(s![xs..(xs+xm), ys..(ys+ym)]).dim());
     ///     assert_eq!(g_view.slice(s![.., ..]), rhs_array.slice(s![xs..(xs+xm), ys..(ys+ym)]));
@@ -994,7 +998,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         Ok(crate::vector::VectorViewMut { vec, array: unsafe { array.assume_init() }, ndarray })
     }
 
-    /// Sets the names of individual field components in multicomponent vectors associated with a DMDA.
+    /// Sets the names of individual field components in multi-component vectors associated with a DMDA.
     ///
     /// Note, you must call [`DM::set_up()`] before you call this.
     ///
@@ -1092,9 +1096,11 @@ impl<'a, 'tl> DM<'a, 'tl> {
         }
     }
 
-    /// Scatters from a global packed vector into its individual local vectors 
+    /// Scatters from a global packed vector into its individual local vectors.
     pub fn composite_scatter<'v, I>(&self, gvec: &'v Vector<'a>, lvecs: I) -> Result<()>
     where
+    // TODO: should this be an IntoIter or just a slice? I dont see a case where you wouldn't
+    // just have a vec or a slice to the local vectors.
         I: IntoIterator<Item = &'v mut Vector<'a>>,
     {
         if let Some(c) = self.composite_dms.as_ref() {
@@ -1116,6 +1122,9 @@ impl<'a, 'tl> DM<'a, 'tl> {
         // TODO: make a non mut version: look at (https://petsc.org/release/docs/manualpages/Vec/VecLockGet.html#VecLockGet)
         // also look at: https://petsc.org/release/src/dm/impls/composite/pack.c.html#DMCompositeGetAccessArray
         // There is a readonly var that we need to set (if we even can)
+        // Or we can just not use DMCompositeGetAccessArray and write our own, because it is just
+        // a wrapper around other functions.
+        // This internal readonly thing could also cause problems if we return a readonly vec as a mut ref.
         if let Some(c) = self.composite_dms.as_ref() {
             let wanted = (0..c.len() as PetscInt).collect::<Vec<_>>();
             let mut vec_ps = vec![std::ptr::null_mut(); c.len()]; // TODO: can we use MaybeUninit
@@ -1230,7 +1239,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         // TODO: should we make label be an `Rc<DMLabel>`
         // TODO: what type does the dm need to be, if any?
         let field = field.into();
-        let is_correct_type = true; // self.type_compare(petsc_raw::DMTYPE_TABLE[DMType::DMCOMPOSITE as usize])?;
+        let is_correct_type = true; // self.type_compare(petsc_raw::DMTYPE_TABLE[DMType::DMPLEX as usize])?;
         if is_correct_type {
             let label: Option<DMLabel> = label.into();
             let ierr = unsafe { petsc_raw::DMAddField(self.dm_p, label.as_ref().map_or(std::ptr::null_mut(),
@@ -1318,9 +1327,6 @@ impl<'a, 'tl> DM<'a, 'tl> {
         Ok(label)
     }
 
-    // TODO: im not sure how well I covered all the cases. The c code can be found in the file
-    // `src/dm/impls/plex/plexproject.c` specifically the function `DMProjectPoint_Private`
-
     /// Add an essential boundary condition to the model. (WIP Wrapper function)
     ///
     /// In the C API you would call `DMAddBoundary` with the type being `DM_BC_ESSENTIAL`.
@@ -1344,6 +1350,10 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// * `x` - coordinates of the current point
     /// * `nc` - the number of field components
     /// * `bcval` *(output)* - output values at the current point
+    ///
+    /// # Example
+    ///
+    /// Look at [`snes-ex12`](https://github.com/ZackJorquera/petsc-rs/blob/main/examples/snes/src/ex12.rs)
     #[cfg(any(petsc_version_3_16_dev, doc))]
     pub fn add_boundary_essential<F1>(&mut self, name: &str, label: &DMLabel, values: &[PetscInt],
         field: PetscInt, comps: &[PetscInt], bc_user_func: F1) -> Result<PetscInt>
@@ -1360,6 +1370,11 @@ impl<'a, 'tl> DM<'a, 'tl> {
             fn1, fn2, ctx, bd.as_mut_ptr()) }
         };
 
+        // I would like to have this function and `add_boundary_essential_with_dt` be the same method with
+        // the second user func being an option. However, the reason why we dont do this is because rust
+        // will complain and say it doesn't know what type `F2` should be when you set it to `None`. This is
+        // why we use explicit types here bellow instead of just `Option::None`. While this isn't a problem
+        // here, i dont want to make the caller have to know they need to do this as it feels unnecessary.
         self.add_boundary_func_shared(name, field, comps, bc_user_func,
             Option::<fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()>>::None,
             raw_fn_wrapper)?;
@@ -1595,6 +1610,10 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// * `field` - The field to constrain
     /// * `comps` - An array of constrained component numbers
     /// * `bc_user_func` - A pointwise function giving boundary values
+    ///
+    /// # Example
+    ///
+    /// Look at [`snes-ex12`](https://github.com/ZackJorquera/petsc-rs/blob/main/examples/snes/src/ex12.rs)
     #[cfg(any(petsc_version_3_16_dev, doc))]
     pub fn add_boundary_natural<F1>(&mut self, name: &str, label: &DMLabel, values: &[PetscInt],
         field: PetscInt, comps: &[PetscInt], bc_user_func: F1) -> Result<PetscInt>
@@ -1725,7 +1744,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         self.add_boundary_func_shared(name, field, comps, bc_user_func, Some(bc_user_func_t), raw_fn_wrapper)
     }
 
-    // TODO: should these be unsafe functions
+    // TODO: should these be unsafe functions, or is having the callback be unsafe enough
     /// Add a essential or natural field boundary condition to the model. (WIP Wrapper function)
     ///
     /// In the C API you would call `DMAddBoundary` with the `bctype` being `DM_BC_*_FIELD`.
@@ -2144,8 +2163,6 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// // now this example only works when `PetscScalar` is `PetscReal`. It will fail
     /// // to compile if `PetscScalar` is `PetscComplex`. Also, this example will only
     /// // work when using PETSc `v3.16-dev.0`, it will also fail to compile otherwise.
-    /// assert!(!Petsc::VERSION_RELEASE && Petsc::VERSION_MAJOR == 3, Petsc::VERSION_MINOR == 16);
-    ///
     /// let mut dm = DM::plex_create_box_mesh(petsc.world(), 2, true, (2,2,0), None, (6.0,6.0,0.0), None, true)?;
     /// dm.set_name("Mesh")?;
     /// dm.set_from_options()?;
@@ -2179,12 +2196,9 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// # dm.view_with(None)?;
     ///
     /// dm.create_ds()?;
-    /// let _ = dm.get_coordinate_dm()?;
+    /// let _ = dm.get_coordinate_dm_or_create()?;
     /// # dm.view_with(None)?;
-    /// # dm.get_coordinate_dm()?.view_with(None)?;
-    ///
-    /// let label = dm.get_label("marker")?.unwrap();
-    /// dm.add_boundary_natural("wall", &label, slice::from_ref(&1), 0, &[], |_, _, _, _, _| Ok(()))?;
+    /// # dm.get_coordinate_dm_or_create()?.view_with(None)?;
     ///
     /// let mut local = dm.create_local_vector()?;
     ///
@@ -2211,6 +2225,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// # Ok(())
     /// # }
     /// ```
+    // TODO: should this take mut self?
     pub fn project_function_local<'sl>(&mut self, time: PetscReal, mode: InsertMode, local: &mut Vector,
         user_funcs: impl IntoIterator<Item = Box<dyn FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'sl>>)
         -> Result<()>
@@ -2274,7 +2289,8 @@ impl<'a, 'tl> DM<'a, 'tl> {
         user_funcs: impl IntoIterator<Item = Box<dyn FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'sl>>)
         -> Result<()>
     {
-        // This should be safe
+        // This should be safe because `get_local_vector`/`local` and `project_function_local` use
+        // different parts of the DM so we still mantain exclusive access to those separate parts.
         let dm2 = ManuallyDrop::new(DM::new(self.world, self.as_raw()));
         let mut local = dm2.get_local_vector()?;
         self.project_function_local(time, mode, &mut local, user_funcs)?;
@@ -2472,8 +2488,8 @@ impl<'a, 'tl> DM<'a, 'tl> {
         Ok(unsafe { integral.assume_init() })
     }
 
-    /// Gets the DM that prescribes coordinate layout and scatters between global and local coordinates 
-    pub fn get_coordinate_dm<'sl>(&'sl mut self) -> Result<Rc<DM<'a, 'tl>>> {
+    /// Gets the DM that prescribes coordinate layout and scatters between global and local coordinates.
+    pub fn get_coordinate_dm_or_create<'sl>(&'sl mut self) -> Result<Rc<DM<'a, 'tl>>> {
         if self.coord_dm.is_some() {
             Ok(self.coord_dm.as_ref().unwrap().clone())
         } else {
@@ -2489,21 +2505,14 @@ impl<'a, 'tl> DM<'a, 'tl> {
         }
     }
 
-    // /// Gets the DM that prescribes coordinate layout and scatters between global and local coordinates 
-    // pub fn get_coordinate_dm_mut<'sl>(&'sl mut self) -> Result<&'sl mut DM<'a, 'tl>> {
-    //     if self.coord_dm.is_some() {
-    //         Ok(self.coord_dm.as_mut().unwrap().as_mut())
-    //     } else {
-    //         let mut dm2_p = MaybeUninit::uninit();
-    //         let ierr = unsafe { petsc_raw::DMGetCoordinateDM(self.dm_p, dm2_p.as_mut_ptr()) };
-    //         chkerrq!(self.world, ierr)?;
-    //
-    //         self.coord_dm = Some(Box::new(DM::new(self.world, unsafe { dm2_p.assume_init() })));
-    //         unsafe { self.coord_dm.as_mut().unwrap().reference()?; }
-    //
-    //         Ok(self.coord_dm.as_mut().unwrap().as_mut())
-    //     }
-    // }
+    /// Gets the DM that prescribes coordinate layout and scatters between global and local coordinates.
+    ///
+    /// If the coordinate hasn't been set, then you must call
+    /// [`DM::get_coordinate_dm_or_create()`] or [`DM::set_coordinate_dm()`]
+    /// for this to return a `Some`.
+    pub fn try_get_coordinate_dm<'sl>(&'sl self) -> Option<Rc<DM<'a, 'tl>>> {
+        self.coord_dm.clone()
+    }
 
     /// Sets the DM that prescribes coordinate layout and scatters between global and local coordinates 
     pub fn set_coordinate_dm(&mut self, coord_dm: Rc<DM<'a, 'tl>>) -> Result<()> {
@@ -2547,6 +2556,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         Ok(())
     }
 
+    /// Internal function
     fn get_field_from_c_struct(&self, f: PetscInt) -> Result<(Option<DMLabel<'a>>, FieldPriv<'a, 'tl>)>
     { 
         let mut dml_p = MaybeUninit::uninit();
@@ -2565,27 +2575,13 @@ impl<'a, 'tl> DM<'a, 'tl> {
         Ok((label, FieldPriv::Unknown(field)))
     }
 
-    /// Get the coarse mesh from which this was obtained by refinement 
-    pub fn get_coarse_dm(&mut self) -> Result<Option<&DM<'a, 'tl>>> {
-        if self.coarse_dm.is_some() {
-            Ok(Some(self.coarse_dm.as_ref().unwrap().as_ref()))
-        } else {
-            let mut dm2_p = MaybeUninit::uninit();
-            let ierr = unsafe { petsc_raw::DMGetCoarseDM(self.dm_p, dm2_p.as_mut_ptr()) };
-            chkerrq!(self.world, ierr)?;
-
-            let dm_nn_p = NonNull::new(unsafe { dm2_p.assume_init() } );
-            self.coarse_dm = dm_nn_p.map(|dm_nn_p| Box::new(DM::new(self.world, dm_nn_p.as_ptr())));
-            if let Some(cdm) = self.coarse_dm.as_mut() {
-                unsafe { cdm.as_mut().reference()?; }
-            }
-
-            Ok(self.coarse_dm.as_ref().map(|box_dm| box_dm.as_ref()))
-        }
-    }
-
-    /// Get the coarse mesh from which this was obtained by refinement 
+    /// Get the coarse mesh from which this was obtained by refinement.
     pub fn get_coarse_dm_mut(&mut self) -> Result<Option<&mut DM<'a, 'tl>>> {
+        // There is no non-mut version of this fruntion because if the coarse dm exists only in
+        // the C struct, then we have to retrieve it which requiers a mutable refrence to self.
+        // So having a non-mut version that still requiers a mut ref to self would be pointless.
+        // Having a try_get version would be confusing because this function doesn't create the 
+        // coarse dm if it doesn't exist, it just retrieves it from the C API if it's there.
         if self.coarse_dm.is_some() {
             Ok(Some(self.coarse_dm.as_mut().unwrap().as_mut()))
         } else {
@@ -2602,6 +2598,8 @@ impl<'a, 'tl> DM<'a, 'tl> {
             Ok(self.coarse_dm.as_mut().map(|box_dm| box_dm.as_mut()))
         }
     }
+
+    // TODO: a lot of work still needs to be done on the dm cloning
 
     /// Clones and return a [`BorrowDM`] that depends on the lifetime of self.
     ///
@@ -2674,7 +2672,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     ///
     /// This method is the exact same as [`DM::clone()`] but will return a [`Result`].
     ///
-    /// Note, you can NOT clone a `DMPLEX`. This will panic.
+    /// Note, you can NOT clone a `DMPLEX`.
     /// Instead use [`DM::clone_shallow()`] or [`DM::clone_unchecked()`].
     pub fn clone_result(&self) -> Result<DM<'a, 'tl>> {
         // TODO: the docs say this is a shallow clone. How should we deal with this for rust
@@ -2687,13 +2685,12 @@ impl<'a, 'tl> DM<'a, 'tl> {
         if self.type_compare(DMType::DMPLEX)? {
             Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                 "You can not clone a DMPLEX with `DM::clone()`, use `DM::clone_shallow()` or `DM::clone_unchecked()` instead.")?;
-            // TODO: should we mpi_abort or something
         }
 
         unsafe { self.clone_unchecked() }
     }
 
-    /// Iterates over self and recursive calls to [`DM::get_coarse_dm_mut()`] until we get a `None`
+    /// Iterates over self and recursive calls to [`DM::get_coarse_dm_mut`] until we get a `None`
     /// from [`DM::get_coarse_dm_mut()`], running `f` on the dm each time.
     ///
     /// After running `f`, it copies the discrete system from `self` to the coarse dm using [`DM::copy_disc_from()`].
@@ -2753,6 +2750,16 @@ impl<'a, 'tl> DM<'a, 'tl> {
 
         let nn_is_p = NonNull::new(unsafe { is_p.assume_init() } );
         Ok(nn_is_p.map(|nn_is_p| IS { world: self.world, is_p: nn_is_p.as_ptr() }))
+    }
+
+    /// Sets the prefix used for searching for all options of [`DM`] in the database.
+    ///
+    /// Same as [PetscObject::set_options_prefix()], but also sets prefix for some internal types.
+    pub fn dm_set_options_prefix(&mut self, prefix: &str) -> crate::Result<()> {
+        let name_cs = ::std::ffi::CString::new(prefix).expect("`CString::new` failed");
+        
+        let ierr = unsafe { crate::petsc_raw::DMSetOptionsPrefix(self.as_raw(), name_cs.as_ptr()) };
+        chkerrq!(self.world(), ierr)
     }
 }
 

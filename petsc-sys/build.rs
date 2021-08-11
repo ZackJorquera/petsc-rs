@@ -380,28 +380,28 @@ fn main() {
     // do asserts
     match real_features[0]
     {
-        "CARGO_FEATURE_PETSC_REAL_F64" => assert!(petsc_lib.consts_contains("PETSC_USE_REAL_DOUBLE"),
+        "CARGO_FEATURE_PETSC_REAL_F64" => assert!(petsc_lib.defines_contains("PETSC_USE_REAL_DOUBLE"),
             "PETSc is not compiled to use `f64` for real, but the feature \"petsc-real-f64\" is set."),
-        "CARGO_FEATURE_PETSC_REAL_F32" => assert!(petsc_lib.consts_contains("PETSC_USE_REAL_SINGLE"),
+        "CARGO_FEATURE_PETSC_REAL_F32" => assert!(petsc_lib.defines_contains("PETSC_USE_REAL_SINGLE"),
             "PETSc is not compiled to use `f32` for real, but the feature \"petsc-real-f32\" is set."),
         _ => panic!("Invalid feature type for petsc real")
     }
 
     if use_complex_feature {
-        assert!(petsc_lib.consts_contains("PETSC_USE_COMPLEX"),
+        assert!(petsc_lib.defines_contains("PETSC_USE_COMPLEX"),
                 "PETSc is not compiled to use complex for scalar, but the feature \"petsc-use-complex\" is set.");
 
         panic!("Using complex numbers as PetscScalar is currently not available. Please disable \"petsc-use-complex\".");
     } else {
-        assert!(!petsc_lib.consts_contains(&"PETSC_USE_COMPLEX"),
+        assert!(!petsc_lib.defines_contains("PETSC_USE_COMPLEX"),
                 "PETSc is compiled to use complex for scalar, but the feature \"petsc-use-complex\" is no set.");
     }
     
     match int_features[0]
     {
-        "CARGO_FEATURE_PETSC_INT_I64" => assert!(petsc_lib.consts_contains("PETSC_USE_64BIT_INDICES"),
+        "CARGO_FEATURE_PETSC_INT_I64" => assert!(petsc_lib.defines_contains("PETSC_USE_64BIT_INDICES"),
             "PETSc is not compiled to use `i64` for ints, but the feature \"petsc-int-i64\" is set."),
-        "CARGO_FEATURE_PETSC_INT_I32" => assert!(!petsc_lib.consts_contains("PETSC_USE_64BIT_INDICES"),
+        "CARGO_FEATURE_PETSC_INT_I32" => assert!(!petsc_lib.defines_contains("PETSC_USE_64BIT_INDICES"),
             "PETSc is not compiled to use `i32` for ints, but the feature \"petsc-int-i32\" is set."),
         _ => panic!("Invalid feature type for petsc int")
     }

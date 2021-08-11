@@ -1,4 +1,4 @@
-//! PETSc matrices (Mat objects) are used to store Jacobians and other
+//! PETSc matrices ([`Mat`] object) are used to store Jacobians and other
 //! sparse matrices in PDE-based (or other) simulations.
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/Mat/index.html>
@@ -28,6 +28,8 @@ pub use mat_shell::MatShell;
 
 /// Abstract PETSc matrix object used to manage all linear operators in PETSc, even those
 /// without an explicit sparse representation (such as matrix-free operators).
+///
+/// If you want to define your own matrix representation and operations use [`MatShell`] instead.
 pub struct Mat<'a, 'tl> {
     pub(crate) world: &'a UserCommunicator,
     pub(crate) mat_p: *mut petsc_raw::_p_Mat, // I could use Mat which is the same thing, but i think using a pointer is more clear
@@ -118,7 +120,9 @@ impl<'a, 'tl> Mat<'a, 'tl> {
         Ok(Mat::new(world, unsafe { mat_p.assume_init() }))
     }
 
-    /// Creates a new matrix class for use with a user-defined data storage format. 
+    /// Creates a new matrix class ([`MatShell`]) for use with a user-defined data storage format.
+    ///
+    /// Same as [`MatShell::create()`].
     pub fn create_shell<T>(world: &'a UserCommunicator, local_rows: impl Into<Option<PetscInt>>,
         local_cols: impl Into<Option<PetscInt>>, global_rows: impl Into<Option<PetscInt>>,
         global_cols: impl Into<Option<PetscInt>>, data: Box<T>) -> Result<MatShell<'a, 'tl, T>>
@@ -619,7 +623,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
         Ok(out_vec)
     }
 
-    ///  Assembles the matrix by calling [`Mat::assembly_begin()`] then [`Mat::assembly_end()`]
+    /// Assembles the matrix by calling [`Mat::assembly_begin()`] then [`Mat::assembly_end()`]
     pub fn assemble(&mut self, assembly_type: MatAssemblyType) -> Result<()>
     {
         self.assembly_begin(assembly_type)?;
@@ -627,7 +631,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
         self.assembly_end(assembly_type)
     }
 
-    /// Performs Matrix-Matrix Multiplication `C=self*other`.
+    /// Performs Matrix-Matrix Multiplication, returns `self*other`.
     ///
     /// Expected fill as ratio of `nnz(C)/(nnz(self) + nnz(other))`, use `None` if you do not have
     /// a good estimate. If the result is a dense matrix this is irrelevant.
@@ -733,6 +737,34 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// Determines whether a PETSc [`Mat`] is of a particular type.
     pub fn type_compare(&self, type_kind: MatType) -> Result<bool> {
         self.type_compare_str(&type_kind.to_string())
+    }
+
+    /// Get vectors compatible with the matrix, i.e., with the same parallel layout.
+    ///
+    /// Returns a tuple of `(right_vec, left_vec)`.
+    ///
+    /// If you want just one of the vector you should use [`Mat::create_left_vector()`]
+    /// or [`Mat::create_right_vector()`]
+    pub fn create_vectors(&self) -> Result<(Vector<'a>, Vector<'a>)> {
+        Ok((self.create_right_vector()?, self.create_left_vector()?))
+    }
+
+    /// Get left vector compatible with the matrix, i.e., with the same parallel layout.
+    pub fn create_left_vector(&self) -> Result<Vector<'a>> {
+        let mut vec_p = MaybeUninit::uninit();
+        let ierr = unsafe { petsc_raw::MatCreateVecs(self.as_raw(), std::ptr::null_mut(), vec_p.as_mut_ptr()) };
+        chkerrq!(self.world, ierr)?;
+
+        Ok(Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } })
+    }
+
+    /// Get a right vector compatible with the matrix, i.e., with the same parallel layout.
+    pub fn create_right_vector(&self) -> Result<Vector<'a>> {
+        let mut vec_p = MaybeUninit::uninit();
+        let ierr = unsafe { petsc_raw::MatCreateVecs(self.as_raw(), vec_p.as_mut_ptr(), std::ptr::null_mut()) };
+        chkerrq!(self.world, ierr)?;
+
+        Ok(Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } })
     }
 }
 
@@ -1589,7 +1621,7 @@ pub mod mat_shell {
             Ok(())
         }
 
-        /// Sets the type of [`Vector`] returned by `MatCreateVecs()`.
+        /// Sets the type of [`Vector`] returned by [`Mat::create_vectors()`].
         pub fn shell_set_vector_type(&mut self, vtype: VectorType) -> Result<()> {
             let type_name_cs = ::std::ffi::CString::new(vtype.to_string()).expect("`CString::new` failed");
             let ierr = unsafe { petsc_raw::MatShellSetVecType(self.mat_p, type_name_cs.as_ptr()) };
@@ -1961,9 +1993,12 @@ impl<'a> Mat<'a, '_> {
     wrap_simple_petsc_member_funcs! {
         MatSetFromOptions, pub set_from_options, takes mut, #[doc = "Configures the Mat from the options database."];
         MatSetUp, pub set_up, takes mut, #[doc = "Sets up the internal matrix data structures for later use"];
-        MatAssemblyBegin, pub assembly_begin, input MatAssemblyType, assembly_type, takes mut, #[doc = "Begins assembling the matrix. This routine should be called after completing all calls to MatSetValues()."];
-        MatAssemblyEnd, pub assembly_end, input MatAssemblyType, assembly_type, takes mut, #[doc = "Completes assembling the matrix. This routine should be called after MatAssemblyBegin()."];
-        MatGetLocalSize, pub get_local_size, output PetscInt, res1, output PetscInt, res2, #[doc = "Returns the number of local rows and local columns of a matrix.\n\nThat is the local size of the left and right vectors as returned by `MatCreateVecs()`"];
+        MatAssemblyBegin, pub assembly_begin, input MatAssemblyType, assembly_type, takes mut, #[doc = "Begins assembling the matrix.\n\n\
+            This routine should be called after completing all calls to [`Mat::set_values()`]. You should probably use [`Mat::assemble()`] or [`Mat::assemble_with()`] instead."];
+        MatAssemblyEnd, pub assembly_end, input MatAssemblyType, assembly_type, takes mut, #[doc = "Completes assembling the matrix.\n\n\
+            This routine should be called after [`Mat::assembly_begin()`]. You should probably use [`Mat::assemble()`] or [`Mat::assemble_with()`] instead."];
+        MatGetLocalSize, pub get_local_size, output PetscInt, res1, output PetscInt, res2, #[doc = "Returns the number of local rows and local columns of a matrix.\n\n\
+            That is the local size of the left and right vectors as returned by [`Mat::create_vectors()`]"];
         MatGetSize, pub get_global_size, output PetscInt, res1, output PetscInt, res2, #[doc = "Returns the number of global rows and columns of a matrix."];
         MatMult, pub mult, input &Vector, x.as_raw, input &mut Vector, y.as_raw, #[doc = "Computes the matrix-vector product, y = Ax"];
         MatMultTranspose, pub mult_transpose, input &Vector, x.as_raw, input &mut Vector, y.as_raw, #[doc = "Computes matrix transpose times a vector y = A^T * x."];
@@ -2018,13 +2053,13 @@ impl<'a> Mat<'a, '_> {
         Petsc C Docs: <https://petsc.org/release/docs/manualpages/Mat/MatSeqSBAIJSetPreallocation.html#MatSeqSBAIJSetPreallocation>\n\n\
         # Parameters.\n\n\
         * `bs` - size of block, the blocks are ALWAYS square. One can use `MatSetBlockSizes()` to set a different row and column blocksize \
-        but the row blocksize always defines the size of the blocks. The column blocksize sets the blocksize of the vectors obtained with `MatCreateVecs()`\n\
+        but the row blocksize always defines the size of the blocks. The column blocksize sets the blocksize of the vectors obtained with [`Mat::create_vectors()`]`\n\
         * Read docs for [`Mat::seq_aij_set_preallocation()`](Mat::seq_aij_set_preallocation())"];
         MatMPISBAIJSetPreallocation, mpi_sb_aij_set_preallocation, block bs, nz d_nz, d_nnz, nz o_nz, o_nnz, #[doc = "For good matrix...\n\n\
         Petsc C Docs: <https://petsc.org/release/docs/manualpages/Mat/MatMPISBAIJSetPreallocation.html#MatMPISBAIJSetPreallocation>\n\n\
         # Parameters.\n\n\
         * `bs` - size of block, the blocks are ALWAYS square. One can use `MatSetBlockSizes()` to set a different row and column blocksize \
-        but the row blocksize always defines the size of the blocks. The column blocksize sets the blocksize of the vectors obtained with `MatCreateVecs()`\n\
+        but the row blocksize always defines the size of the blocks. The column blocksize sets the blocksize of the vectors obtained with [`Mat::create_vectors()`]`\n\
         * Read docs for [`Mat::mpi_aij_set_preallocation()`](Mat::mpi_aij_set_preallocation())"];
     }
 }

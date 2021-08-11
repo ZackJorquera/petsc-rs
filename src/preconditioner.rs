@@ -202,7 +202,7 @@ impl<'a, 'tl, 'bl> PC<'a, 'tl, 'bl> {
         F: FnMut(&PC<'a, 'tl, '_>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
     {
         // TODO: look at how rsmpi did the trampoline stuff:
-        // https://github.com/rsmpi/rsmpi/blob/master/src/collective.rs#L1684
+        // https://github.com/rsmpi/rsmpi/blob/82e1d357/src/collective.rs#L1684
         // They used libffi, that could be a safer way to do it.
 
         let closure_anchor = Box::new(user_f);

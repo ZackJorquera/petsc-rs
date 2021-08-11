@@ -56,7 +56,7 @@ fn main() -> petsc_rs::Result<()> {
     let Opt { problem_type, pass_dm } = petsc.options_get()?;
 
     let mut dau = DM::da_create_1d(petsc.world(), DMBoundaryType::DM_BOUNDARY_NONE, 10, 1, 1, None)?;
-    // DMSetOptionsPrefix(dau,"u_");
+    dau.dm_set_options_prefix("u_")?;
     dau.set_from_options()?;
     dau.set_up()?;
     dau.da_set_feild_name(0, "u")?;
@@ -66,7 +66,7 @@ fn main() -> petsc_rs::Result<()> {
     lxk[0] -= 1;
 
     let mut dak = DM::da_create_1d(petsc.world(), DMBoundaryType::DM_BOUNDARY_NONE, m-1, 1, 1, lxk.as_ref())?;
-    // DMSetOptionsPrefix(dak,"k_");
+    dau.dm_set_options_prefix("k_")?;
     dak.set_from_options()?;
     dak.set_up()?;
     dak.da_set_feild_name(0, "k")?;
