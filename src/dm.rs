@@ -1346,7 +1346,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     ///
     /// # Example
     ///
-    /// Look at [`snes-ex12`](https://github.com/ZackJorquera/petsc-rs/blob/main/examples/snes/src/ex12.rs)
+    /// Look at [`snes-ex12`](https://gitlab.com/petsc/petsc-rs/-/blob/main/examples/snes/src/ex12.rs)
     #[cfg(any(petsc_version_3_16_dev, doc))]
     pub fn add_boundary_essential<F1>(&mut self, name: &str, label: &DMLabel, values: &[PetscInt],
         field: PetscInt, comps: &[PetscInt], bc_user_func: F1) -> Result<PetscInt>
@@ -1606,7 +1606,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     ///
     /// # Example
     ///
-    /// Look at [`snes-ex12`](https://github.com/ZackJorquera/petsc-rs/blob/main/examples/snes/src/ex12.rs)
+    /// Look at [`snes-ex12`](https://gitlab.com/petsc/petsc-rs/-/blob/main/examples/snes/src/ex12.rs)
     #[cfg(any(petsc_version_3_16_dev, doc))]
     pub fn add_boundary_natural<F1>(&mut self, name: &str, label: &DMLabel, values: &[PetscInt],
         field: PetscInt, comps: &[PetscInt], bc_user_func: F1) -> Result<PetscInt>

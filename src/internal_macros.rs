@@ -1,7 +1,6 @@
-//! Macro for internal use.
+//! Macros for internal use.
 //!
 //! This could be for generating bindings or for things that shouldn't be exposed to crate users.
-//! [`wrap_simple_petsc_member_funcs!`].
 
 #![macro_use]
 
@@ -37,8 +36,10 @@
 /// ```ignore
 /// pub struct Vector<'a> {
 ///     pub(crate) world: &'a UserCommunicator,
-///     pub(crate) vec_p: petsc_raw::Vec,
+///     pub(crate) vec_p: *mut petsc_raw::_p_Vec,
 /// }
+///
+/// impl_petsc_object_traits! { Vector, vec_p, petsc_raw::_p_Vec, VecView; }
 /// ```
 /// Note, for the macro to work, the type must implement `crate::PetscAsRaw` and `crate::PetscObject`.
 /// This can be done with the [`impl_petsc_object_traits!`] macro. Once a wrapper type implements
@@ -125,7 +126,7 @@
 ///
 /// # Real Examples
 ///
-/// The the examples show in this doc-string exist in `petsc-rs`, except for the `VecSetABRetCD` one.
+/// The examples show in this doc-string exist in `petsc-rs`, except for the `VecSetABRetCD` one.
 ///
 /// Almost every file in `src/` uses this macro at the bottom of the file.
 macro_rules! wrap_simple_petsc_member_funcs {
@@ -190,6 +191,19 @@ $(
 
 /// Implements [`PetscAsRaw`](crate::PetscAsRaw), [`PetscAsRawMut`](crate::PetscAsRawMut), [`PetscObject`](crate::PetscObject),
 /// [`PetscObjectPrivate`](crate::PetscObjectPrivate), and [`viewer::PetscViewable`](crate::viewer::PetscViewable).
+///
+/// You can run this macro on multiple structs at a time:
+/// ```ignore
+/// impl_petsc_object_traits! {
+///     DM, dm_p, petsc_raw::_p_DM, DMView, '_;
+///     DMLabel, dml_p, petsc_raw::_p_DMLabel, DMLabelView;
+///     FEDisc, fe_p, petsc_raw::_p_PetscFE, PetscFEView, '_;
+///     FVDisc, fv_p, petsc_raw::_p_PetscFV, PetscFVView;
+///     DMField, field_p, petsc_raw::_p_DMField, DMFieldView;
+///     DS, ds_p, petsc_raw::_p_PetscDS, PetscDSView, '_;
+///     WeakForm, wf_p, petsc_raw::_p_PetscWeakForm, PetscWeakFormView;
+/// }
+/// ```
 macro_rules! impl_petsc_object_traits {
     {$(
         $struct_name:ident, $raw_ptr_var:ident, $raw_ptr_ty:ty, $raw_view_func:ident $(, $add_lt:lifetime)* ;

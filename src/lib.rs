@@ -12,7 +12,7 @@
 //! First, you will need to add `petsc-rs` to your `Cargo.toml`.
 //! ```toml
 //! [dependencies]
-//! petsc-rs = { git = "https://github.com/ZackJorquera/petsc-rs/", branch = "main" }
+//! petsc-rs = { git = "https://gitlab.com/petsc/petsc-rs/", branch = "main" }
 //! ```
 //! Next, to get access to all the important traits and types you can use `use petsc_rs::prelude::*`.
 //! Some of the important types that are included are:
@@ -62,7 +62,7 @@
 //! (experimental only) you can include something like the following in your Cargo.toml.
 //! ```toml
 //! [dependencies.petsc-rs]
-//! git = "https://github.com/ZackJorquera/petsc-rs/"
+//! git = "https://gitlab.com/petsc/petsc-rs/"
 //! branch = "main"  # for complex numbers use the "complex-scalar" branch
 //! default-features = false  # note, default turns on "petsc-real-f64" and "petsc-int-i32"
 //! features = ["petsc-real-f32", "petsc-int-i64"]
@@ -74,7 +74,7 @@
 //!
 //! - [C API Programming with PETSc/TAO](https://petsc.org/release/documentation/manual/programming/)
 //!
-//! - [`petsc-rs` github page](https://github.com/ZackJorquera/petsc-rs)
+//! - [`petsc-rs` GitLab page](https://gitlab.com/petsc/petsc-rs/)
 
 // useful doc page: https://petsc.org/release/docs/manualpages/singleindex.html
 

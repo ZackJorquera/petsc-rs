@@ -11,7 +11,7 @@ Note, `petsc-rs` is a work in progress, so expect that a lot of functionality wi
 To use `petsc-rs` from a Rust package, the following can be put in your `Cargo.toml`. Note, `petsc-rs` is supported for rust 1.54 and above.
 ```toml
 [dependencies]
-petsc-rs = { git = "https://github.com/ZackJorquera/petsc-rs/", branch = "main" }
+petsc-rs = { git = "https://gitlab.com/petsc/petsc-rs/", branch = "main" }
 ```
 
 In order for `petsc-rs` to work correctly, you need to [download PETSc](https://petsc.org/release/download/). Note, `petsc-rs` requires PETSc version `3.15` or the main branch (prerelease version `3.16-dev.0`). Using the main branch is unstable as new breaking changes could be added (`petsc-rs` has been tested using commit [`ee14c70`](https://gitlab.com/petsc/petsc/tree/ee14c7024d937659fa3550ba1b9a77d7ae2cc83e) of PETSc). Regardless, `petsc-rs` will automatically detect what version of PETSc you are using and build the correct wrappers. If the version of PETSc you are using is not supported, then `petsc-rs` will fail to build.
@@ -33,7 +33,7 @@ From here, you should be able to compile your projects using cargo. However, if 
 If you want to use a PETSc with non-standard precisions for floats or integers, or for complex numbers (experimental only) you can include something like the following in your Cargo.toml.
 ```toml
 [dependencies.petsc-rs]
-git = "https://github.com/ZackJorquera/petsc-rs/"
+git = "https://gitlab.com/petsc/petsc-rs/"
 branch = "main"  # for complex numbers use the "complex-scalar" branch
 default-features = false  # note, default turns on "petsc-real-f64" and "petsc-int-i32"
 features = ["petsc-real-f32", "petsc-int-i64"]
@@ -61,11 +61,11 @@ You must be using the `complex-scalar` branch to enable this feature.
 
 ### Using `petsc-sys`
 
-If you wish to use raw bindings from `petsc-sys` in the same crate that you are using `petsc-rs` you can import the `petsc-sys` crate with the following line in your `Cargo.toml`. An example of using both `petsc-rs` and `petsc-sys` can be found in [`examples/snes/src/ex12.rs`](https://github.com/ZackJorquera/petsc-rs/blob/main/examples/snes/src/ex12.rs).
+If you wish to use raw bindings from `petsc-sys` in the same crate that you are using `petsc-rs` you can import the `petsc-sys` crate with the following line in your `Cargo.toml`. An example of using both `petsc-rs` and `petsc-sys` can be found in [`examples/snes/src/ex12.rs`](https://gitlab.com/petsc/petsc-rs/-/blob/main/examples/snes/src/ex12.rs).
 
 ```toml
 [dependencies]
-petsc-sys = { git = "https://github.com/ZackJorquera/petsc-rs/", branch = "main", default-features = false }
+petsc-sys = { git = "https://gitlab.com/petsc/petsc-rs/", branch = "main", default-features = false }
 ```
 
 Note, `petsc-sys` has the same type related feature flags as `petsc-rs` and `petsc-rs` will pass it's flags to `petsc-sys`. To avoid conflicts you should use `default-features = false` when importing `petsc-sys` so that you don't accidentally enable any additional flags.
@@ -86,7 +86,7 @@ mpiexec -n 8 target/debug/petsc_program_name [petsc_options]
 
 ## Getting Started Example
 
-To help the user start using PETSc immediately, we begin with a simple uniprocessor example that solves the one-dimensional Laplacian problem with finite differences. This sequential code, which can be found in [`examples/ksp/src/ex1.rs`](https://github.com/ZackJorquera/petsc-rs/blob/main/examples/ksp/src/ex1.rs), illustrates the solution of a linear system with KSP, the interface to the preconditioners, Krylov subspace methods, and direct linear solvers of PETSc. Note, to compile and run this code, you should be in the [`examples/`](https://github.com/ZackJorquera/petsc-rs/blob/main/examples/) directory.
+To help the user start using PETSc immediately, we begin with a simple uniprocessor example that solves the one-dimensional Laplacian problem with finite differences. This sequential code, which can be found in [`examples/ksp/src/ex1.rs`](https://gitlab.com/petsc/petsc-rs/-/blob/main/examples/ksp/src/ex1.rs), illustrates the solution of a linear system with KSP, the interface to the preconditioners, Krylov subspace methods, and direct linear solvers of PETSc. Note, to compile and run this code, you should be in the [`examples/`](https://gitlab.com/petsc/petsc-rs/-/tree/main/examples/) directory.
 
 ```rust
 //! This file will show how to do the kps ex1 example in rust using the petsc-rs bindings.
@@ -227,7 +227,7 @@ fn main() -> petsc_rs::Result<()> {
 
 ## Examples
 
-More examples can be found in [`examples/`](https://github.com/ZackJorquera/petsc-rs/tree/main/examples)
+More examples can be found in [`examples/`](https://gitlab.com/petsc/petsc-rs/-/tree/main/examples/)
 
 ## Documentation
 
