@@ -16,7 +16,6 @@ use std::mem::{MaybeUninit, ManuallyDrop};
 use std::ffi::CStr;
 use std::rc::Rc;
 use crate::{
-    Petsc,
     petsc_raw,
     Result,
     PetscAsRaw,
@@ -389,7 +388,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     /// # let petsc = Petsc::init_no_args()?;
     /// let n = 10;
     ///
-    /// #[allow(non_snake_case)]
+    /// # #[allow(non_snake_case)]
     /// let mut J = petsc.mat_create()?;
     /// J.set_sizes(None, None, Some(n), Some(n))?;
     /// J.set_from_options()?;
@@ -694,6 +693,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
 
     // TODO: we can do better that having the user say if they edited the vec (how does Cow work? can we use that here?)
     // Also note that if we are running on multiple processes, the changed flag must be the same for all processes.
+    // Look into `ndarray::CowArray`, would that help?
     /// Sets a user function that is called after the line search has been applied to determine the step
     /// direction and length. Allows the user to change or override the decision of the line search routine.
     ///
@@ -861,7 +861,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     /// to calling [`SNES::solve()`]. In particular, to employ an initial guess of zero, the user should
     /// explicitly set this vector to zero by calling [`Vector::set_all()`].
     // TODO: should this take mut self
-    pub fn solve<'vl, 'val: 'vl>(&self, b: impl Into<Option<&'vl Vector<'val>>>, x: &mut Vector) -> Result<()>
+    pub fn solve<'vl, 'val: 'vl>(&mut self, b: impl Into<Option<&'vl Vector<'val>>>, x: &mut Vector) -> Result<()>
     {
         let ierr = unsafe { petsc_raw::SNESSolve(self.snes_p, b.into().map_or(std::ptr::null_mut(), |v| v.vec_p), x.vec_p) };
         chkerrq!(self.world, ierr)
@@ -869,7 +869,6 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
 
     /// Gets the [`SNES`] method type and name (as a [`String`]). 
     pub fn get_type_str(&self) -> Result<String> {
-        // TODO: return enum
         let mut s_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::SNESGetType(self.snes_p, s_p.as_mut_ptr()) };
         chkerrq!(self.world, ierr)?;
@@ -949,9 +948,8 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
         }
     }
 
-    // TODO: should this be here or in DM
     /// Use DMPlex's internal FEM routines to compute SNES boundary values, residual, and Jacobian.
-    pub fn dm_plex_local_fem(&mut self) -> Result<()> {
+    pub fn use_dm_plex_local_fem(&mut self) -> Result<()> {
         let dm = self.get_dm_or_create()?;
         let ierr = unsafe { petsc_raw::DMPlexSetSNESLocalFEM(dm.dm_p,
             std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut()) };
@@ -1020,9 +1018,9 @@ impl<'a> SNES<'a, '_, '_> {
         SNESSetErrorIfNotConverged, pub set_error_if_not_converged, input bool, flg, takes mut, #[doc = "Causes [`SNES::solve()`] to generate an error if the solver has not converged.\n\n\
             Or the database key `-snes_error_if_not_converged` can be used.\n\nNormally PETSc continues if a linear solver fails to converge, you can call [`SNES::get_converged_reason()`] after a [`SNES::solve()`] to determine if it has converged."];
         SNESSetJacobianDomainError, pub(crate) set_jacobian_domain_error, takes mut, #[doc = "Tells [`SNES`] that compute jacobian does not make sense any more.\n\n\
-            For example there is a negative element transformation. You probably want to use [`DomainErr`] instead of this function."];
+            For example there is a negative element transformation. You probably want to use [`DomainErr`](DomainOrPetscError::DomainErr) instead of this function."];
         SNESSetFunctionDomainError, pub(crate) set_function_domain_error, takes mut, #[doc = "Tells [`SNES`] that the input vector to your SNES Function is not in the functions domain.\n\n\
-            For example, negative pressure. You probably want to use [`DomainErr`] instead of this function."];
+            For example, negative pressure. You probably want to use [`DomainErr`](DomainOrPetscError::DomainErr) instead of this function."];
     }
 }
 

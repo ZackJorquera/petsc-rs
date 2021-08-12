@@ -23,7 +23,6 @@ use std::pin::Pin;
 use std::ptr::NonNull;
 use std::rc::Rc;
 use crate::{
-    Petsc,
     petsc_raw,
     Result,
     PetscAsRaw,
@@ -130,7 +129,7 @@ pub enum Field<'a, 'tl> {
 /// internal type used only for storage.
 enum FieldPriv<'a, 'tl> {
     Known(Field<'a, 'tl>),
-    /// The discretization object is unknown, this is only use internally.
+    /// The discretization object is unknown, this is only used internally.
     Unknown(crate::PetscObjectStruct<'a>),
 }
 
@@ -581,12 +580,6 @@ impl<'a, 'tl> DM<'a, 'tl> {
         // problems. At least I think we don't (it feels like interior mutability so i wonder if
         // we should be using UnsafeCell for something).
 
-        // TODO: The way this is setup causes problems, once you get the local vector it is tied to the
-        // lifetime of the ref self, which means that you can't mutate the vector with the same DM you
-        // used to create it even if the DM is only used immutably (i.e. `DM::da_vec_view_mut` wont work).
-        // But I don't see why it shouldn't work. We could maybe pass the self reference as an output which
-        // allow us to use it with the vector because they would be tied with the original self reference
-        // not each other.
         let mut vec_p = MaybeUninit::uninit();
         // TODO: under the hood this does mutate the C struct but we dont take mut ref, is that a problem?
         // I dont think it is as the borrow rules are followed, i.e., we could theoretically used a `RefCell`
@@ -620,7 +613,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
                 }
             })
         } else {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                 format!("There are no composite dms set, line: {}", line!())).map(|_| unreachable!())
         }
     }
@@ -640,7 +633,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
                 }
             })
         } else {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                 format!("There are no composite dms set, line: {}", line!())).map(|_| unreachable!())
         }
     }
@@ -864,13 +857,13 @@ impl<'a, 'tl> DM<'a, 'tl> {
         };
 
         if local_size != gxm*gym*gzm*dof {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_INCOMP, 
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_INCOMP, 
                 format!("Vector local size {} is not compatible with DMDA local sizes {} or {}\n",
                     local_size,xm*ym*zm*dof,gxm*gym*gzm*dof))?;
         }
 
         if dim > 3 || dim < 1 {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT, 
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT, 
                 format!("DMDA dimension not 1, 2, or 3, it is {}\n",dim))?;
         }
 
@@ -975,13 +968,13 @@ impl<'a, 'tl> DM<'a, 'tl> {
         };
 
         if local_size != gxm*gym*gzm*dof {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_INCOMP, 
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_INCOMP, 
                 format!("Vector local size {} is not compatible with DMDA local sizes {} or {}\n",
                     local_size,xm*ym*zm*dof,gxm*gym*gzm*dof))?;
         }
 
         if dim > 3 || dim < 1 {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT, 
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT, 
                 format!("DMDA dimension not 1, 2, or 3, it is {}\n",dim))?;
         }
 
@@ -1030,7 +1023,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         let dim = self.get_dimension()?;
 
         if dim > 3 || dim < 1 {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT, 
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT, 
                 format!("DMDA dimension not 1, 2, or 3, it is {}\n",dim))?;
         }
 
@@ -1063,7 +1056,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// Gets the dms in the composite dm created with [`DM::composite_create()`].
     pub fn composite_dms(&self) -> Result<&[Self]> {
         self.composite_dms.as_ref().map(|c| c.as_ref()).ok_or_else(|| 
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                 format!("There are no composite dms set, line: {}", line!())).unwrap_err())
     }
 
@@ -1071,7 +1064,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     //     if let Some(c) = self.composite_dms.as_mut() {
     //         Ok(c.iter_mut().collect())
     //     } else {
-    //         Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+    //         seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
     //             format!("There are no composite dms set, line: {}", line!())).map(|_| unreachable!())
     //     }
     // }
@@ -1091,7 +1084,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
 
             Ok(())
         } else {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                     format!("The DM is not a composite DM, line: {}", line!()))
         }
     }
@@ -1110,7 +1103,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             let ierr = unsafe { petsc_raw::DMCompositeScatterArray(self.dm_p, gvec.vec_p, lvecs_p.as_mut_ptr()) };
             chkerrq!(self.world, ierr)
         } else {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                 format!("There are no composite dms set, line: {}", line!()))
         }
     }
@@ -1147,7 +1140,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             }).collect())
 
         } else {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                 format!("There are no composite dms set, line: {}", line!())).map(|_| unreachable!())
         }
     }
@@ -1179,7 +1172,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
 
             Ok(ret_vec)
         } else {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                 format!("There are no composite dms set, line: {}", line!())).map(|_| unreachable!())
         }
     }
@@ -1216,7 +1209,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
 
             Ok(ret_vec)
         } else {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                 format!("There are no composite dms set, line: {}", line!())).map(|_| unreachable!())
         }
     }
@@ -1254,7 +1247,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
 
             Ok(())
         } else {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                     format!("The DM is not a composite DM, line: {}", line!()))
         }
     }
@@ -1270,7 +1263,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     pub(crate) unsafe fn set_inner_values(dm: &mut Self) -> petsc_raw::PetscErrorCode {
         if dm.type_compare(DMType::DMCOMPOSITE).unwrap() {
             let len = dm.composite_get_num_dms_petsc().unwrap();
-            let mut dms_p = vec![std::ptr::null_mut(); len as usize]; // TODO: use MaybeUninit if we can
+            let mut dms_p = vec![std::ptr::null_mut(); len as usize]; // use MaybeUninit if we can
             let ierr = petsc_raw::DMCompositeGetEntriesArray(dm.dm_p, dms_p.as_mut_ptr());
             if ierr != 0 { let _ = chkerrq!(dm.world, ierr); return ierr; }
 
@@ -1904,10 +1897,10 @@ impl<'a, 'tl> DM<'a, 'tl> {
             DMBoundaryConditionType::DM_BC_ESSENTIAL
                 | DMBoundaryConditionType::DM_BC_NATURAL
                 | DMBoundaryConditionType::DM_BC_ESSENTIAL_BD_FIELD
-                => return Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_USER_INPUT,
+                => return seterrq!(self.world, PetscErrorKind::PETSC_ERR_USER_INPUT,
                     format!("DM::add_boundary_field does not support non field boundary conditions. You gave {:?}.", bctype)),
             // This is for `DMBoundaryConditionType::DM_BC_NATURAL_RIEMANN`
-            _ => return Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_USER_INPUT,
+            _ => return seterrq!(self.world, PetscErrorKind::PETSC_ERR_USER_INPUT,
                     format!("Unknown boundary condition type given to DM::add_boundary_field. You gave {:?}.", bctype)),
         };
     
@@ -2225,8 +2218,9 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// # Ok(())
     /// # }
     /// ```
-    // TODO: should this take mut self?
-    pub fn project_function_local<'sl>(&mut self, time: PetscReal, mode: InsertMode, local: &mut Vector,
+    // TODO: should this take mut self? i dont think it needs to. The closure we give it is called
+    // during this function call so it can be `FnMut` while self doesn't need to be.
+    pub fn project_function_local<'sl>(&self, time: PetscReal, mode: InsertMode, local: &mut Vector,
         user_funcs: impl IntoIterator<Item = Box<dyn FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'sl>>)
         -> Result<()>
     {
@@ -2234,11 +2228,11 @@ impl<'a, 'tl> DM<'a, 'tl> {
         if let Some(fields) = self.fields.as_ref() {
             if fields.len() != nf {
                 // This should never happen if user uses the rust api to add fields
-                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_COR,
+                seterrq!(self.world, PetscErrorKind::PETSC_ERR_COR,
                     "Number of fields in C strutc and rust struct do not match.")?;
             }
         } else {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                 "No fields have been set.")?;
         }
 
@@ -2246,7 +2240,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             user_f: closure_anchor })).collect::<Vec<_>>();
 
         if trampoline_datas.len() != nf {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_USER_INPUT,
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_USER_INPUT,
                 format!("Expected {} functions in `user_funcs`, but there were {}.", nf, trampoline_datas.len()))?;
         }
 
@@ -2272,7 +2266,6 @@ impl<'a, 'tl> DM<'a, 'tl> {
             = vec![Some(dm_project_function_local_trampoline); nf];
         let mut trampoline_data_refs = trampoline_datas.iter().map(|td| unsafe { std::mem::transmute(td.as_ref()) }).collect::<Vec<_>>();
 
-        // TODO: will DMProjectFunctionLocal call the closure? 
         let ierr = unsafe { petsc_raw::DMProjectFunctionLocal(
             self.dm_p, time, trampoline_funcs.as_mut_ptr(),
             trampoline_data_refs.as_mut_ptr(),
@@ -2285,14 +2278,11 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// This projects the given function into the function space provided, putting the coefficients in a vector.
     ///
     /// Under the hood uses [`DM::project_function_local()`] and [`DM::local_to_global()`].
-    pub fn project_function<'sl>(&mut self, time: PetscReal, mode: InsertMode, global: &mut Vector<'a>,
+    pub fn project_function<'sl>(&self, time: PetscReal, mode: InsertMode, global: &mut Vector<'a>,
         user_funcs: impl IntoIterator<Item = Box<dyn FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'sl>>)
         -> Result<()>
     {
-        // This should be safe because `get_local_vector`/`local` and `project_function_local` use
-        // different parts of the DM so we still mantain exclusive access to those separate parts.
-        let dm2 = ManuallyDrop::new(DM::new(self.world, self.as_raw()));
-        let mut local = dm2.get_local_vector()?;
+        let mut local = self.get_local_vector()?;
         self.project_function_local(time, mode, &mut local, user_funcs)?;
         self.local_to_global(&local, mode, global)
     }
@@ -2313,18 +2303,18 @@ impl<'a, 'tl> DM<'a, 'tl> {
         if let Some(fields) = self.fields.as_ref() {
             if fields.len() != nf {
                 // This should never happen if user uses the rust api to add fields
-                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_COR,
+                seterrq!(self.world, PetscErrorKind::PETSC_ERR_COR,
                     "Number of fields in C strutc and rust struct do not match.")?;
             }
         } else {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                 "No fields have been set.")?;
         }
 
         let mut fn_ptrs = user_funcs.into_iter().collect::<Vec<_>>();
 
         if fn_ptrs.len() != nf {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_USER_INPUT,
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_USER_INPUT,
                 format!("Expected {} functions in `user_funcs`, but there were {}.", nf, fn_ptrs.len()))?;
         }
 
@@ -2360,18 +2350,18 @@ impl<'a, 'tl> DM<'a, 'tl> {
         if let Some(fields) = self.fields.as_ref() {
             if fields.len() != nf {
                 // This should never happen if user uses the rust api to add fields
-                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_COR,
+                seterrq!(self.world, PetscErrorKind::PETSC_ERR_COR,
                     "Number of fields in C strutc and rust struct do not match.")?;
             }
         } else {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                 "No fields have been set.")?;
         }
 
         let mut fn_ptrs = user_funcs.into_iter().collect::<Vec<_>>();
 
         if fn_ptrs.len() != nf {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_USER_INPUT,
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_USER_INPUT,
                 format!("Expected {} functions in `user_funcs`, but there were {}.", nf, fn_ptrs.len()))?;
         }
 
@@ -2401,7 +2391,9 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// * `u_h` - The coefficient vector, a global vector
     /// * `user_funcs` - The functions to evaluate for each field component
     /// * *output* - The diff ||u - u_h||_2
-    pub fn compute_l2_diff<'sl>(&mut self, time: PetscReal, u_h: &Vector,
+    // TODO: should this take mut self? i dont think it needs to. The closure we give it is called
+    // during this function call so it can be `FnMut` while self doesn't need to be.
+    pub fn compute_l2_diff<'sl>(&self, time: PetscReal, u_h: &Vector,
         user_funcs: impl IntoIterator<Item = Box<dyn FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'sl>>)
         -> Result<PetscReal>
     {
@@ -2411,11 +2403,11 @@ impl<'a, 'tl> DM<'a, 'tl> {
         if let Some(fields) = self.fields.as_ref() {
             if fields.len() != nf {
                 // This should never happen if user uses the rust api to add fields
-                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_COR,
+                seterrq!(self.world, PetscErrorKind::PETSC_ERR_COR,
                     "Number of fields in C strutc and rust struct do not match.")?;
             }
         } else {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                 "No fields have been set.")?;
         }
 
@@ -2423,7 +2415,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
             user_f: closure_anchor })).collect::<Vec<_>>();
 
         if trampoline_datas.len() != nf {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_USER_INPUT,
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_USER_INPUT,
                 format!("Expected {} functions in `user_funcs`, but there were {}.", nf, trampoline_datas.len()))?;
         }
 
@@ -2683,7 +2675,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         // TODO: we don't need to do this. If the closure is defined with a static lifetime then
         // we should be fine
         if self.type_compare(DMType::DMPLEX)? {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                 "You can not clone a DMPLEX with `DM::clone()`, use `DM::clone_shallow()` or `DM::clone_unchecked()` instead.")?;
         }
 
@@ -3005,13 +2997,13 @@ impl<'a> DM<'a, '_> {
             # Outputs (in order)\n\n\
             * `x,y,z` - the corner indices (where y and z are optional; these are used for 2D and 3D problems)\n\
             * `m,n,p` - widths in the corresponding directions (where n and p are optional; these are used for 2D and 3D problems)"];
-        // TODO: would it be nicer to have this take in a Range<PetscReal>? (then we couldn't use the macro)
+        // TODO: would it be nicer to have this take in a Range<PetscReal>? (but then we couldn't use the macro)
         DMDASetUniformCoordinates, pub da_set_uniform_coordinates, input PetscReal, x_min, input PetscReal, x_max, input PetscReal, y_min,
             input PetscReal, y_max, input PetscReal, z_min, input PetscReal, z_max, #[doc = "Sets a DMDA coordinates to be a uniform grid.\n\n\
             `y` and `z` values will be ignored for 1 and 2 dimensional problems."];
         DMCompositeGetNumberDM, pub composite_get_num_dms_petsc, output PetscInt, ndms, #[doc = "idk remove this maybe"];
         DMPlexSetRefinementUniform, pub plex_set_refinement_uniform, input bool, refinement_uniform, takes mut, #[doc = "Set the flag for uniform refinement"];
-        DMPlexIsSimplex, pub plex_is_simplex, output bool, flg .into from petsc_raw::PetscBool, #[doc = "Is the first cell in this mesh a simplex?\n\n\
+        DMPlexIsSimplex, pub plex_is_simplex, output bool, flg, #[doc = "Is the first cell in this mesh a simplex?\n\n\
             Only avalable for PETSc `v3.16-dev.0`"] #[cfg(any(petsc_version_3_16_dev, doc))];
         DMGetNumFields, pub get_num_fields, output PetscInt, nf, #[doc = "Get the number of fields in the DM"];
         DMSetAuxiliaryVec, pub set_auxiliary_vec, input Option<&DMLabel<'a>>, label .as_raw, input PetscInt, value, input Vector<'a>, aux .as_raw consume .aux_vec, takes mut,

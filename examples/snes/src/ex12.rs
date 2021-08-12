@@ -584,7 +584,7 @@ fn main() -> petsc_rs::Result<()> {
     snes.set_dm(dm)?;
     snes.set_from_options()?;
 
-    snes.dm_plex_local_fem()?;
+    snes.use_dm_plex_local_fem()?;
     if let Some(ref mut a_mat) = A {
         snes.set_jacobian(a_mat.deref_mut(), &mut J, |_, _, _, _| { Ok (()) })?;
     } else {

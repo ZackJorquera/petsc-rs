@@ -308,9 +308,8 @@ fn main() {
         .emit_builtins()
 
         .allowlist_function("[A-Z][a-zA-Z0-9]*(_Private)?")
-        .allowlist_type("[A-Z][a-zA-Z0-9]*")
-        .allowlist_var("[A-Z][a-zA-Z0-9]*")
-        .allowlist_var("[A-Z0-9_]*")
+        .allowlist_type("[A-Z][a-zA-Z0-9_]*")
+        .allowlist_var("[A-Z][a-zA-Z0-9_]*")
 
         .opaque_type("FILE")
 

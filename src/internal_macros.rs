@@ -1,6 +1,9 @@
-#![macro_use]
+//! Macro for internal use.
+//!
+//! This could be for generating bindings or for things that shouldn't be exposed to crate users.
+//! [`wrap_simple_petsc_member_funcs!`].
 
-// TODO: make macro use `::std::*` or `crate::*` for everything
+#![macro_use]
 
 /// Internal macro used to make wrappers of "simple" Petsc function
 ///
@@ -21,7 +24,8 @@
 ///
 /// ```ignore
 /// wrap_simple_petsc_member_funcs! {
-///     VecNorm, norm, input NormType, norm_type, output f64, tmp1, #[doc = "Computes the vector norm."];
+///     VecNorm, pub norm, input NormType, norm_type,
+///         output PetscReal, tmp1, #[doc = "Computes the vector norm."];
 /// }
 /// ```
 ///
@@ -29,7 +33,7 @@
 /// that is defined as follows (from bindgen): 
 /// `pub unsafe fn VecSetABRetCD(arg1: Vec, arg2: PetscInt, arg3: PetscReal, arg4: *mut PetscReal, arg5: *mut PetscInt) -> PetscErrorCode`
 /// It takes in two inputs `arg2` and `arg3` and returns two outputs with `arg4` and
-/// `arg5` (through pointers). For refrence the rust `petsc_rs::Vector` type is defined as the following:
+/// `arg5` (through pointers). For reference the rust `petsc_rs::Vector` type is defined as the following:
 /// ```ignore
 /// pub struct Vector<'a> {
 ///     pub(crate) world: &'a UserCommunicator,
@@ -38,22 +42,23 @@
 /// ```
 /// Note, for the macro to work, the type must implement `crate::PetscAsRaw` and `crate::PetscObject`.
 /// This can be done with the [`impl_petsc_object_traits!`] macro. Once a wrapper type implements
-/// [`PetscAsRaw`](crate::PetscAsRaw), so does `Option<T>` where the `None` case because null ptr.
+/// [`PetscAsRaw`](crate::PetscAsRaw), so does `Option<T>` where the `None` case becomes null.
 ///
 /// We can then using the macro in the following way to create the function 
 /// `pub fn set_ab_ret_cd(&mut self, a: i32, b: f64) -> crate::Result<(f64, i32)>`
 /// Note, you should use `PetscInt` and `PetscReal` instead of `i32` and `f64`.
+/// I'm just using `i32` and `f64` to save horizontal space in this example.
 /// ```ignore
 /// impl Vec<'_> {
 ///     wrap_simple_petsc_member_funcs! {
 ///         VecSetABRetCD, pub set_ab_ret_cd, input i32, a, input f64, b, 
 /// //         ^            ^         ^            ^
-/// //    Petsc func name   └- vis    |            |- Then for each input
-/// //                           rust func name   put `input type, param_name,`
+/// //    PETSc func name   └─ vis    │            ├─ Then for each input
+/// //                           rust func name   put `input <type>, <param_name>,`
 ///             output f64, c, output i32, d, takes mut, #[doc = "doc-string"];
 /// //           ^                              ^
-/// //           |- for each output             |- If you want the method to take
-/// //          put `output type, tmp_name`     a `&mut self` put `takes mut,`
+/// //           ├─ for each output             └─ If you want the method to take
+/// //          put `output <type>, <tmp_name>,`   a `&mut self` put `takes mut,`
 ///     }
 /// }
 /// ```
@@ -62,73 +67,72 @@
 ///
 /// ## More Advanced Input
 ///
-/// `PetscScalar` can be a complex type, in the pets-rc side we use a different Complex type
-/// than is used by the raw function so some automatic conversion is done for you to accommodate
-/// this for both in input type and the output type.
-///
 /// Note, the input type can differ from the raw input type if `.into()` can be use
 /// for conversion. This is done automatically. If the inputs to the rust wrapper function
-/// is a struct, like `Vector` you can also use the macro to get a member value.
+/// is a struct, like `Vector` you can also use the macro to apply a simple method, in this
+/// case we apply `.as_raw()`.
 /// ```ignore
 /// impl Vec<'_> {
 ///     wrap_simple_petsc_member_funcs! {
 ///         VecAXPY, pub axpy, input PetscScalar, alpha, input &Vector,
-///             other .as_raw, #[doc = "doc-string"];
-/// //                ^ just add `.as_raw` after the param_name
-///     }
+///             other .as_raw, takes mut #[doc = "doc-string"];
+///       //          ^
+///     } //          └ just add `.<as_raw_fn>` after the param_name
 /// }
 /// ```
+/// Note, simple method you give, `as_raw` in this case, is applied before the `.into()`.
 /// 
-/// If the rust wrapper output type shares the same memory layout as the type used by the
-/// raw Petsc function, than nothing needs to be done as a pointer cast is done
-/// automatically. If you with to do a conversion that requires an into you can do something
-/// like the following.
+/// Like inputs, the output types can differ from the raw output types as long as `.into()` can
+/// be use for conversion. The following is an example returns a `bool` but the raw function
+/// returns a `petsc_raw::PetscBool`. Currently this macro can not be use to return anything that
+/// requires a more complicated conversion like a creating a wrapper struct (like `Vector` or `Mat`).
 /// ```ignore
 /// impl NullSpace<'_> {
 ///     wrap_simple_petsc_member_funcs! {
-///         MatNullSpaceTest, pub test, input &Mat, vec .as_raw,
-///         output bool, is_null .into from petsc_raw::PetscBool, #[doc = "doc-string"];
-/// //                           ^      ^      ^
-/// //                    add `.into`   |      |
-/// //                            Then add `from <original_type>`
+///         MatNullSpaceTest, pub test, input &Mat, mat .as_raw,
+///         output bool, is_null , #[doc = "doc-string"];
 ///     }
 /// }
 /// ```
-/// Note, the `original_type` is the type that is given to the raw petsc function.
-/// It most likely will be the same type that the raw function wants, but only must
-/// shares the same memory layout as the type used by the raw Petsc function, as a
-/// pointer cast is done automatically.
+///
+/// Because both the input type and output type automaticly apply `.into()`, `PetscScalar` can
+/// be a complex with no extra cost. On the petsc-rc side we use a different Complex type
+/// than is used by the raw function, however, `Into` and `From` are implemented between them.
 ///
 /// If you want the function to consume an input, you can use `consume .<member_name>` in
 /// the following way. Note, this requires `member_name` to be a member of the struct type,
 /// and it must be an [`Option`].
 /// ```ignore
-/// pub struct KSP<'a> {
-///     world: &'a UserCommunicator,
+/// pub struct KSP<'a, 'tl, 'bl> {
+///     world: &'a UserCommunicator
 ///     ksp_p: petsc_raw::KSP,
-///     owned_dm: Option<DM<'a>>,
+///     owned_dm: Option<DM<'a, 'tl>>,
+///     // some fields omitted
 /// }
-///
-/// impl KSP<'_> {
-///     wrap_simple_petsc_member_funcs! {
-///         KSPSetDM, pub set_dm, input DM, dm .as_raw consume .owned_dm,
-/// //                                            ^      ^         ^
-/// //                     Note, `as_raw` is only ┘      |         |
-/// //                     used with raw function      Add `consume .<member_name>`
-///             takes mut, #[doc = "doc-string"];
+/// 
+/// impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> { // ┌ You need the lifetime parameters
+///     wrap_simple_petsc_member_funcs! { //  v 
+///         KSPSetDM, pub set_dm, input DM<'a, 'tl>, dm .as_raw consume .owned_dm,
+/// //                                                     ^      ^         ^
+/// //                         Note, `as_raw` is only used ┘      │         │
+/// //                         when calling the raw function.     │         │
+///             takes mut, #[doc = "doc-string"]; //     Add `consume .<member_name>`
 ///     }
 /// }
 /// ```
-/// Note this will drop the member value before it sets it.
+///
+/// If you want the rust function to be `unsafe` you can add `is unsafe` at the end, before the doc-string.
 ///
 /// # Real Examples
+///
+/// The the examples show in this doc-string exist in `petsc-rs`, except for the `VecSetABRetCD` one.
 ///
 /// Almost every file in `src/` uses this macro at the bottom of the file.
 macro_rules! wrap_simple_petsc_member_funcs {
     {$(
         $raw_func:ident, $vis_par:vis $new_func:ident,
         $(input $param_type:ty, $param_name:ident $(.$as_raw_fn:ident)? $(consume .$member:ident)? ,)*
-        $(output $ret_type:ty, $tmp_ident:ident $(.$into_fn:ident from $raw_ret_type:ty)? ,)*
+        $(output $ret_type:ty, $tmp_ident:ident,)*
         $(takes $mut_tag:tt,)? $(is $is_unsafe:ident,)? $( #[$att:meta] )+;
     )*} => {
 $(
@@ -138,13 +142,13 @@ $(
         -> crate::Result<($( $ret_type ),*)>
     {
         $(
-            let mut $tmp_ident = ::std::mem::MaybeUninit $(::<$raw_ret_type>)? ::uninit();
+            let mut $tmp_ident = ::std::mem::MaybeUninit::uninit();
         )*
         #[allow(unused_unsafe)]
         let ierr = unsafe { crate::petsc_raw::$raw_func(
             self.as_raw() as *mut _,
             $( $param_name $(.$as_raw_fn())?.into() , )*
-            $( $tmp_ident.as_mut_ptr() as *mut _ ),*
+            $( $tmp_ident.as_mut_ptr() ),*
         )};
         chkerrq!(self.world(), ierr)?;
 
@@ -154,7 +158,7 @@ $(
         )?)*
 
         #[allow(unused_unsafe)]
-        crate::Result::Ok(unsafe { ( $( $tmp_ident.assume_init() $(.$into_fn())? ),* ) })
+        crate::Result::Ok(unsafe { ( $( $tmp_ident.assume_init() .into() ),* ) })
     }
 )*
     };
@@ -170,7 +174,7 @@ macro_rules! wrap_prealloc_petsc_member_funcs {
     )*} => {
 $(
     $( #[$att] )+
-    pub fn $new_func(&mut self, $($arg1: PetscInt,)? $($arg2: PetscInt, $arg3: ::std::option::Option<&[PetscInt]>),+) -> crate::Result<()> {
+    pub fn $new_func(&mut self, $($arg1: crate::PetscInt,)? $($arg2: crate::PetscInt, $arg3: ::std::option::Option<&[PetscInt]>),+) -> crate::Result<()> {
         let ierr = unsafe { crate::petsc_raw::$raw_func(
             self.as_raw(), 
             $( $arg1, )?
@@ -184,7 +188,8 @@ $(
     };
 }
 
-/// Implements [`PetscAsRaw`], [`PetscAsRawMut`], [`PetscObject`], [`PetscObjectPrivate`], and [`viewer::PetscViewable`].
+/// Implements [`PetscAsRaw`](crate::PetscAsRaw), [`PetscAsRawMut`](crate::PetscAsRawMut), [`PetscObject`](crate::PetscObject),
+/// [`PetscObjectPrivate`](crate::PetscObjectPrivate), and [`viewer::PetscViewable`](crate::viewer::PetscViewable).
 macro_rules! impl_petsc_object_traits {
     {$(
         $struct_name:ident, $raw_ptr_var:ident, $raw_ptr_ty:ty, $raw_view_func:ident $(, $add_lt:lifetime)* ;
@@ -251,23 +256,36 @@ macro_rules! function_name {
         fn f() {}
         #[allow(dead_code)]
         fn type_name_of<T>(_: T) -> &'static str {
-            std::any::type_name::<T>()
+            ::std::any::type_name::<T>()
         }
         let name = type_name_of(f);
         &name[..name.len() - 3]
     }}
 }
 
-/// Calls [`Petsc::check_error()`] with the line number, function name, and file name added.
+/// Calls [`Petsc::check_error()`](crate::Petsc::check_error()) with the line number, function name, and file name added.
 ///
-/// Because [`Petsc::check_error`] and [`function_name!`] are not exposed to create users
+/// Because [`Petsc::check_error`](crate::Petsc::check_error()) and [`function_name!`] are not exposed to create users
 /// this macro is only intended for internal use.
 ///
-/// Note, this wraps the [`Petsc::check_error()`] in an unsafe block, but is by no means a safe API.
+/// Note, this wraps the [`Petsc::check_error()`](crate::Petsc::check_error()) in an unsafe block, but is by no means a safe API.
 // TODO: remove the unsafe block, make the caller use the unsafe block.
 macro_rules! chkerrq {
     ($world:expr, $ierr_code:expr) => ({
         #[allow(unused_unsafe)]
-        unsafe { Petsc::check_error($world, line!() as i32, function_name!(), file!(), $ierr_code) }
+        unsafe { crate::Petsc::check_error($world, line!() as i32, function_name!(), file!(), $ierr_code) }
+    });
+}
+
+/// Calls [`Petsc::set_error2()`](crate::Petsc::set_error2()) with the line number, function name, and file name added.
+///
+/// For now, this macro is only intended for internal use.
+macro_rules! seterrq {
+    ($world:expr, $err_kind:expr, $err_msg:expr) => ({
+        #[allow(unused_unsafe)]
+        crate::Petsc::set_error2(
+            $world, Some(line!() as i32), Some(function_name!()),
+            Some(file!()), $err_kind, $err_msg
+        )
     });
 }

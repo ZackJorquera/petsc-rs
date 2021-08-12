@@ -4,7 +4,7 @@
 
 use std::mem::MaybeUninit;
 use std::ops::Deref;
-use crate::{Petsc, petsc_raw, Result, PetscAsRaw, PetscInt, PetscObject};
+use crate::{petsc_raw, Result, PetscAsRaw, PetscInt, PetscObject};
 use mpi::topology::UserCommunicator;
 use mpi::traits::*;
 

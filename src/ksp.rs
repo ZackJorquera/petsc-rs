@@ -14,7 +14,6 @@ use std:: pin::Pin;
 use std::mem::{MaybeUninit, ManuallyDrop};
 use std::rc::Rc;
 use crate::{
-    Petsc,
     petsc_raw,
     Result,
     PetscAsRaw,
@@ -75,7 +74,7 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
             compute_rhs_trampoline_data: None }
     }
 
-    /// Same as [`Petsc::ksp_create()`].
+    /// Same as [`Petsc::ksp_create()`](crate::Petsc::ksp_create).
     pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut ksp_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::KSPCreate(world.as_raw(), ksp_p.as_mut_ptr()) };
@@ -194,7 +193,7 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
     }
 
     /// Solves linear system.
-    pub fn solve<'vl, 'val: 'vl>(&self, b: impl Into<Option<&'vl Vector<'val>>>, x: &mut Vector) -> Result<()>
+    pub fn solve<'vl, 'val: 'vl>(&mut self, b: impl Into<Option<&'vl Vector<'val>>>, x: &mut Vector) -> Result<()>
     {
         let ierr = unsafe { petsc_raw::KSPSolve(self.ksp_p, b.into().map_or(std::ptr::null_mut(), |v| v.vec_p), x.vec_p) };
         chkerrq!(self.world, ierr)
@@ -202,11 +201,11 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
 
     /// Sets the routine to compute the linear operators
     ///
-    /// The user provided func() will be called automatically at the very next call to KSPSolve().
-    /// It will not be called at future KSPSolve() calls unless either KSPSetComputeOperators()
-    /// or KSPSetOperators() is called before that KSPSolve() is called.
+    /// The user provided func() will be called automatically at the very next call to [`KSP::solve()`].
+    /// It will not be called at future [`KSP::solve()`] calls unless either KSPSetComputeOperators()
+    /// or KSPSetOperators() is called before that [`KSP::solve()`] is called.
     ///
-    /// To reuse the same preconditioner for the next KSPSolve() and not compute a new one based
+    /// To reuse the same preconditioner for the next [`KSP::solve()`] and not compute a new one based
     /// on the most recently computed matrix call KSPSetReusePreconditioner()
     ///
     /// # Parameters
@@ -278,7 +277,7 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
 
     /// Sets the routine to compute the right hand side of the linear system
     ///
-    /// The routine you provide will be called EACH time you call KSPSolve() to prepare the
+    /// The routine you provide will be called EACH time you call [`KSP::solve()`] to prepare the
     /// new right hand side for that solve
     ///
     /// # Parameters
@@ -399,7 +398,7 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
     wrap_simple_petsc_member_funcs! {
         KSPSetFromOptions, pub set_from_options, takes mut, #[doc = "Sets KSP options from the options database. This routine must be called before KSPSetUp() if the user is to be allowed to set the Krylov type."];
         KSPSetUp, pub set_up, takes mut, #[doc = "Sets up the internal data structures for the later use of an iterative solver. . This will be automatically called with [`KSP::solve()`]."];
-        KSPGetIterationNumber, pub get_iteration_number, output PetscInt, iter_num, #[doc = "Gets the current iteration number; if the KSPSolve() is complete, returns the number of iterations used."];
+        KSPGetIterationNumber, pub get_iteration_number, output PetscInt, iter_num, #[doc = "Gets the current iteration number; if the [`KSP::solve()`] is complete, returns the number of iterations used."];
         KSPSetDM, pub set_dm, input DM<'a, 'tl>, dm .as_raw consume .dm, takes mut, #[doc = "Sets the [DM](DM) that may be used by some [preconditioners](crate::pc).\n\n\
             If this is used then the KSP will attempt to use the DM to create the matrix and use the routine set with [`DMKSPSetComputeOperators()`](#) or [`KSP::set_compute_operators()`]. Use\
             [`KSP::set_dm_active(false)`](KSP::set_dm_active()) to instead use the matrix you've provided with [`KSP::set_operators()`]."];

@@ -7,7 +7,6 @@ use std::{ffi::CString, marker::PhantomData, ops::{Deref, DerefMut}};
 use std::mem::{MaybeUninit, ManuallyDrop};
 use std::rc::Rc;
 use crate::{
-    Petsc,
     petsc_raw,
     Result,
     PetscAsRaw,
@@ -111,7 +110,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
         Mat { world, mat_p, _phantom_closure: PhantomData }
     }
 
-    /// Same at [`Petsc::mat_create()`].
+    /// Same at [`Petsc::mat_create()`](crate::Petsc::mat_create).
     pub fn create(world: &'a UserCommunicator,) -> Result<Self> {
         let mut mat_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::MatCreate(world.as_raw(), mat_p.as_mut_ptr()) };
@@ -139,7 +138,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// See the manual page for [`MatDuplicateOption`](https://petsc.org/release/docs/manualpages/Mat/MatDuplicateOption.html#MatDuplicateOption) for an explanation of these options.
     pub fn duplicate(&self, op: MatDuplicateOption) -> Result<Self> {
         if self.type_compare(MatType::MATSHELL)? {
-            Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+            seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                 "You can't duplicate a MatShell")?;
         }
 
@@ -605,7 +604,6 @@ impl<'a, 'tl> Mat<'a, 'tl> {
         T1: IntoIterator<Item = PetscInt>,
         T2: IntoIterator<Item = PetscInt>,
     {
-        // TODO: make this return an ndarray, also it doesn't really matter
         let idxm_iter = idxm.into_iter();
         let idxm_array = idxm_iter.collect::<Vec<_>>();
         let mi = idxm_array.len();
@@ -627,7 +625,6 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     pub fn assemble(&mut self, assembly_type: MatAssemblyType) -> Result<()>
     {
         self.assembly_begin(assembly_type)?;
-        // TODO: what would even go here?
         self.assembly_end(assembly_type)
     }
 
@@ -774,7 +771,6 @@ pub mod mat_shell {
     use std::mem::{MaybeUninit, ManuallyDrop};
     use super::{MatOperation, Mat, MatDuplicateOption};
     use crate::{
-        Petsc,
         petsc_raw,
         Result,
         PetscAsRaw,
@@ -787,6 +783,12 @@ pub mod mat_shell {
     use mpi::topology::UserCommunicator;
     use mpi::traits::*;
     use seq_macro::seq;
+
+    // TODO: there are 148 ops, but this might change so we should get this number in a better way
+    // Also if this number changes, this is not the only occurrence of it. You will have to change
+    // it in other places too. Sadly, some of the occurrences of 148 require int literals so we
+    // can't use this const there. But they should fail to compile.
+    const NUM_MAT_OPS: usize = 148;
     
     /// A matrix type to be used to define your own matrix type -- perhaps matrix free
     ///
@@ -922,7 +924,14 @@ pub mod mat_shell {
         MVV(Box<dyn Fn(&MatShell<'a, 'tl, T>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>),
         MV(Box<dyn Fn(&MatShell<'a, 'tl, T>, &mut Vector<'a>) -> Result<()> + 'tl>),
         MVI(Box<dyn FnMut(&mut MatShell<'a, 'tl, T>, &Vector<'a>, InsertMode) -> Result<()> + 'tl>),
-        // TODO: add more as we create more `shell_set_operation` methods
+        // TODO: add more as we create more `shell_set_operation` methods. A list of the functions
+        // and thier signatures can be found in `include/petsc/private/matimpl.h` the struct `_MatOps`.
+        // I think adding more of these will end up being very manual.
+        // Would it make sense to make a different variant for each function, not just each function type.
+        
+        // TODO: do we want a `destroy_func`? what would it even do. Is it just to drop things in the
+        // context? if that is the case then we don't need this as rust will will call that drop on the
+        // context type. It might still make sense to have it though, although.
         #[allow(dead_code)]
         Destroy(Box<dyn FnOnce(&mut MatShell<'a, 'tl, T>) -> Result<()> + 'tl>),
         Duplicate(Box<dyn Fn(&MatShell<'a, 'tl, T>, MatDuplicateOption) -> Result<MatShell<'a, 'tl, T>> + 'tl>),
@@ -931,13 +940,7 @@ pub mod mat_shell {
     struct MatShellTrampolineData<'a, 'tl, T> {
         #[allow(dead_code)]
         world: &'a UserCommunicator,
-        // TODO: there are 148 ops, but this might change so we should get this number in a better way
-        // Also if this number changes, this is not the only occurrence of it. You
-        // will have to change it in other places too.
-        user_funcs: [Option<MatShellSingleOperationTrampolineData<'a, 'tl, T>>; 148],
-        // TODO: do we want a `destroy_func`? what would it even do. Is it just to drop things in the
-        // context? if that is the case then we don't need this as rust will will call that drop on the
-        // context type. It might still make sense to have it though, although.
+        user_funcs: [Option<MatShellSingleOperationTrampolineData<'a, 'tl, T>>; NUM_MAT_OPS],
         data: Option<Box<T>>,
     }
 
@@ -979,6 +982,10 @@ pub mod mat_shell {
                 let _ = td.as_mut().data.take();
                 td.as_mut().data = mat_data;
             } else {
+                if self.in_operation_closure {
+                    seterrq!(self.world, PetscErrorKind::PETSC_ERR_ORDER,
+                        "You can not set new trampoline data in an operation closure.")?;
+                }
                 let none_array = seq!(N in 0..148 { [ #( None, )* ] });
                 let td = MatShellTrampolineData { 
                     world: self.world, user_funcs: none_array, data: mat_data };
@@ -1026,9 +1033,11 @@ pub mod mat_shell {
         //     2. Make a new MatOperation enum that contains the rust closure type and have one 
         //        `shell_set_operation` function do all the work. This would mean that we would take Box<dyn _>
         //        and not a generic like we do now. I dont think this is the best way to do it, at lease
-        //        of the user side, under the hood this makes more sense.
+        //        on the user side, under the hood this makes more sense.
         // Both of these we could slowly roll out one function at a time. Also, it seems like this will
-        // be very tedious either way
+        // be very tedious either way. The problem is that we want to validate that the user gave the correct
+        // function in a user friendly wat, but at the same time i would like to avoid having 150 differnt
+        // functions to set all the ops.
 
         /// Allows user to set a matrix operation for a shell matrix.
         ///
@@ -1096,7 +1105,7 @@ pub mod mat_shell {
             F: Fn(&MatShell<'a, 'tl, T>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
         {
             if self.in_operation_closure {
-                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ORDER,
+                seterrq!(self.world, PetscErrorKind::PETSC_ERR_ORDER,
                     "You can not set operations in another operation.")?;
             }
 
@@ -1153,7 +1162,7 @@ pub mod mat_shell {
                     
                     (user_funcs[MAT_OPERATION_MVV_TABLE[N]].as_mut()
                         .map_or_else(
-                            || Petsc::set_error(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
+                            || seterrq!(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
                                 format!(
                                     "Rust function for {:?} was not found",
                                     std::mem::transmute::<u32, MatOperation>(MAT_OPERATION_MVV_TABLE[N] as u32))),
@@ -1161,7 +1170,7 @@ pub mod mat_shell {
                                     (*f)(&mat, &x, &mut y)
                                 } else {
                                     // This should never happen
-                                    Petsc::set_error(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
+                                    seterrq!(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
                                         format!("Rust closure for Mat Op {:?} is the wrong type",
                                         std::mem::transmute::<u32, MatOperation>(MAT_OPERATION_MVV_TABLE[N] as u32)))
                                 } ))
@@ -1172,7 +1181,7 @@ pub mod mat_shell {
             // macro bellow to be the number of variants in `MatOperationMVV`, or the number of elements
             // in `MAT_OPERATION_MVV_TABLE`.
             let mut trampolines = [mat_shell_operation_mvv_trampoline_0::<T>
-                as unsafe extern "C" fn(_, _, _) -> _;148];
+                as unsafe extern "C" fn(_, _, _) -> _; NUM_MAT_OPS];
             seq!(N in 0..4 {
                 debug_assert!(N < MAT_OPERATION_MVV_TABLE.len(),
                     "Internal Error: `shell_set_operation_mvv` was not updated, but `MAT_OPERATION_MVV_TABLE` was.");
@@ -1243,7 +1252,7 @@ pub mod mat_shell {
             F: Fn(&MatShell<'a, 'tl, T>, &mut Vector<'a>) -> Result<()> + 'tl
         {
             if self.in_operation_closure {
-                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ORDER,
+                seterrq!(self.world, PetscErrorKind::PETSC_ERR_ORDER,
                     "You can not set operations in another operation.")?;
             }
 
@@ -1299,7 +1308,7 @@ pub mod mat_shell {
         
                     (user_funcs[MAT_OPERATION_MV_TABLE[N]].as_mut()
                         .map_or_else(
-                            || Petsc::set_error(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
+                            || seterrq!(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
                                 format!(
                                     "Rust function for {:?} was not found",
                                     std::mem::transmute::<u32, MatOperation>(MAT_OPERATION_MV_TABLE[N] as u32))),
@@ -1307,7 +1316,7 @@ pub mod mat_shell {
                                     (*f)(&mat, &mut v)
                                 } else {
                                     // This should never happen
-                                    Petsc::set_error(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
+                                    seterrq!(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
                                         format!("Rust closure for Mat Op {:?} is the wrong type",
                                         std::mem::transmute::<u32, MatOperation>(MAT_OPERATION_MV_TABLE[N] as u32)))
                                 } ))
@@ -1318,7 +1327,7 @@ pub mod mat_shell {
             // macro bellow to be the number of variants in `MatOperationMV`, or the number of elements
             // in `MAT_OPERATION_MV_TABLE`.
             let mut trampolines = [mat_shell_operation_mv_trampoline_0::<T>
-                as unsafe extern "C" fn(_, _) -> _;148];
+                as unsafe extern "C" fn(_, _) -> _; NUM_MAT_OPS];
             seq!(N in 0..1 {
                 debug_assert!(N < MAT_OPERATION_MV_TABLE.len(),
                     "Internal Error: `shell_set_operation_mv` was not updated, but `MAT_OPERATION_MV_TABLE` was.");
@@ -1358,7 +1367,7 @@ pub mod mat_shell {
             F: Fn(&MatShell<'a, 'tl, T>, &Vector<'a>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
         {
             if self.in_operation_closure {
-                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ORDER,
+                seterrq!(self.world, PetscErrorKind::PETSC_ERR_ORDER,
                     "You can not set operations in another operation.")?;
             }
 
@@ -1416,7 +1425,7 @@ pub mod mat_shell {
         
                     (user_funcs[MAT_OPERATION_MVVV_TABLE[N]].as_mut()
                         .map_or_else(
-                            || Petsc::set_error(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
+                            || seterrq!(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
                                 format!(
                                     "Rust function for {:?} was not found",
                                     std::mem::transmute::<u32, MatOperation>(MAT_OPERATION_MVVV_TABLE[N] as u32))),
@@ -1424,7 +1433,7 @@ pub mod mat_shell {
                                     (*f)(&mat, &v1, &v2, &mut v3)
                                 } else {
                                     // This should never happen
-                                    Petsc::set_error(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
+                                    seterrq!(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
                                         format!("Rust closure for Mat Op {:?} is the wrong type",
                                         std::mem::transmute::<u32, MatOperation>(MAT_OPERATION_MVVV_TABLE[N] as u32)))
                                 } ))
@@ -1435,7 +1444,7 @@ pub mod mat_shell {
             // macro bellow to be the number of variants in `MatOperationMVVV`, or the number of elements
             // in `MAT_OPERATION_MVVV_TABLE`.
             let mut trampolines = [mat_shell_operation_mvvv_trampoline_0::<T>
-                as unsafe extern "C" fn(_, _, _, _) -> _;148];
+                as unsafe extern "C" fn(_, _, _, _) -> _; NUM_MAT_OPS];
             seq!(N in 0..4 {
                 debug_assert!(N < MAT_OPERATION_MVVV_TABLE.len(),
                     "Internal Error: `shell_set_operation_mvvv` was not updated, but `MAT_OPERATION_MVVV_TABLE` was.");
@@ -1527,7 +1536,7 @@ pub mod mat_shell {
             F: FnMut(&mut MatShell<'a, 'tl, T>, &Vector<'a>, InsertMode) -> Result<()> + 'tl
         {
             if self.in_operation_closure {
-                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ORDER,
+                seterrq!(self.world, PetscErrorKind::PETSC_ERR_ORDER,
                     "You can not set operations in another operation.")?;
             }
 
@@ -1583,7 +1592,7 @@ pub mod mat_shell {
         
                     (user_funcs[MAT_OPERATION_MVI_TABLE[N]].as_mut()
                         .map_or_else(
-                            || Petsc::set_error(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
+                            || seterrq!(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
                                 format!(
                                     "Rust function for {:?} was not found",
                                     std::mem::transmute::<u32, MatOperation>(MAT_OPERATION_MVI_TABLE[N] as u32))),
@@ -1591,7 +1600,7 @@ pub mod mat_shell {
                                     (*f)(&mut mat, &v, im)
                                 } else {
                                     // This should never happen
-                                    Petsc::set_error(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
+                                    seterrq!(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
                                         format!("Rust closure for Mat Op {:?} is the wrong type",
                                         std::mem::transmute::<u32, MatOperation>(MAT_OPERATION_MVI_TABLE[N] as u32)))
                                 } ))
@@ -1602,7 +1611,7 @@ pub mod mat_shell {
             // macro bellow to be the number of variants in `MatOperationMVI`, or the number of elements
             // in `MAT_OPERATION_MVI_TABLE`.
             let mut trampolines = [mat_shell_operation_mvi_trampoline_0::<T>
-                as unsafe extern "C" fn(_, _, _) -> _;148];
+                as unsafe extern "C" fn(_, _, _) -> _; NUM_MAT_OPS];
             seq!(N in 0..1 {
                 debug_assert!(N < MAT_OPERATION_MVI_TABLE.len(),
                     "Internal Error: `shell_set_operation_mv` was not updated, but `MAT_OPERATION_MVI_TABLE` was.");
@@ -1697,11 +1706,10 @@ pub mod mat_shell {
             F: Fn(&MatShell<'a, 'tl, T>, MatDuplicateOption) -> Result<MatShell<'a, 'tl, T>> + 'tl,
         {
             if self.in_operation_closure {
-                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ORDER,
+                seterrq!(self.world, PetscErrorKind::PETSC_ERR_ORDER,
                     "You can not set operations in another operation.")?;
             }
 
-            // TODO: should we set `in_closure = true` somehow. It probably doesn't matter as mat is immutable
             let closure_anchor = MatShellSingleOperationTrampolineData::Duplicate(Box::new(user_f));
         
             if let Some(td) = self.shell_trampoline_data.as_mut() {
@@ -1730,15 +1738,15 @@ pub mod mat_shell {
         /// See the manual page for [`MatDuplicateOption`](https://petsc.org/release/docs/manualpages/Mat/MatDuplicateOption.html#MatDuplicateOption) for an explanation of these options.
         pub fn duplicate(&self, op: MatDuplicateOption) -> Result<Self> {
             // For the most part this is a port of the C MatDuplicate method
-            // We have to do this all in rust because otherwise we cant set closures.
+            // We have to do this all in rust because otherwise we cant call the closures.
             // This is by no means safe rust code.
             let is_assembled: bool = unsafe { &*self.mat_p }.assembled.into();
             if op == MatDuplicateOption::MAT_COPY_VALUES && !is_assembled {
-                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+                seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                     "MAT_COPY_VALUES not allowed for unassembled matrix")?;
             }
             if unsafe { &*self.mat_p }.factortype != petsc_raw::MatFactorType::MAT_FACTOR_NONE {
-                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+                seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
                     "`duplicate`: Not for factored matrix")?;
             }
 
@@ -1746,16 +1754,39 @@ pub mod mat_shell {
                 if let Some(MatShellSingleOperationTrampolineData::Duplicate(ref duplicate))
                     = td.as_ref().user_funcs[MatOperation::MATOP_DUPLICATE as usize]
                 {
-                    // TODO: ierr = PetscLogEventBegin(MAT_Convert,mat,0,0,0);CHKERRQ(ierr);
+                    // This code is taken from the `PetscLogEventBegin/End` macros in `include/petsclog.h`
+                    // TODO: should we make is an actuall function
+                    let petsc_log_event_with = |plb_ple: Option<unsafe extern "C" fn(petsc_raw::PetscLogEvent, 
+                        ::std::os::raw::c_int, petsc_raw::PetscObject, petsc_raw::PetscObject, 
+                        petsc_raw::PetscObject, petsc_raw::PetscObject) -> petsc_raw::PetscErrorCode>| -> Result<()>
+                    {
+                        if let Some(petsc_log_plb) = plb_ple {
+                            let mut petsc_stagelog = MaybeUninit::uninit();
+                            let ierr = unsafe { petsc_raw::PetscLogGetStageLog(petsc_stagelog.as_mut_ptr()) };
+                            chkerrq!(self.world, ierr)?;
+
+                            let petsc_stagelog = unsafe { &*petsc_stagelog.assume_init() };
+                            let stage_info = unsafe { std::slice::from_raw_parts_mut(petsc_stagelog.stageInfo, petsc_stagelog.maxStages as usize) };
+                            if  stage_info[petsc_stagelog.curStage as usize].perfInfo.active.into() {
+                                let event_info = unsafe { std::slice::from_raw_parts_mut((&*stage_info[petsc_stagelog.curStage as usize].eventLog).eventInfo, (&*stage_info[petsc_stagelog.curStage as usize].eventLog).maxEvents as usize) };
+                                if event_info[unsafe { petsc_raw::MAT_Convert } as usize].active.into() {
+                                    let ierr = unsafe { petsc_log_plb(petsc_raw::MAT_Convert, 0, self.mat_p as *mut _, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut()) };
+                                    chkerrq!(self.world, ierr)?;
+                                }
+                            }
+                        }
+                        Ok(())
+                    };
+                    // Does: PetscLogEventBegin(MAT_Convert,mat,0,0,0);CHKERRQ(ierr);
+                    petsc_log_event_with(unsafe { petsc_raw::PetscLogPLB })?;
+
+                    // We dont need to set `in_closure = true` because mat is immutable and we give the user
+                    // the actual mat so this is a case where it would be fine to mutate the `MatShell`.
                     let mut new_mat = duplicate(self, op)?;
                     let new_mat_ref = unsafe { &mut *new_mat.mat_p };
                     let old_mat_ref = unsafe { &*self.mat_p };
 
-                    // // TODO: should we do the following? 
-                    // ierr = MatGetOperation(mat,MATOP_VIEW,&viewf);CHKERRQ(ierr);
-                    // if (viewf) {
-                    //     ierr = MatSetOperation(B,MATOP_VIEW,viewf);CHKERRQ(ierr);
-                    // }
+                    // unlike for the C code, we dont copy over the view funciton
 
                     new_mat_ref.stencil.dim = old_mat_ref.stencil.dim;
                     new_mat_ref.stencil.noc = old_mat_ref.stencil.noc;
@@ -1776,19 +1807,21 @@ pub mod mat_shell {
                         chkerrq!(self.world(), ierr)?;
                     }
 
-                    // ierr = PetscLogEventEnd(MAT_Convert,mat,0,0,0);CHKERRQ(ierr);
+                    // Does: PetscLogEventEnd(MAT_Convert,mat,0,0,0);CHKERRQ(ierr);
+                    petsc_log_event_with(unsafe { petsc_raw::PetscLogPLE })?;
+
                     unsafe { &mut *(new_mat_ref as *mut _ as *mut petsc_raw::_p_PetscObject) }.state += 1;
 
                     Ok(new_mat)
                 }
                 else
                 {
-                    Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_SUP, 
+                    seterrq!(self.world, PetscErrorKind::PETSC_ERR_SUP, 
                         "No `duplicate` operation written for matrix type `MatShell`\n")
                             .map(|_| unreachable!())
                 }
             } else {
-                Petsc::set_error(self.world, PetscErrorKind::PETSC_ERR_SUP, 
+                seterrq!(self.world, PetscErrorKind::PETSC_ERR_SUP, 
                     "No `duplicate` operation written for matrix type `MatShell`\n")
                         .map(|_| unreachable!())
             }
@@ -1798,7 +1831,7 @@ pub mod mat_shell {
     impl<'a, 'tl, T> Clone for MatShell<'a, 'tl, T> {
         /// Same as [`x.duplicate(MatDuplicateOption::MAT_COPY_VALUES)`](MatShell::duplicate()).
         fn clone(&self) -> Self {
-            self.duplicate(MatDuplicateOption::MAT_COPY_VALUES).unwrap()
+            MatShell::duplicate(&self, MatDuplicateOption::MAT_COPY_VALUES).unwrap()
         }
     }
 
@@ -2067,7 +2100,7 @@ impl<'a> Mat<'a, '_> {
 impl<'a> NullSpace<'a> {
     wrap_simple_petsc_member_funcs! {
         MatNullSpaceRemove, pub remove_from, input &mut Vector, vec.as_raw, #[doc = "Removes all the components of a null space from a vector."];
-        MatNullSpaceTest, pub test, input &Mat, vec .as_raw, output bool, is_null .into from petsc_raw::PetscBool, #[doc = "Tests if the claimed null space is really a null space of a matrix."];
+        MatNullSpaceTest, pub test, input &Mat, mat .as_raw, output bool, is_null, #[doc = "Tests if the claimed null space is really a null space of a matrix."];
     }
 }
 

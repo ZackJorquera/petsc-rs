@@ -20,28 +20,17 @@ Input parameters include:\n\n";
 use petsc_rs::prelude::*;
 use mpi::traits::*;
 
-// TODO: make this a derive macro like stuctopt
-// #[derive(PetscOpt)]
-// #[petscopt(name = "ex2", about = HELP_MSG)]
 struct Opt {
-    /// number of mesh points in x-direction
-    // #[petscopt(short = "m", default_value = "8")]
     m: PetscInt,
-    
-    /// number of mesh points in y-direction
-    // #[petscopt(short = "n", default_value = "7")]
     n: PetscInt,
-
-    /// write exact solution vector to stdout
-    // #[petscopt(short, long)]
     view_exact_sol: bool,
 }
 
 impl PetscOpt for Opt {
     fn from_petsc_opt_builder(pob: &mut PetscOptBuilder) -> petsc_rs::Result<Self> {
-        let m = pob.options_int("-m", "", "ksp-ex2", 8)?;
-        let n = pob.options_int("-n", "", "ksp-ex2", 7)?;
-        let view_exact_sol = pob.options_bool("-view_exact_sol", "", "ksp-ex2", false)?;
+        let m = pob.options_int("-m", "number of mesh points in x-direction", "ksp-ex2", 8)?;
+        let n = pob.options_int("-n", "number of mesh points in y-direction", "ksp-ex2", 7)?;
+        let view_exact_sol = pob.options_bool("-view_exact_sol", "write exact solution vector to stdout", "ksp-ex2", false)?;
         Ok(Opt { m, n, view_exact_sol })
     }
 }

@@ -5,7 +5,6 @@
 use std::{ffi::{CStr, CString}, marker::PhantomData, ops::{Deref, DerefMut}};
 use std::mem::{MaybeUninit, ManuallyDrop};
 use crate::{
-    Petsc,
     petsc_raw,
     Result,
     PetscAsRaw,
@@ -92,7 +91,7 @@ pub use petsc_raw::VecOption;
 
 impl<'a> Vector<'a> {
     /// Creates an empty vector object. The type can then be set with [`Vector::set_type`], or [`Vector::set_from_options`].
-    /// Same as [`Petsc::vec_create`].
+    /// Same as [`Petsc::vec_create`](crate::Petsc::vec_create).
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
@@ -142,7 +141,6 @@ impl<'a> Vector<'a> {
     pub fn assemble(&mut self) -> Result<()>
     {
         self.assembly_begin()?;
-        // TODO: what would even go here?
         self.assembly_end()
     }
 
@@ -217,9 +215,7 @@ impl<'a> Vector<'a> {
     /// assert_eq!(v.get_values(0..10).unwrap(), [2.1,0.0,2.0,2.2,0.0,0.0,0.0,3.3,3.0,8.4]
     ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
     /// ```
-    pub fn set_values(&mut self, ix: &[PetscInt], v: &[PetscScalar], iora: InsertMode) -> Result<()>
-    {
-        // TODO: should I do these asserts?
+    pub fn set_values(&mut self, ix: &[PetscInt], v: &[PetscScalar], iora: InsertMode) -> Result<()> {
         assert!(iora == InsertMode::INSERT_VALUES || iora == InsertMode::ADD_VALUES);
         assert_eq!(ix.len(), v.len());
 
@@ -378,8 +374,6 @@ impl<'a> Vector<'a> {
     where
         T: IntoIterator<Item = PetscInt>,
     {
-        // TODO: i added Vector::view, do we still need this method?
-
         let ix_iter = ix.into_iter();
         let ix_array = ix_iter.collect::<Vec<_>>();
         let ni = ix_array.len();
@@ -629,7 +623,6 @@ impl<'a> Vector<'a> {
 
     /// Gets the [`Vector`] type name (as a [`String`]). 
     pub fn get_type_str(&self) -> Result<String> {
-        // TODO: return enum
         let mut s_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::VecGetType(self.vec_p, s_p.as_mut_ptr()) };
         chkerrq!(self.world, ierr)?;

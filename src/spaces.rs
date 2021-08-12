@@ -2,11 +2,8 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/SPACE/index.html>
 
-// TODO: should we add Mat::NullSpace to this file
-
 use std::{ffi::CString, mem::MaybeUninit};
 use crate::{
-    Petsc,
     petsc_raw,
     Result,
     PetscAsRaw,
@@ -82,6 +79,23 @@ impl<'a> Space<'a> {
     pub fn type_compare(&self, type_kind: SpaceType) -> Result<bool> {
         self.type_compare_str(&type_kind.to_string())
     }
+
+    /// Set the degree of approximation for this space.
+    ///
+    /// # Parameters
+    ///
+    /// * `degree` - The degree of the largest polynomial space contained in the space.
+    /// * `max_degree` - The degree of the largest polynomial space containing the space.
+    ///
+    /// One of `degree` or `max_degree` can be `None` to have PETSc determine what it should be.
+    pub fn set_degree(&mut self, degree: impl Into<Option<PetscInt>>, max_degree: impl Into<Option<PetscInt>>) -> Result<()> {
+        let ierr = unsafe { petsc_raw::PetscSpaceSetDegree(
+            self.as_raw(),
+            degree.into().unwrap_or(petsc_raw::PETSC_DETERMINE),
+            max_degree.into().unwrap_or(petsc_raw::PETSC_DETERMINE) 
+        ) };
+        chkerrq!(self.world, ierr)
+    }
 }
 
 impl<'a, 'tl> DualSpace<'a, 'tl> {
@@ -138,10 +152,6 @@ impl<'a> Space<'a> {
         PetscSpacePolynomialGetTensor, pub polynomial_get_tensor, output bool, tensor, #[doc = "Gets whether a function space is a space of tensor polynomials, as opposed to polynomials."];
         PetscSpaceSetNumComponents, pub set_num_components, input PetscInt, nc, takes mut, #[doc = "Set the number of components for this space"];
         PetscSpaceSetNumVariables, pub set_num_variables, input PetscInt, nv, takes mut, #[doc = "Set the number of variables for this space"];
-        PetscSpaceSetDegree, pub set_degree, input PetscInt, degree, input PetscInt, max_degree, takes mut, #[doc = "Set the degree of approximation for this space.\n\n\
-            # Parameters\n\
-            * `degree` - The degree of the largest polynomial space contained in the space\n\
-            * `max_degree` - The degree of the largest polynomial space containing the space. TODO: One of degree and maxDegree can be PETSC_DETERMINE (None in rust). "];
         PetscSpaceGetNumComponents, pub get_num_components, output PetscInt, nc, #[doc = "Get the number of components for this space"];
         PetscSpaceGetNumVariables, pub get_num_variables, output PetscInt, nv, #[doc = "Get the number of variables for this space"];
         PetscSpaceGetDegree, pub get_degree, output PetscInt, degree, output PetscInt, max_degree, #[doc = "Get the degree of approximation for this space."];

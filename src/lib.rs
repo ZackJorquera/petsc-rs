@@ -101,7 +101,7 @@ use std::mem::{MaybeUninit, ManuallyDrop};
 use std::ffi::{CString, CStr, };
 use mpi::topology::UserCommunicator;
 
-pub(crate) mod macros;
+pub(crate) mod internal_macros;
 
 pub mod vector;
 pub mod mat;
@@ -739,21 +739,32 @@ impl Petsc {
     /// }
     /// ```
     ///
+    /// Same as [`Petsc::set_error2()`] but sets `line`, `func_name`, and `file_name` to `None`.
     pub fn set_error<C: Communicator, E>(world: &C, error_kind: PetscErrorKind, err_msg: E) -> Result<()>
+    where
+        E: Into<Box<dyn std::error::Error + Send + Sync>>
+    {
+        Petsc::set_error2(world, None, None, None, error_kind, err_msg)
+    }
+
+    /// Same as [`Petsc::set_error()`] but allows you to set the line number, function name, and file name.
+    pub fn set_error2<C: Communicator, E>(world: &C, line: Option<i32>, func_name: Option<&str>, file_name: Option<&str>, error_kind: PetscErrorKind, err_msg: E) -> Result<()>
     where
         E: Into<Box<dyn std::error::Error + Send + Sync>>
     {
         let error = PetscError { kind: error_kind, error: err_msg.into() };
 
         let c_s_r = CString::new(error.error.to_string());
+        let file_ocs = file_name.map(|file_name| CString::new(file_name).expect("`CString::new` failed"));
+        let func_ocs = func_name.map(|func_name| CString::new(func_name).expect("`CString::new` failed"));
 
         // TODO: It would be nice to get line number, func name, and file name from the caller,
         // however, it might be better for us to use results to build a stack trace, and
         // then it wouldn't really matter what we do here.
         // Regardless, the error handling needs a lot of work to be as functional as C PETSc.
         unsafe {
-            let _ = petsc_raw::PetscError(world.as_raw(), -1, std::ptr::null(), 
-                std::ptr::null(), error_kind as petsc_raw::PetscErrorCode,
+            let _ = petsc_raw::PetscError(world.as_raw(), line.unwrap_or(-1), func_ocs.as_ref().map_or(std::ptr::null(), |cs| cs.as_ptr()), 
+                file_ocs.as_ref().map_or(std::ptr::null(), |cs| cs.as_ptr()), error_kind as petsc_raw::PetscErrorCode,
                 PetscErrorType::PETSC_ERROR_INITIAL,
                 c_s_r.as_ref().map(|s| s.as_ptr()).unwrap_or(std::ptr::null()));
         }
@@ -1129,7 +1140,7 @@ pub(crate) trait PetscObjectPrivate<'a, PT>: PetscObject<'a, PT> {
 
 /// This is a internal template struct that is used when an object could have multiple types.
 ///
-/// For example this is used in [`DM::get_field_from_c_struct()`]
+/// For example this is used in [`dm::DM::get_field_from_c_struct()`]
 struct PetscObjectStruct<'a> {
     pub(crate) world: &'a UserCommunicator,
     pub(crate) po_p: *mut petsc_raw::_p_PetscObject,
@@ -1180,12 +1191,6 @@ where
     /// Builds the struct from a [`PetscOptBuilder`] object.
     fn from_petsc_opt_builder(petsc: &mut PetscOptBuilder) -> Result<Self>;
 }
-
-// We want to expose the complex type using the num-complex Complex type
-// which has the same memory layout as the one bindgen creates, `__BindgenComplex`.
-// TODO: is this the best way to do this? If we are just going to transmute to convert 
-// why dont we ignore these types from bindgen a manually define them our selves like
-// we did for MPI_Comm.
 
 /// PETSc type that represents a complex number with precision matching that of PetscReal.
 #[cfg(any(feature = "petsc-use-complex", feature = "petsc-sys/petsc-use-complex"))]

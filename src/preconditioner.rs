@@ -12,7 +12,6 @@ use std::mem::{MaybeUninit, ManuallyDrop};
 use std::ffi::{CString, };
 use std::pin::Pin;
 use crate::{
-    Petsc,
     petsc_raw,
     Result,
     PetscAsRaw,

@@ -4,7 +4,6 @@
 
 use std::mem::MaybeUninit;
 use crate::{
-    Petsc,
     petsc_raw,
     Result,
     PetscAsRaw,
