@@ -27,13 +27,6 @@ pub struct ISView<'a, 'b> {
     slice: &'b [PetscInt],
 }
 
-impl<'a> Drop for IS<'a> {
-    fn drop(&mut self) {
-        let ierr = unsafe { petsc_raw::ISDestroy(&mut self.is_p as *mut _) };
-        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
-    }
-}
-
 impl Drop for ISView<'_, '_> {
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::ISRestoreIndices(self.is.is_p, &mut self.array as *mut _) };
@@ -103,4 +96,4 @@ impl IS<'_> {
     }
 }
 
-impl_petsc_object_traits! { IS, is_p, petsc_raw::_p_IS, ISView; }
+impl_petsc_object_traits! { IS, is_p, petsc_raw::_p_IS, ISView, ISDestroy; }

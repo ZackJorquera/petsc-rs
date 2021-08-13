@@ -14,6 +14,7 @@ petsc-int-i32 = []
 petsc-int-i64 = []
 petsc-use-complex = ["num-complex"]
 generate-enums = []
+use-private-headers = []
 
 [dependencies]
 mpi-sys = {git = "https://github.com/rsmpi/rsmpi.git", rev = "82e1d35" }

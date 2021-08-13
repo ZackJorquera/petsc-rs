@@ -53,7 +53,7 @@ pub struct DM<'a, 'tl> {
     coord_dm: Option<Rc<DM<'a, 'tl>>>,
     coarse_dm: Option<Box<DM<'a, 'tl>>>,
 
-    fields: Option<Vec<(Option<DMLabel<'a>>, FieldPriv<'a, 'tl>)>>,
+    fields: Option<Vec<(Option<DMLabel<'a>>, FieldDiscPriv<'a, 'tl>)>>,
 
     ds: Option<DS<'a, 'tl>>,
 
@@ -81,9 +81,9 @@ pub struct DMLabel<'a> {
     pub(crate) dml_p: *mut petsc_raw::_p_DMLabel,
 }
 
-/// The PetscFE class encapsulates a finite element discretization.
+/// The [`FEDisc`] class encapsulates a finite element discretization.
 ///
-/// Each PetscFE object contains a PetscSpace, PetscDualSpace, and
+/// Each [`FEDisc`] object contains a [`Space`], [`DualSpace`], and
 /// DMPlex in the classic Ciarlet triple representation. 
 pub struct FEDisc<'a, 'tl> {
     pub(crate) world: &'a UserCommunicator,
@@ -91,9 +91,10 @@ pub struct FEDisc<'a, 'tl> {
 
     space: Option<Space<'a>>,
     dual_space: Option<DualSpace<'a, 'tl>>,
+    // TODO: add dm
 }
 
-/// The PetscFV class encapsulates a finite volume discretization.
+/// The [`FVDisc`] class encapsulates a finite volume discretization.
 ///
 /// TODO: implement
 pub struct FVDisc<'a> {
@@ -116,75 +117,88 @@ pub struct DMField<'a> {
 /// being used is the method [`DM::add_field()`].
 ///
 /// All variants implement `Into<Field>` so it's easier to use.
-pub enum Field<'a, 'tl> {
-    // TODO: what all do we except? Im not sure we should except DMField
+pub enum FieldDisc<'a, 'tl> {
+    // From what i can tell these are the only two options:
     /// The discretization object is [`FEDisc`]
     FEDisc(FEDisc<'a, 'tl>),
     /// The discretization object is [`FVDisc`]
     FVDisc(FVDisc<'a>),
-    /// The discretization object is [`DMField`]
-    DMField(DMField<'a>),
 }
 
 /// internal type used only for storage.
-enum FieldPriv<'a, 'tl> {
-    Known(Field<'a, 'tl>),
-    /// The discretization object is unknown, this is only used internally.
+// TODO: we could get rid of this struct by checking what type the FieldDisc
+// by using `PetscObjectGetClassId` like is done here (look at `to_known_unwrap`):
+// https://gitlab.com/petsc/petsc/-/blob/9634419/src/dm/impls/plex/plexsection.c#L454-456
+enum FieldDiscPriv<'a, 'tl> {
+    Known(FieldDisc<'a, 'tl>),
+    /// The discretization object is unknown or we dont care what it is,
+    /// this is only used internally.
     Unknown(crate::PetscObjectStruct<'a>),
 }
 
-unsafe impl PetscAsRaw for Field<'_, '_> {
+unsafe impl PetscAsRaw for FieldDisc<'_, '_> {
     type Raw = *mut petsc_raw::_p_PetscObject;
 
     #[inline]
     fn as_raw(&self) -> Self::Raw {
         match self {
-            Field::FEDisc(f) => f.as_raw() as *mut _,
-            Field::FVDisc(f) => f.as_raw() as *mut _,
-            Field::DMField(f) => f.as_raw() as *mut _,
+            FieldDisc::FEDisc(f) => f.as_raw() as *mut _,
+            FieldDisc::FVDisc(f) => f.as_raw() as *mut _,
         }
     }
 }
 
-unsafe impl<'a> crate::PetscAsRawMut for Field<'_, '_> {
+unsafe impl<'a> crate::PetscAsRawMut for FieldDisc<'_, '_> {
     #[inline]
     fn as_raw_mut(&mut self) -> *mut Self::Raw {
         match self {
-            Field::FEDisc(f) => &mut f.as_raw() as *mut *mut _ as *mut _,
-            Field::FVDisc(f) => &mut f.as_raw() as *mut *mut _ as *mut _,
-            Field::DMField(f) => &mut f.as_raw() as *mut *mut _ as *mut _,
+            FieldDisc::FEDisc(f) => &mut f.as_raw() as *mut *mut _ as *mut _,
+            FieldDisc::FVDisc(f) => &mut f.as_raw() as *mut *mut _ as *mut _,
         }
     }
 } 
 
-impl<'a> crate::PetscObject<'a, petsc_raw::_p_PetscObject> for Field<'a, '_> {
+impl<'a> crate::PetscObject<'a, petsc_raw::_p_PetscObject> for FieldDisc<'a, '_> {
     #[inline]
     fn world(&self) -> &'a mpi::topology::UserCommunicator {
         match self {
-            Field::FEDisc(f) => f.world(),
-            Field::FVDisc(f) => f.world(),
-            Field::DMField(f) => f.world(),
+            FieldDisc::FEDisc(f) => f.world(),
+            FieldDisc::FVDisc(f) => f.world(),
         }
     }
 }
 
-impl<'a> crate::PetscObjectPrivate<'a, petsc_raw::_p_PetscObject> for Field<'a, '_> { }
+impl<'a> crate::PetscObjectPrivate<'a, petsc_raw::_p_PetscObject> for FieldDisc<'a, '_> { }
 
-impl<'a, 'tl> Into<Field<'a, 'tl>> for FEDisc<'a, 'tl> {
-    fn into(self) -> Field<'a, 'tl> {
-        Field::FEDisc(self)
+impl<'a, 'tl> Into<FieldDisc<'a, 'tl>> for FEDisc<'a, 'tl> {
+    fn into(self) -> FieldDisc<'a, 'tl> {
+        FieldDisc::FEDisc(self)
     }
 }
 
-impl<'a, 'tl> Into<Field<'a, 'tl>> for FVDisc<'a> {
-    fn into(self) -> Field<'a, 'tl> {
-        Field::FVDisc(self)
+impl<'a, 'tl> Into<FieldDisc<'a, 'tl>> for FVDisc<'a> {
+    fn into(self) -> FieldDisc<'a, 'tl> {
+        FieldDisc::FVDisc(self)
     }
 }
 
-impl<'a, 'tl> Into<Field<'a, 'tl>> for DMField<'a> {
-    fn into(self) -> Field<'a, 'tl> {
-        Field::DMField(self)
+impl<'a, 'tl> FieldDiscPriv<'a, 'tl> {
+    #[allow(dead_code)]
+    fn to_known_unwrap(self) -> FieldDisc<'a, 'tl> {
+        match self {
+            FieldDiscPriv::Known(fd) => fd,
+            FieldDiscPriv::Unknown(ufd) => {
+                let id = ufd.get_class_id().unwrap();
+                if id == unsafe { petsc_raw::PETSCFE_CLASSID } {
+                    FEDisc::new(ufd.world, ufd.po_p as *mut _).into()
+                } else if id == unsafe { petsc_raw::PETSCFV_CLASSID } {
+                    FVDisc::new(ufd.world, ufd.po_p as *mut _).into()
+                } else {
+                    seterrq!(ufd.world, PetscErrorKind::PETSC_ERR_ARG_WRONG, 
+                        "Unknown discretization type for field").map(|_| unreachable!()).unwrap()
+                }
+            }
+        }
     }
 }
 
@@ -286,41 +300,6 @@ type BCFieldDyn<'tl> = dyn Fn(PetscInt, PetscInt, PetscInt,
     &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
     &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
     PetscReal, &[PetscReal], PetscInt, &[PetscScalar], &mut [PetscScalar]) -> Result<()> + 'tl;
-
-impl<'a> Drop for DM<'a, '_> {
-    fn drop(&mut self) {
-        let ierr = unsafe { petsc_raw::DMDestroy(&mut self.dm_p as *mut _) };
-        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
-    }
-}
-
-impl<'a> Drop for DMLabel<'a> {
-    fn drop(&mut self) {
-        let ierr = unsafe { petsc_raw::DMLabelDestroy(&mut self.dml_p as *mut _) };
-        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
-    }
-}
-
-impl<'a> Drop for FEDisc<'a, '_> {
-    fn drop(&mut self) {
-        let ierr = unsafe { petsc_raw::PetscFEDestroy(&mut self.fe_p as *mut _) };
-        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
-    }
-}
-
-impl<'a> Drop for DS<'a, '_> {
-    fn drop(&mut self) {
-        let ierr = unsafe { petsc_raw::PetscDSDestroy(&mut self.ds_p as *mut _) };
-        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
-    }
-}
-
-impl<'a> Drop for WeakForm<'a> {
-    fn drop(&mut self) {
-        let ierr = unsafe { petsc_raw::PetscWeakFormDestroy(&mut self.wf_p as *mut _) };
-        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
-    }
-}
 
 impl<'a, 'tl> DM<'a, 'tl> {
     /// Same as `DM { ... }` but sets all optional params to `None`
@@ -1228,7 +1207,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// Add the discretization object for the given DM field 
     ///
     /// Note, The label indicates the support of the field, or is `None` for the entire mesh.
-    pub fn add_field(&mut self, label: impl Into<Option<DMLabel<'a>>>, field: impl Into<Field<'a, 'tl>>) -> Result<()> {
+    pub fn add_field(&mut self, label: impl Into<Option<DMLabel<'a>>>, field: impl Into<FieldDisc<'a, 'tl>>) -> Result<()> {
         // TODO: should we make label be an `Rc<DMLabel>`
         // TODO: what type does the dm need to be, if any?
         let field = field.into();
@@ -1240,9 +1219,9 @@ impl<'a, 'tl> DM<'a, 'tl> {
             chkerrq!(self.world, ierr)?;
 
             if let Some(f) = self.fields.as_mut() {
-                f.push((label, FieldPriv::Known(field)));
+                f.push((label, FieldDiscPriv::Known(field)));
             } else {
-                self.fields = Some(vec![(label, FieldPriv::Known(field))]);
+                self.fields = Some(vec![(label, FieldDiscPriv::Known(field))]);
             }
 
             Ok(())
@@ -2549,7 +2528,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     }
 
     /// Internal function
-    fn get_field_from_c_struct(&self, f: PetscInt) -> Result<(Option<DMLabel<'a>>, FieldPriv<'a, 'tl>)>
+    fn get_field_from_c_struct(&self, f: PetscInt) -> Result<(Option<DMLabel<'a>>, FieldDiscPriv<'a, 'tl>)>
     { 
         let mut dml_p = MaybeUninit::uninit();
         let mut f_p = MaybeUninit::uninit();
@@ -2564,7 +2543,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
 
         let mut field = crate::PetscObjectStruct { world: self.world, po_p: unsafe { f_p.assume_init() } };
         unsafe { field.reference()?; }
-        Ok((label, FieldPriv::Unknown(field)))
+        Ok((label, FieldDiscPriv::Unknown(field)))
     }
 
     /// Get the coarse mesh from which this was obtained by refinement.
@@ -2756,7 +2735,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
 }
 
 impl<'a> FEDisc<'a, '_> {
-    /// Same as `Field { ... }` but sets all optional params to `None`
+    /// Same as `FEDisc { ... }` but sets all optional params to `None`
     pub(crate) fn new(world: &'a UserCommunicator, fe_p: *mut petsc_raw::_p_PetscFE) -> Self {
         FEDisc { world, fe_p, space: None, dual_space: None }
     }
@@ -2793,6 +2772,13 @@ impl<'a> FEDisc<'a, '_> {
     /// Determines whether a PETSc [`FEDisc`] is of a particular type.
     pub fn type_compare(&self, type_kind: FEDiscType) -> Result<bool> {
         self.type_compare_str(&type_kind.to_string())
+    }
+}
+
+impl<'a> FVDisc<'a> {
+    /// Same as `FVDisc { ... }` but sets all optional params to `None`
+    pub(crate) fn new(world: &'a UserCommunicator, fv_p: *mut petsc_raw::_p_PetscFV) -> Self {
+        FVDisc { world, fv_p }
     }
 }
 
@@ -3001,7 +2987,7 @@ impl<'a> DM<'a, '_> {
         DMDASetUniformCoordinates, pub da_set_uniform_coordinates, input PetscReal, x_min, input PetscReal, x_max, input PetscReal, y_min,
             input PetscReal, y_max, input PetscReal, z_min, input PetscReal, z_max, #[doc = "Sets a DMDA coordinates to be a uniform grid.\n\n\
             `y` and `z` values will be ignored for 1 and 2 dimensional problems."];
-        DMCompositeGetNumberDM, pub composite_get_num_dms_petsc, output PetscInt, ndms, #[doc = "idk remove this maybe"];
+        DMCompositeGetNumberDM, pub composite_get_num_dms_petsc, output PetscInt, ndms, #[doc = "Get's the number of DM objects in the DMComposite representation."]; // TODO: remove this maybe, we can just use .len() on dm list
         DMPlexSetRefinementUniform, pub plex_set_refinement_uniform, input bool, refinement_uniform, takes mut, #[doc = "Set the flag for uniform refinement"];
         DMPlexIsSimplex, pub plex_is_simplex, output bool, flg, #[doc = "Is the first cell in this mesh a simplex?\n\n\
             Only avalable for PETSc `v3.16-dev.0`"] #[cfg(any(petsc_version_3_16_dev, doc))];
@@ -3022,11 +3008,11 @@ impl<'a, 'tl> FEDisc<'a, 'tl> {
 }
 
 impl_petsc_object_traits! {
-    DM, dm_p, petsc_raw::_p_DM, DMView, '_;
-    DMLabel, dml_p, petsc_raw::_p_DMLabel, DMLabelView;
-    FEDisc, fe_p, petsc_raw::_p_PetscFE, PetscFEView, '_;
-    FVDisc, fv_p, petsc_raw::_p_PetscFV, PetscFVView;
-    DMField, field_p, petsc_raw::_p_DMField, DMFieldView;
-    DS, ds_p, petsc_raw::_p_PetscDS, PetscDSView, '_;
-    WeakForm, wf_p, petsc_raw::_p_PetscWeakForm, PetscWeakFormView;
+    DM, dm_p, petsc_raw::_p_DM, DMView, DMDestroy, '_;
+    DMLabel, dml_p, petsc_raw::_p_DMLabel, DMLabelView, DMLabelDestroy;
+    FEDisc, fe_p, petsc_raw::_p_PetscFE, PetscFEView, PetscFEDestroy, '_;
+    FVDisc, fv_p, petsc_raw::_p_PetscFV, PetscFVView, PetscFVDestroy;
+    DMField, field_p, petsc_raw::_p_DMField, DMFieldView, DMFieldDestroy;
+    DS, ds_p, petsc_raw::_p_PetscDS, PetscDSView, PetscDSDestroy, '_;
+    WeakForm, wf_p, petsc_raw::_p_PetscWeakForm, PetscWeakFormView, PetscWeakFormDestroy;
 }

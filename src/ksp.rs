@@ -59,13 +59,6 @@ struct KSPComputeRHSTrampolineData<'a, 'tl> {
     user_f: Box<dyn FnMut(&KSP<'a, 'tl, '_>, &mut Vector<'a>) -> Result<()> + 'tl>,
 }
 
-impl<'a> Drop for KSP<'a, '_, '_> {
-    fn drop(&mut self) {
-        let ierr = unsafe { petsc_raw::KSPDestroy(&mut self.ksp_p as *mut _) };
-        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
-    }
-}
-
 impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
     /// Same as `KSP { ... }` but sets all optional params to `None`
     pub(crate) fn new(world: &'a UserCommunicator, ksp_p: *mut petsc_raw::_p_KSP) -> Self {
@@ -408,4 +401,4 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
     }
 }
 
-impl_petsc_object_traits! { KSP, ksp_p, petsc_raw::_p_KSP, KSPView, '_, '_; }
+impl_petsc_object_traits! { KSP, ksp_p, petsc_raw::_p_KSP, KSPView, KSPDestroy, '_, '_; }

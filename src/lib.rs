@@ -649,7 +649,7 @@ impl Petsc {
     /// Same as [`petsc_sys::PETSC_VERSION_SUBMINOR`].
     ///
     /// This value is only "correct" if PETSc is using a release version. If the version
-    /// of PETSc is pre-release then this value should be `0`, but wont nessaserally be `0`.
+    /// of PETSc is pre-release then this value should be `0`, but wont necessarily be `0`.
     pub const VERSION_SUBMINOR: usize = petsc_raw::PETSC_VERSION_SUBMINOR as usize;
 
     /// If the PETSc library is release (`true`) or pre-release (`false`).
@@ -1135,18 +1135,20 @@ pub(crate) trait PetscObjectPrivate<'a, PT>: PetscObject<'a, PT> {
         PetscObjectReference, reference, takes mut, is unsafe, #[doc = "Indicates to any PetscObject that it is being referenced by another PetscObject. This increases the reference count for that object by one."];
         PetscObjectDereference, dereference, takes mut, is unsafe, #[doc = "Indicates to any PetscObject that it is being referenced by one less PetscObject. This decreases the reference count for that object by one."];
         PetscObjectGetReference, get_reference_count, output PetscInt, cnt, #[doc = "Gets the current reference count for any PETSc object."];
+        PetscObjectGetClassId, get_class_id, output petsc_raw::PetscClassId, id, #[doc = "Gets the classid for any PetscObject"];
     }
 }
 
 /// This is a internal template struct that is used when an object could have multiple types.
 ///
 /// For example this is used in [`dm::DM::get_field_from_c_struct()`]
+// TODO: Should we impl Drop for it?
 struct PetscObjectStruct<'a> {
     pub(crate) world: &'a UserCommunicator,
     pub(crate) po_p: *mut petsc_raw::_p_PetscObject,
 }
 
-impl_petsc_object_traits! { PetscObjectStruct, po_p, petsc_raw::_p_PetscObject, PetscObjectView; }
+impl_petsc_object_traits! { PetscObjectStruct, po_p, petsc_raw::_p_PetscObject, PetscObjectView, PetscObjectDestroy; }
 
 // Because the `view_with` function created is private it will yell at us
 // for not using it so until then I will comment this out:

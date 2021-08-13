@@ -62,13 +62,6 @@ pub struct BorrowMat<'a, 'tl, 'bv> {
     pub(crate) _phantom: PhantomData<&'bv Mat<'a, 'tl>>,
 }
 
-impl<'a> Drop for Mat<'a, '_> {
-    fn drop(&mut self) {
-        let ierr = unsafe { petsc_raw::MatDestroy(&mut self.mat_p as *mut _) };
-        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
-    }
-}
-
 impl Drop for BorrowMatMut<'_, '_, '_> {
     fn drop(&mut self) {
         self.drop_func.take().map(|f| f(self));
@@ -85,13 +78,6 @@ impl Drop for BorrowMat<'_, '_, '_> {
 pub struct NullSpace<'a> {
     pub(crate) world: &'a UserCommunicator,
     pub(crate) ns_p: *mut petsc_raw::_p_MatNullSpace,
-}
-
-impl Drop for NullSpace<'_> {
-    fn drop(&mut self) {
-        let ierr = unsafe { petsc_raw::MatNullSpaceDestroy(&mut self.ns_p as *mut _) };
-        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
-    }
 }
 
 pub use petsc_raw::MatAssemblyType;
@@ -2105,6 +2091,6 @@ impl<'a> NullSpace<'a> {
 }
 
 impl_petsc_object_traits! { 
-    Mat, mat_p, petsc_raw::_p_Mat, MatView, '_;
-    NullSpace, ns_p, petsc_raw::_p_MatNullSpace, MatNullSpaceView;
+    Mat, mat_p, petsc_raw::_p_Mat, MatView, MatDestroy, '_;
+    NullSpace, ns_p, petsc_raw::_p_MatNullSpace, MatNullSpaceView, MatNullSpaceDestroy;
 }

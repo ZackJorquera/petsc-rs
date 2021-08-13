@@ -68,13 +68,6 @@ pub struct BorrowVector<'a, 'bv> {
     _phantom: PhantomData<&'bv Vector<'a>>,
 }
 
-impl<'a> Drop for Vector<'a> {
-    fn drop(&mut self) {
-        let ierr = unsafe { petsc_raw::VecDestroy(&mut self.vec_p as *mut _) };
-        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
-    }
-}
-
 impl Drop for BorrowVectorMut<'_, '_> {
     fn drop(&mut self) {
         self.drop_func.take().map(|f| f(self));
@@ -782,4 +775,4 @@ impl<'a> Vector<'a> {
     }
 }
 
-impl_petsc_object_traits! { Vector, vec_p, petsc_raw::_p_Vec, VecView; }
+impl_petsc_object_traits! { Vector, vec_p, petsc_raw::_p_Vec, VecView, VecDestroy; }

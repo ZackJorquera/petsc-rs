@@ -25,26 +25,12 @@ pub struct Space<'a> {
     pub(crate) s_p: *mut petsc_raw::_p_PetscSpace,
 }
 
-impl Drop for Space<'_> {
-    fn drop(&mut self) {
-        let ierr = unsafe { petsc_raw::PetscSpaceDestroy(&mut self.s_p as *mut _) };
-        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
-    }
-}
-
 /// PETSc object that manages the dual space to a linear space, e.g. the space of evaluation functionals at the vertices of a triangle 
 pub struct DualSpace<'a, 'tl> {
     pub(crate) world: &'a UserCommunicator,
     pub(crate) ds_p: *mut petsc_raw::_p_PetscDualSpace,
 
     dm: Option<DM<'a, 'tl>>
-}
-
-impl Drop for DualSpace<'_, '_> {
-    fn drop(&mut self) {
-        let ierr = unsafe { petsc_raw::PetscDualSpaceDestroy(&mut self.ds_p as *mut _) };
-        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
-    }
 }
 
 impl<'a> Space<'a> {
@@ -174,6 +160,6 @@ impl<'a, 'tl> DualSpace<'a, 'tl> {
 }
 
 impl_petsc_object_traits! {
-    Space, s_p, petsc_raw::_p_PetscSpace, PetscSpaceView;
-    DualSpace, ds_p, petsc_raw::_p_PetscDualSpace, PetscDualSpaceView, '_;
+    Space, s_p, petsc_raw::_p_PetscSpace, PetscSpaceView, PetscSpaceDestroy;
+    DualSpace, ds_p, petsc_raw::_p_PetscDualSpace, PetscDualSpaceView, PetscDualSpaceDestroy, '_;
 }

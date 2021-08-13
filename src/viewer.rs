@@ -30,13 +30,6 @@ pub struct Viewer<'a> {
     pub(crate) viewer_p: *mut petsc_raw::_p_PetscViewer,
 }
 
-impl<'a> Drop for Viewer<'a> {
-    fn drop(&mut self) {
-        let ierr = unsafe { petsc_raw::PetscViewerDestroy(&mut self.viewer_p as *mut _) };
-        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
-    }
-}
-
 impl<'a> Viewer<'a> {
     /// Creates a ASCII PetscViewer shared by all processors in a communicator.
     pub fn create_ascii_stdout(world: &'a UserCommunicator) -> Result<Self>
@@ -76,4 +69,4 @@ pub trait PetscViewable {
     fn view_with<'vl, 'val: 'vl>(&self, viewer: impl Into<Option<&'vl Viewer<'val>>>) -> Result<()>;
 }
 
-impl_petsc_object_traits! { Viewer, viewer_p, petsc_raw::_p_PetscViewer, PetscViewerView; }
+impl_petsc_object_traits! { Viewer, viewer_p, petsc_raw::_p_PetscViewer, PetscViewerView, PetscViewerDestroy; }

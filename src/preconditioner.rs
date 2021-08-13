@@ -47,14 +47,6 @@ struct PCShellSetApplyTrampolineData<'a, 'tl> {
     user_f: Box<dyn FnMut(&PC<'a, 'tl, '_>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>,
 }
 
-impl<'a> Drop for PC<'a, '_, '_> {
-    // Note, this should only be called if the PC context was created with `PCCreate`.
-    fn drop(&mut self) {
-        let ierr = unsafe { petsc_raw::PCDestroy(&mut self.pc_p as *mut _) };
-        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
-    }
-}
-
 impl<'a, 'tl, 'bl> PC<'a, 'tl, 'bl> {
     /// Same as `PC { ... }` but sets all optional params to `None`
     pub(crate) fn new(world: &'a UserCommunicator, pc_p: *mut petsc_raw::_p_PC) -> Self {
@@ -281,4 +273,4 @@ impl<'a> PC<'a, '_, '_> {
     }
 }
 
-impl_petsc_object_traits! { PC, pc_p, petsc_raw::_p_PC, PCView, '_, '_; }
+impl_petsc_object_traits! { PC, pc_p, petsc_raw::_p_PC, PCView, PCDestroy, '_, '_; }

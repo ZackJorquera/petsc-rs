@@ -138,20 +138,6 @@ struct SNESLineSearchPreCheckTrampolineData<'a, 'tl> {
 
 pub use petsc_raw::SNESConvergedReason;
 
-impl<'a> Drop for SNES<'a, '_, '_> {
-    fn drop(&mut self) {
-        let ierr = unsafe { petsc_raw::SNESDestroy(&mut self.snes_p as *mut _) };
-        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
-    }
-}
-
-impl Drop for LineSearch<'_> {
-    fn drop(&mut self) {
-        let ierr = unsafe { petsc_raw::SNESLineSearchDestroy(&mut self.ls_p as *mut _) };
-        let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap or what idk?
-    }
-}
-
 impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     /// Same as `SNES { ... }` but sets all optional params to `None`
     pub(crate) fn new(world: &'a UserCommunicator, snes_p: *mut petsc_raw::_p_SNES) -> Self {
@@ -1025,6 +1011,6 @@ impl<'a> SNES<'a, '_, '_> {
 }
 
 impl_petsc_object_traits! {
-    SNES, snes_p, petsc_raw::_p_SNES, SNESView, '_, '_;
-    LineSearch, ls_p, petsc_raw::_p_LineSearch, SNESLineSearchView;
+    SNES, snes_p, petsc_raw::_p_SNES, SNESView, SNESDestroy, '_, '_;
+    LineSearch, ls_p, petsc_raw::_p_LineSearch, SNESLineSearchView, SNESLineSearchDestroy;
 }

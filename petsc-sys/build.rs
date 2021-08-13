@@ -217,7 +217,8 @@ fn main() {
                     "CARGO_FEATURE_PETSC_USE_COMPLEX",
                     "CARGO_FEATURE_PETSC_INT_I32",
                     "CARGO_FEATURE_PETSC_INT_I64",
-                    "CARGO_FEATURE_GENERATE_ENUMS"].iter()
+                    "CARGO_FEATURE_GENERATE_ENUMS",
+                    "CARGO_FEATURE_USE_PRIVATE_HEADERS"].iter()
         .map(|&x| env::var(x).ok().map(|o| if o == "1" { Some(x) } else { None }).flatten())
         .flatten().collect::<Vec<_>>();
 
@@ -232,6 +233,7 @@ fn main() {
     let int_features = features.iter().filter(|a| a.contains("PETSC_INT_"))
         .copied().collect::<Vec<_>>();
     let generate_enums_feature = features.contains(&"CARGO_FEATURE_GENERATE_ENUMS");
+    let use_private_headers = features.contains(&"CARGO_FEATURE_USE_PRIVATE_HEADERS");
     
     assert_eq!(real_features.len(),  1, 
         "There must be exactly one \"petsc-real-*\" feature enabled. There are {} enabled.",
@@ -292,6 +294,10 @@ fn main() {
     }
     for dir in &mpi_lib.include_paths {
         bindings = bindings.clang_arg(format!("-I{}", dir.to_string_lossy()));
+    }
+
+    if use_private_headers {
+        bindings = bindings.clang_arg("-DUSE_PRIVATE_HEADERS");
     }
 
     // TODO: get comments somehow

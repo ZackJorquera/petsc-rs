@@ -28,6 +28,8 @@
 /// }
 /// ```
 ///
+/// Note, for the raw PETSc function, `VecNorm` in this case, do not include the `petsc_raw::` as it is done internally.
+///
 /// For a more general case lets say we have a Petsc function called `VecSetABRetCD`
 /// that is defined as follows (from bindgen): 
 /// `pub unsafe fn VecSetABRetCD(arg1: Vec, arg2: PetscInt, arg3: PetscReal, arg4: *mut PetscReal, arg5: *mut PetscInt) -> PetscErrorCode`
@@ -39,7 +41,7 @@
 ///     pub(crate) vec_p: *mut petsc_raw::_p_Vec,
 /// }
 ///
-/// impl_petsc_object_traits! { Vector, vec_p, petsc_raw::_p_Vec, VecView; }
+/// impl_petsc_object_traits! { Vector, vec_p, petsc_raw::_p_Vec, VecView, VecDestroy; }
 /// ```
 /// Note, for the macro to work, the type must implement `crate::PetscAsRaw` and `crate::PetscObject`.
 /// This can be done with the [`impl_petsc_object_traits!`] macro. Once a wrapper type implements
@@ -190,23 +192,26 @@ $(
 }
 
 /// Implements [`PetscAsRaw`](crate::PetscAsRaw), [`PetscAsRawMut`](crate::PetscAsRawMut), [`PetscObject`](crate::PetscObject),
-/// [`PetscObjectPrivate`](crate::PetscObjectPrivate), and [`viewer::PetscViewable`](crate::viewer::PetscViewable).
+/// [`PetscObjectPrivate`](crate::PetscObjectPrivate), [`viewer::PetscViewable`](crate::viewer::PetscViewable),
+/// and [`Drop`](::std::ops::Drop).
+///
+/// Note, you should not include the `petsc_raw::` on the raw function names, but you should on the raw pointer type.
 ///
 /// You can run this macro on multiple structs at a time:
 /// ```ignore
 /// impl_petsc_object_traits! {
-///     DM, dm_p, petsc_raw::_p_DM, DMView, '_;
-///     DMLabel, dml_p, petsc_raw::_p_DMLabel, DMLabelView;
-///     FEDisc, fe_p, petsc_raw::_p_PetscFE, PetscFEView, '_;
-///     FVDisc, fv_p, petsc_raw::_p_PetscFV, PetscFVView;
-///     DMField, field_p, petsc_raw::_p_DMField, DMFieldView;
-///     DS, ds_p, petsc_raw::_p_PetscDS, PetscDSView, '_;
-///     WeakForm, wf_p, petsc_raw::_p_PetscWeakForm, PetscWeakFormView;
+///     DM, dm_p, petsc_raw::_p_DM, DMView, DMDestroy, '_;
+///     DMLabel, dml_p, petsc_raw::_p_DMLabel, DMLabelView, DMLabelDestroy;
+///     FEDisc, fe_p, petsc_raw::_p_PetscFE, PetscFEView, PetscFEDestroy, '_;
+///     FVDisc, fv_p, petsc_raw::_p_PetscFV, PetscFVView, PetscFVDestroy;
+///     DMField, field_p, petsc_raw::_p_DMField, DMFieldView, DMFieldDestroy;
+///     DS, ds_p, petsc_raw::_p_PetscDS, PetscDSView, PetscDSDestroy, '_;
+///     WeakForm, wf_p, petsc_raw::_p_PetscWeakForm, PetscWeakFormView, PetscWeakFormDestroy;
 /// }
 /// ```
 macro_rules! impl_petsc_object_traits {
     {$(
-        $struct_name:ident, $raw_ptr_var:ident, $raw_ptr_ty:ty, $raw_view_func:ident $(, $add_lt:lifetime)* ;
+        $struct_name:ident, $raw_ptr_var:ident, $raw_ptr_ty:ty, $raw_view_func:ident, $raw_destroy_func:ident $(, $add_lt:lifetime)* ;
     )*} => {
     $(
         unsafe impl<'a> crate::PetscAsRaw for $struct_name<'a, $( $add_lt ),*> {
@@ -228,14 +233,13 @@ macro_rules! impl_petsc_object_traits {
         impl<'a> crate::PetscObject<'a, $raw_ptr_ty> for $struct_name<'a, $( $add_lt ),*> {
             #[inline]
             fn world(&self) -> &'a mpi::topology::UserCommunicator {
-                self.world
+                self.world // should we make this a macro input or is it safe to assume that is will always be `.world`
             }
         }
 
         impl<'a> crate::PetscObjectPrivate<'a, $raw_ptr_ty> for $struct_name<'a, $( $add_lt ),*> { }
 
-        impl crate::viewer::PetscViewable for $struct_name<'_, $( $add_lt ),*>
-        {
+        impl crate::viewer::PetscViewable for $struct_name<'_, $( $add_lt ),*> {
             /// Views the object with a viewer
             fn view_with<'vl, 'val: 'vl>(&self, viewer: impl Into<Option<&'vl crate::viewer::Viewer<'val>>>) -> crate::Result<()> {
                 let owned_viewer;
@@ -248,6 +252,13 @@ macro_rules! impl_petsc_object_traits {
                 };
                 let ierr = unsafe { crate::petsc_raw::$raw_view_func(self.as_raw(), viewer.as_raw()) };
                 chkerrq!(self.world(), ierr)
+            }
+        }
+
+        impl ::std::ops::Drop for $struct_name<'_, $( $add_lt ),*> {
+            fn drop(&mut self) {
+                let ierr = unsafe { crate::petsc_raw::$raw_destroy_func(&mut self.as_raw() as *mut _) };
+                let _ = chkerrq!(self.world(), ierr); // TODO: should I unwrap or what idk?
             }
         }
     )*
