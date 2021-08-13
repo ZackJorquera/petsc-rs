@@ -313,15 +313,15 @@ fn main() {
 
         .emit_builtins()
 
-        .allowlist_function("[A-Z][a-zA-Z0-9]*(_Private)?")
-        .allowlist_type("[A-Z][a-zA-Z0-9_]*")
-        .allowlist_var("[A-Z][a-zA-Z0-9_]*")
+        .whitelist_function("[A-Z][a-zA-Z0-9]*(_Private)?")
+        .whitelist_type("[A-Z][a-zA-Z0-9_]*")
+        .whitelist_var("[A-Z][a-zA-Z0-9_]*")
 
         .opaque_type("FILE")
 
         // There is no need to make bindings for mpi types as that has already been done in the mpi crate
-        .blocklist_item("(O?MPI|o?mpi)[\\w_]*")
-        .blocklist_item("FP\\w*") // we need this because PETSc defines FP_* things twice and we will get errors
+        .blacklist_item("(O?MPI|o?mpi)[\\w_]*")
+        .blacklist_item("FP\\w*") // we need this because PETSc defines FP_* things twice and we will get errors
         // .raw_line("use mpi::ffi::*;")
 
         // Tell cargo to not mangle the function names

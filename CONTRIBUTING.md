@@ -26,7 +26,7 @@ This crate validates that PETSc was built with the correct types, i.e. the size 
 
 #### `build-probe-petsc`
 
-This crate is used to probe for the petsc library. It also provides us with version information and build information stored in some of the headers files, like the size of ints and floats, if we are using complex or real numbers, and version information. The main reason why this is separated from petsc-sys is that it is useful for `petsc-rs` to know about some of this information.
+This crate is used to probe for the petsc library. It also provides us with version information and build information stored in some of the header files, like the size of ints and floats, if we are using complex or real numbers, and version information. The main reason why this is separated from petsc-sys is that it is useful for `petsc-rs` to know about some of this information.
 
 ### features
 
@@ -40,11 +40,15 @@ Right now, this is all done in the `build.rs` for `petsc-sys`, but I think it wo
 
 ## Notable Issues
 
-### Bindgen Versions
+### MPI Versions
 
-Right now when you build `petsc-rs` two versions of bindgen will be used. This is because the [`rsmpi`](https://github.com/rsmpi/rsmpi) uses an outdated version of bindgen. Instead of using the same version they do, I opted to use the latest version. If they were to use the same version that could cut down on about half of the build dependencies.
+Currently, we are using the `rsmpi` from its GitHub repo and not from [crates.io](https://crates.io/). This is because the most recent version of `rsmpi` on [crates.io](https://crates.io/), currently [0.5.4](https://crates.io/crates/mpi/0.5.4), is more than 3 years old and is not compatible with newer versions of MPI. It also uses a lot of outdated dependencies that cause problems with the mostly up-to-date dependencies used by `petsc-rs`.
 
-Also, if we use the version of `rsmpi` on <crates.io>, currently [0.5.4](https://crates.io/crates/mpi/0.5.4), then we would get an error saying that we have two incompatible versions of libffi. This is because that version of `rsmpi` is from 3 years ago and uses an even older version of bindgen. 
+It seems like the [0.6 release](https://github.com/rsmpi/rsmpi/issues/95) isn't that far away, at least in terms of work still needing to be done. The main problem is that I haven't seen any work done on `rsmpi` since march. It seems to be inactive for the time being.
+
+Also, to prevent having multiple versions of bindgen, we use the same version that [`mpi-sys` uses](https://github.com/rsmpi/rsmpi/blob/master/mpi-sys/Cargo.toml#L20), which is not the most recent version of bindgen but doesn't really limit the functionality that much.
+
+If we want to publish the `petsc-rs` crate on [crates.io](https://crates.io/), we will need to remove all of the `git = ""` dependencies, which is only a problem for MPI related crates.
 
 ### Complex numbers and the FFI issue
 
@@ -74,7 +78,7 @@ This causes one major problem, the closure gives mutable access to a rust wrappe
 
 ### The `wrap_simple_petsc_member_funcs!` macro
 
-A lot of the wrappers that need to be created for many of the PETSc functions are very boilerplate, so I create a macro to try and do a lot of the more tedious stuff for us. I think I did a good job explaining how to use it in its doc-string, so I won't mention that here.
+A lot of the wrappers that need to be created for many of the PETSc functions are very boilerplate, so I created a macro to try and do a lot of the more tedious stuff for us. I think I did a good job explaining how to use it in its doc-string, so I won't mention that here.
 
 ## What still needs to be done
 
@@ -88,31 +92,31 @@ Most of these are just things I made as I was making `petsc-rs` so some might be
 
 There are also a lot of `TODO` comments throughout the repository that I try to keep up to date.
 
-- [ ] should dmda and other types of DM be their own class. Then DM can be a trait or something. This would make it safer, i.e. you can't call da method unless you are a DMDA. This same question exists for all PETSc wrapper types. However, I think what we have right now works fine so im not supper motivated to try to implement this right now. Also, look at the [`Field` type](https://gitlab.com/petsc/petsc-rs/-/blob/main/src/dm.rs#L119-127).
+- [ ] should DMDA and other types of DM be their own struct. Then DM can be a trait or something. This would make it safer, i.e. you can't call da method unless you are a DMDA. This same question exists for all PETSc wrapper types. However, I think what we have right now works fine so I'm not supper motivated to try to implement this right now. Also, look at the [`Field` type](https://gitlab.com/petsc/petsc-rs/-/blob/main/src/dm.rs#L119-127).
 - [ ] Do we want wrappers of `DMSNESSetFunction` and `DMKSPSetComputeOperators`. If so it would make sense to move the trampoline data to the DM, i.e. `SNES::set_function` would just call `DM::snes_set_function` and that would deal with the closure.
 - [ ] Add a wrapper for `DMGetCoordinates` (also what does it do) (returns a vector with a different type than PetscScalar, should we use generics on vector, or we could make a new struct CoordVec or something)
-- [ ] make Mat builder an option for construction I think what we have now works well enough, but you shouldn't be able use the mat until you call `set_up` so i would make sense to have that be a consuming builder.
+- [ ] make Mat builder an option for construction I think what we have now works well enough, but you shouldn't be able to use the mat until you call `set_up` so it would make sense to have that be a consuming builder.
   - [ ] make Vector builder an option for construction
-- [ ] add comments to raw bindings (would have to edit the bindgen results) (the PETSc code has comments on all the functions (in `*.c` file), It would be cool if we could grab it) (or just link to the online C API docs). I don't know how to do this or if we even can. I've tried a couple of things but have had no success. In the end it probably isn't a big deal because the user can always just search the PETSc C API docs.
+- [ ] add comments to raw bindings (would have to edit the bindgen results) (the PETSc code has comments on all the functions (in `*.c` file), It would be cool if we could grab it) (or just link to the online C API docs). I don't know how to do this or if we even can. I've tried a couple of things but have had no success. In the end, it probably isn't a big deal because the user can always just search the PETSc C API docs.
 - [ ] make build.rs build petsc if a feature to do that is on
-  - [ ] add features on how to install blas (maybe) (look into blas-lapack-rs) -  i don't know if this is necessary. Also we dont use blas directly anywhere is so idk if this even matters.
+  - [ ] add features on how to install blas (maybe) (look into blas-lapack-rs) - I don't know if this is necessary. Also, we don't use blas directly anywhere is so IDK if this even matters.
   - [ ] I suspect that if Petsc installed mpi, then we could use that version, i.e., we need to find the mpi installed on the system (look at rsmpi to see what they do in this case).
-  - [ ] In the same vein we should support a static install of petsc (I think the only reason it doesn't work for me rn is that the static install i have is 3.10 not 3.15)
+  - [ ] In the same vein we should support a static install of petsc (I think the only reason it doesn't work for me rn is that the static install I have is 3.10 not 3.15)
   - [ ] I foresee this being an issue in the future, when we install petsc in petsc-sys build.rs, we will want to make sure that the petsc-rs build.rs is not run until the install has finished, or have some way of petsc-rs waiting for the install. Note, cargo runs them in parallel right now so we can guarantee anything about what is run when.
 - [ ] make all unwraps in docstrings us try `?` instead
 - [ ] add PF bindings (https://petsc.org/release/docs/manualpages/PF/index.html)
-- [ ] add better MatStencil type for petsc-rs (maybe add a bunch of types that all implement Into<MatStencil> or a bunch of new_Xd functions )
+- [ ] add better MatStencil type for petsc-rs (maybe add a bunch of types that all implement `Into<MatStencil>` or a bunch of `new_Xd` functions )
 - [ ] add wrapper for `MatNullSpaceSetFunction`
 - [ ] it would be cool to make a macro that functions sort of like stuctopt for the PetscOpt trait
 - [ ] work on complex numbers
-- [ ] it would make sense to move a lot of the high-level functionality to rust side (for of like we did for da_vec_view)
+- [ ] it would make sense to move a lot of the high-level functionality to the rust side (for of like we did for da_vec_view)
   - [ ] we could do this for viewers
-  - [ ] Also add GUI viewer, look how OpenCV rust bindings does it
+  - [ ] Also add GUI viewer, look how OpenCV rust bindings do it
   - [ ] we could maybe do this for error handling (i.e. rewrite PetscError).
 - [ ] make LineSearch API better (in general and for set_post/pre_check) (Note, the `changed` bools needing to be the same for all processes so it might make sense to do a mpi all reduce) Maybe look into ndarray::CowArray to determine if the user edited the array.
 - [ ] make DMDA use const generic to store the dimensions - this is in the same vein as having DMDA be its own struct type
 - [ ] make set_sizes take an enum that contains both local and global so you can't give two Nones and get an error - IDK if this is that important, I kind of like the current API.
-- [ ] maybe make re-exports from petsc_raw use type defs if we change the name e.g., `pub type PetscErrorKind = petsc_raw::PetscErrorCodeEnum` not `pub use petsc_raw::PetscErrorCodeEnum as PetscErrorKind`. However, this does cause problems for enums, we lose the variants in the docs.
+- [ ] maybe make re-exports from petsc_raw use typedefs if we change the name e.g., `pub type PetscErrorKind = petsc_raw::PetscErrorCodeEnum` not `pub use petsc_raw::PetscErrorCodeEnum as PetscErrorKind`. However, this does cause problems for enums, we lose the variants in the docs.
 - [ ] add `KSP::set_compute_operators_single_mat`, if it would even make a different. Right now we just ignore one of the operators.
 - [ ] create wrapper macro to synchronize method calls, for example, we could do something like `sync! { petsc.world(), println!("hello process: {}", petsc.world().rank()) }` in place of `petsc_println_all!(petsc.world(), "hello process: {}", petsc.world().rank())`. Would this even work?
 - [ ] should rename the `create` methods to be `new` (make things rustier). We would have to change the name of the existing private `new` methods.
@@ -120,7 +124,7 @@ There are also a lot of `TODO` comments throughout the repository that I try to 
 - [ ] add Quadrature type (https://petsc.org/release/docs/manualpages/FE/PetscQuadrature.html)
   - [ ] do `PetscDTStroudConicalQuadrature`
 - [ ] do `https://petsc.org/release/docs/manualpages/DMPLEX/DMPlexSetClosurePermutationTensor.html`
-- [ ] should the example be in `src/` folders or should we put them in the root with the `Cargo.toml`. Or should they just all be in examples/ so that cargo build --examples works.
+- [ ] should the examples be in `src/` folders or should we put them in the root with the `Cargo.toml`. Or should they just all be in examples/ so that cargo build --examples works.
 - [ ] Add a proc macro or something that does the same thing as PetscFunctionBeginUser and PetscFunctionReturn. Or incorporate this into the try `?` operator
 - [ ] For almost every closure, we take a `FnMut` but this might not always be correct. I think we should take `Fn`s. This is because the method that calls the fn might not take `&mut self`, but some do. Look at how MatShell works, I think that is correct.
 - [ ] add `DMPlexInsertBoundaryValues`
@@ -131,9 +135,8 @@ There are also a lot of `TODO` comments throughout the repository that I try to 
 - [ ] when we take a file path as an input we should probably take an `AsRef<Path>`, for the `PetscBuilder::file` we might want to separate the ':yaml' thing from the file path, at least as far as the caller is concerned.  
 - [ ] in a lot of the doc test examples we use `set_from_options` and other stuff from the options database. This is a problem because the test relies on the options being specific values. We should instead manually set the values. Using the options database in the full examples should be fine though.
 - [ ] Some functions return `Rc`s, but shouldn't. This is if we take it as input as ref. Read `TODO` comment above `SNES::get_residual`.
-- [ ] Should `get_local_vector` take `&mut self`. This is because it does mutate the DM a little, however it might also be possible to just use some interior mutability construct. Or maybe we store the `localin`/`localout` array in the rust side as a slice and put a RefCell around that. Or maybe it doesn't even have to be around the arrays and could be a different variable that acts as a mutability lock handled all internally, but at this point, it would be useless as it is already safe. Or maybe we just make it take `&mut self` and also return `&self`/`&mut self` you you aren't locked out of doing anything because of the lifetime in `BorrowVector`. IDK what to do here, as it seems like it is fine already, but it also doesn't seem fine.
+- [ ] Should `get_local_vector` take `&mut self`. This is because it does mutate the DM a little, however, it might also be possible to just use some interior mutability construct. Or maybe we store the `localin`/`localout` array in the rust side as a slice and put a RefCell around that. Or maybe it doesn't even have to be around the arrays and could be a different variable that acts as a mutability lock handled all internally, but at this point, it would be useless as it is already safe. Or maybe we just make it take `&mut self` and also return `&self`/`&mut self` you aren't locked out of doing anything because of the lifetime in `BorrowVector`. IDK what to do here, as it seems like it is fine already, but it also doesn't seem fine.
 - [ ] right now we block versions of PETSc that aren't supported, but maybe we should have a feature to disable this so users can use unsupported versions if they actually do work.
 - [ ] I added `build-probe-petsc` because I wanted to get PETSc version/build info in petsc-rs build.rs, but it might also work to make petsc-sys a build dependency for petsc-rs, and then we can just use the consts from that.
 - [ ] Add TS wrappers (<https://petsc.org/release/docs/manualpages/TS/index.html>)
 - [ ] Add Tao wrappers (<https://petsc.org/release/docs/manualpages/Tao/index.html>)
-- [ ] Should we move the main doc-string in petsc-sys to a readme?

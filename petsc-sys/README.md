@@ -17,8 +17,8 @@ PETSc has support for multiple different sizes of scalars and integers. To expos
 - **`petsc-int-i32`** *(enabled by default)* — Sets the integer type, `PetscInt`, to be `i32`.
 - **`petsc-int-i64`** — Sets the integer type, `PetscInt`, to be `i64`.
 - **`generate-enums`** — Tells `petsc-sys` to generate enums from `#define`s in the headers. This is done for the error enum, `PetscErrorCodeEnum`, and many type enums like `MatTypeEnum` and `DMTypeEnum`. This feature is used by `petsc-rs`, but if you are just using the `petsc-sys` raw bindings then this feature is most likely not needed as all the `#define`s are already ported as `pub const`s from bindgen.
-- **`use-private-headers`** — Tells `petsc-sys` to generate bindings using the private headers. This feature is used by `petsc-rs`, but if you only want to use these bindings in the same way you would use the C API, then you don't need this feature. Note, not all private headers are necessarily used, just the ones that `petsc-rs` uses.
+- **`use-private-headers`** — Tells `petsc-sys` to generate bindings using the private headers. This feature is used by `petsc-rs`, but if you only want to use these bindings in the same way you would use the C API, then you don't need this feature. Note, not all private headers are necessarily used, just the ones needed by `petsc-rs`.
 
 # MPI
 
-This create will not generate any MPI bindings. Instead it uses the `mpi-sys` crate from [`rsmpi`](https://github.com/rsmpi/rsmpi).
+This crate will not generate any MPI bindings. Instead, it uses the `mpi-sys` crate from [`rsmpi`](https://github.com/rsmpi/rsmpi).

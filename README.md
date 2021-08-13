@@ -16,7 +16,7 @@ petsc-rs = { git = "https://gitlab.com/petsc/petsc-rs/", branch = "main" }
 
 In order for `petsc-rs` to work correctly, you need to [download PETSc](https://petsc.org/release/download/). Note, `petsc-rs` requires PETSc version `3.15` or the main branch (prerelease version `3.16-dev.0`). Using the main branch is unstable as new breaking changes could be added (`petsc-rs` has been tested using commit [`ee14c70`](https://gitlab.com/petsc/petsc/tree/ee14c7024d937659fa3550ba1b9a77d7ae2cc83e) of PETSc). Regardless, `petsc-rs` will automatically detect what version of PETSc you are using and build the correct wrappers. If the version of PETSc you are using is not supported, then `petsc-rs` will fail to build.
 
-Next, you need to [configure and install PETSc](https://petsc.org/release/install/). I haven't tested all the different ways to install PETSc, but the following I know works for `petsc-rs`. Note, it is required that you install an MPI library globally and not have PETSc install it for you. This is needed by the [rsmpi](https://github.com/rsmpi/rsmpi) crate (look at its [requirements](https://github.com/rsmpi/rsmpi#requirements) for more information). Im using `openmpi` 3.1.3, which gives me `mpicc` and `mpicxx`.
+Next, you need to [configure and install PETSc](https://petsc.org/release/install/). I haven't tested all the different ways to install PETSc, but the following I know works for `petsc-rs`. Note, it is required that you install an MPI library globally and not have PETSc install it for you. This is needed by the [rsmpi](https://github.com/rsmpi/rsmpi) crate (look at its [requirements](https://github.com/rsmpi/rsmpi#requirements) for more information). I'm using `openmpi` 3.1.3, which gives me `mpicc` and `mpicxx`.
 ```text
 ./configure --with-cc=mpicc --with-cxx=mpicxx --download-f2cblaslapack --with-fc=0
 make all check
@@ -68,7 +68,18 @@ If you wish to use raw bindings from `petsc-sys` in the same crate that you are 
 petsc-sys = { git = "https://gitlab.com/petsc/petsc-rs/", branch = "main", default-features = false }
 ```
 
-Note, `petsc-sys` has the same type related feature flags as `petsc-rs` and `petsc-rs` will pass it's flags to `petsc-sys`. To avoid conflicts you should use `default-features = false` when importing `petsc-sys` so that you don't accidentally enable any additional flags.
+Note, `petsc-sys` has the same type related feature flags as `petsc-rs` and `petsc-rs` will pass its flags to `petsc-sys`. To avoid conflicts you should use `default-features = false` when importing `petsc-sys` so that you don't accidentally enable any additional flags.
+
+### Using `mpi`
+
+If you want to use `mpi` in your project, you MUST use `rsmpi v0.6` or above. Currently, this isn't available on [crates.io](https://crates.io/) so you will have to get it from the GitHub repo. You can do that by adding the following to your `Cargo.toml`.
+
+```toml
+[dependencies]
+mpi = {git = "https://github.com/rsmpi/rsmpi.git", branch = "main" }
+```
+
+Or to be consistent with `petsc-rs` you can use `rev = "82e1d35"` instead of `branch = "main"`.
 
 ## Running PETSc Programs
 
