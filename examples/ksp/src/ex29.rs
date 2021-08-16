@@ -23,13 +23,10 @@
 static HELP_MSG: &str = "Solves 2D inhomogeneous Laplacian using multigrid.\n\n";
 
 use petsc_rs::prelude::*;
-use structopt::StructOpt;
+use mpi::traits::*;
 use ndarray::prelude::*;
 
 use std::fmt;
-
-mod opt;
-use opt::*;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 enum BCType { DIRICHLET, NEUMANN }
@@ -54,39 +51,44 @@ impl fmt::Display for BCType {
     }
 }
 
-#[derive(Debug, StructOpt)]
-#[structopt(name = "ex29", about = "Options for the inhomogeneous Poisson equation")]
+impl Default for BCType {
+    fn default() -> Self { BCType::DIRICHLET }
+}
+
 struct Opt {
     /// The conductivity
-    #[structopt(short, long, default_value = "1.0")]
     rho: PetscReal,
 
     /// The width of the Gaussian source
-    #[structopt(short, long, default_value = "0.1")]
     nu: PetscReal,
 
     /// Type of boundary condition
-    #[structopt(short, long, default_value = "DIRICHLET")]
     bc_type: BCType,
 
     /// Run solver multiple times, useful for performance studies of solver
-    #[structopt(short, long)]
     test_solver: bool,
 
-    /// use `-- -help` for petsc help
-    #[structopt(subcommand)]
-    sub: Option<PetscOpt>,
+    check_matis: bool,
+}
+
+impl PetscOpt for Opt {
+    fn from_petsc_opt_builder(pob: &mut PetscOptBuilder) -> petsc_rs::Result<Self> {
+        let rho = pob.options_real("-rho", "", "ksp-ex29", 1.0)?;
+        let nu = pob.options_real("-nu", "", "ksp-ex29", 0.1)?;
+        let bc_type = pob.options_from_string("-bc_type", "", "ksp-ex29", BCType::DIRICHLET)?;
+        let test_solver = pob.options_bool("-test_solver", "", "ksp-ex29", false)?;
+        let check_matis = pob.options_bool("-check_matis", "", "ksp-ex29", false)?;
+        Ok(Opt { rho, nu, bc_type, test_solver, check_matis })
+    }
 }
 
 fn main() -> petsc_rs::Result<()> {
-    let Opt {rho, nu, bc_type, test_solver: _, sub: ext_args} = Opt::from_args();
-    let petsc_args = PetscOpt::petsc_args(ext_args); // Is there an easier way to do this
-    let check_matis = false;
-
     let petsc = Petsc::builder()
-        .args(petsc_args)
+        .args(std::env::args())
         .help_msg(HELP_MSG)
         .init()?;
+
+    let Opt { rho, nu, bc_type, test_solver: _test_solver, check_matis } = petsc.options_get()?;
 
     petsc_println!(petsc.world(), "(petsc_println!) Hello parallel world of {} processes!", petsc.world().size() )?;
 
@@ -101,8 +103,9 @@ fn main() -> petsc_rs::Result<()> {
     let mut x = da.create_global_vector()?;
 
     ksp.set_dm(da)?;
-    ksp.set_compute_rhs(|_ksp, dm, b| {
+    ksp.set_compute_rhs(|ksp, b| {
         // We will define the forcing function $f = e^{-x^2/\nu} e^{-y^2/\nu}$
+        let dm = ksp.try_get_dm().unwrap();
         let (_, mx, my, _, _, _, _, _, _, _, _, _, _) = dm.da_get_info()?;
         let (hx, hy) = (1.0 / (PetscScalar::from(mx as PetscReal) - 1.0), 
             1.0 / (PetscScalar::from(my as PetscReal) - 1.0));
@@ -130,7 +133,8 @@ fn main() -> petsc_rs::Result<()> {
         Ok(())
     })?;
 
-    ksp.set_compute_operators(|_ksp, dm, _, jac| {
+    ksp.set_compute_operators(|ksp, _, jac| {
+        let dm = ksp.try_get_dm().unwrap();
         let (_, mx, my, _, _, _, _, _, _, _, _, _, _) = dm.da_get_info()?;
         let (hx, hy) = (1.0 / (PetscScalar::from(mx as PetscReal) - 1.0), 
             1.0 / (PetscScalar::from(my as PetscReal) - 1.0));
@@ -188,7 +192,8 @@ fn main() -> petsc_rs::Result<()> {
 
     //ksp.view_with(Some(&petsc.viewer_create_ascii_stdout()?))?;
     x.view_with(Some(&petsc.viewer_create_ascii_stdout()?))?;
-    petsc_println_all!(petsc.world(), "Process [{}]\n{:.5e}", petsc.world().rank(), *ksp.get_dm()?.da_vec_view(&x)?)?;
+    petsc_println_sync!(petsc.world(), "Process [{}]\n{:.5e}", petsc.world().rank(), 
+        *ksp.try_get_dm().unwrap().da_vec_view(&x)?)?;
 
     // return
     Ok(())

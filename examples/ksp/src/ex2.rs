@@ -18,45 +18,36 @@ static HELP_MSG: &str = "Solves a linear system in parallel with KSP.
 Input parameters include:\n\n";
 
 use petsc_rs::prelude::*;
-use structopt::StructOpt;
+use mpi::traits::*;
 
-mod opt;
-use opt::*;
-
-#[derive(Debug, StructOpt)]
-#[structopt(name = "ex2", about = HELP_MSG)]
 struct Opt {
-    /// number of mesh points in x-direction
-    #[structopt(short, default_value = "8")]
     m: PetscInt,
-    
-    /// number of mesh points in y-direction
-    #[structopt(short, default_value = "7")]
     n: PetscInt,
-
-    /// write exact solution vector to stdout
-    #[structopt(short, long)]
     view_exact_sol: bool,
+}
 
-    /// use `-- -help` for petsc help
-    #[structopt(subcommand)]
-    sub: Option<PetscOpt>,
+impl PetscOpt for Opt {
+    fn from_petsc_opt_builder(pob: &mut PetscOptBuilder) -> petsc_rs::Result<Self> {
+        let m = pob.options_int("-m", "number of mesh points in x-direction", "ksp-ex2", 8)?;
+        let n = pob.options_int("-n", "number of mesh points in y-direction", "ksp-ex2", 7)?;
+        let view_exact_sol = pob.options_bool("-view_exact_sol", "write exact solution vector to stdout", "ksp-ex2", false)?;
+        Ok(Opt { m, n, view_exact_sol })
+    }
 }
 
 fn main() -> petsc_rs::Result<()> {
-    let Opt {m, n, view_exact_sol, sub: ext_args} = Opt::from_args();
-    let petsc_args = PetscOpt::petsc_args(ext_args); // Is there an easier way to do this
-
     // optionally initialize mpi
     // let _univ = mpi::initialize().unwrap();
     // init with no options
     let petsc = Petsc::builder()
-        .args(petsc_args)
+        .args(std::env::args())
         .help_msg(HELP_MSG)
         .init()?;
 
     // or init with no options
     // let petsc = Petsc::init_no_args()?;
+
+    let Opt {m, n, view_exact_sol} = petsc.options_get()?;
 
     petsc_println!(petsc.world(), "Hello parallel world of {} processes!", petsc.world().size() )?;
 
@@ -110,7 +101,7 @@ fn main() -> petsc_rs::Result<()> {
     // Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
     // float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
     // call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
-    // but if `PetscScalar` is complex it will construct a complex value which the imaginary part being
+    // but if `PetscScalar` is complex it will construct a complex value with the imaginary part being
     // set to `0`.
     A.assemble_with(mat_ownership_range.map(|ii| {
             let mut data_vec = vec![];
@@ -175,9 +166,7 @@ fn main() -> petsc_rs::Result<()> {
         Set operators. Here the matrix that defines the linear system
         also serves as the matrix that defines the preconditioner.
     */
-    #[allow(non_snake_case)]
-    let rc_A = std::rc::Rc::new(A);
-    ksp.set_operators(Some(rc_A.clone()), Some(rc_A.clone()))?;
+    ksp.set_operators(&A, &A)?;
 
     /*
         Set linear solver defaults for this problem (optional).

@@ -3,7 +3,7 @@
 //! Concepts: DM^creating vectors with a DMDA
 //! Processors: n
 //!
-//!   [`Vec::view_with()`] on DMDA vectors first puts the Vec elements into global natural ordering before printing (or plotting)
+//!   [`Vector::view_with()`] on DMDA vectors first puts the Vec elements into global natural ordering before printing (or plotting)
 //! them. In 2d 5 by 2 DMDA this means the numbering is
 //!
 //!      5   6   7   8   9        0   5
@@ -28,7 +28,7 @@
 //!                               6   8
 //!                               7   9
 //!
-//! If we filled the vector with global PETSc ordering, i.e. the above, when we use [`Vec::view_with()`]
+//! If we filled the vector with global PETSc ordering, i.e. the above, when we use [`Vector::view_with()`]
 //! we would see the following order
 //!
 //!     Process [0]
@@ -37,7 +37,7 @@
 //!     4 5 8 9
 //!
 //! We can also print out the correct 2d DMDA vector using [`DM::da_vec_view()`] in the following way:
-//! `petsc_println_all!(petsc.world(), "(Process: {}) global vec:\n{:.1}", petsc.world().rank(), *dm.da_vec_view(&global)?);`
+//! `petsc_println_sync!(petsc.world(), "(Process: {}) global vec:\n{:.1}", petsc.world().rank(), *dm.da_vec_view(&global)?);`
 //!
 //! ```text
 //! (Process: 0) global vec: 
@@ -64,17 +64,30 @@
 static HELP_MSG: &str = "Tests VecView() contour plotting for 2d DMDAs.\n\n";
 
 use petsc_rs::prelude::*;
+use mpi::traits::*;
+
+struct Opt {
+    star_stencil: bool,
+    view_global: bool,
+}
+
+impl PetscOpt for Opt {
+    fn from_petsc_opt_builder(pob: &mut PetscOptBuilder) -> petsc_rs::Result<Self> {
+        let star_stencil = pob.options_bool("-star_stencil", "", "dm-ex1", false)?;
+        let view_global = pob.options_bool("-view_global", "", "dm-ex1", false)?;
+        Ok(Opt { star_stencil, view_global })
+    }
+}
 
 fn main() -> petsc_rs::Result<()> {
-    let star_stencil = false;
-    let view_global = true;
-
     let (m, n) = (10, 8);
 
     let petsc = Petsc::builder()
         .args(std::env::args())
         .help_msg(HELP_MSG)
         .init()?;
+
+    let Opt { star_stencil, view_global } = petsc.options_get()?;
     
     let viewer = petsc.viewer_create_ascii_stdout()?;
 
@@ -97,9 +110,9 @@ fn main() -> petsc_rs::Result<()> {
 
     dm.view_with(Some(&viewer))?;
     if view_global {
-        petsc_println_all!(petsc.world(), "(Process: {}) global vec (flat):\n{:0.1}", petsc.world().rank(), *global.view()?)?;
+        petsc_println_sync!(petsc.world(), "(Process: {}) global vec (flat):\n{:0.1}", petsc.world().rank(), *global.view()?)?;
 
-        petsc_println_all!(petsc.world(), "(Process: {}) global vec:\n{:0.1}", petsc.world().rank(), *dm.da_vec_view(&global)?)?;
+        petsc_println_sync!(petsc.world(), "(Process: {}) global vec:\n{:0.1}", petsc.world().rank(), *dm.da_vec_view(&global)?)?;
 
         // Note, this might print the vector in a different order than the above two
         global.view_with(Some(&viewer))?;

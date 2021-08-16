@@ -22,35 +22,31 @@
 static HELP_MSG: &str = "Solves 1D variable coefficient Laplacian using multigrid.\n\n";
 
 use petsc_rs::prelude::*;
-use structopt::StructOpt;
+use mpi::traits::*;
 
-mod opt;
-use opt::*;
-
-#[derive(Debug, StructOpt)]
-#[structopt(name = "ex25", about = HELP_MSG)]
 struct Opt {
     /// The conductivity
-    #[structopt(short, default_value = "1")]
     k: PetscInt,
 
     /// The width of the Gaussian source
-    #[structopt(short, default_value = "0.99")]
     e: PetscReal,
+}
 
-    /// use `-- -help` for petsc help
-    #[structopt(subcommand)]
-    sub: Option<PetscOpt>,
+impl PetscOpt for Opt {
+    fn from_petsc_opt_builder(pob: &mut PetscOptBuilder) -> petsc_rs::Result<Self> {
+        let k = pob.options_int("-k", "", "ksp-ex25", 1)?;
+        let e = pob.options_real("-e", "", "ksp-ex25", 0.99)?;
+        Ok(Opt { k, e })
+    }
 }
 
 fn main() -> petsc_rs::Result<()> {
-    let Opt {k, e, sub: ext_args} = Opt::from_args();
-    let petsc_args = PetscOpt::petsc_args(ext_args); // Is there an easier way to do this
-
     let petsc = Petsc::builder()
-        .args(petsc_args)
+        .args(std::env::args())
         .help_msg(HELP_MSG)
         .init()?;
+        
+    let Opt {k, e} = petsc.options_get()?;
 
     petsc_println!(petsc.world(), "(petsc_println!) Hello parallel world of {} processes!", petsc.world().size() )?;
 
@@ -62,8 +58,9 @@ fn main() -> petsc_rs::Result<()> {
     let mut x = da.create_global_vector()?;
 
     ksp.set_dm(da)?;
-    ksp.set_compute_rhs(|_ksp, dm, b| {
+    ksp.set_compute_rhs(|ksp, b| {
         // We will define the forcing function $f = e^{-x^2/\nu} e^{-y^2/\nu}$
+        let dm = ksp.try_get_dm().unwrap();
         let (_, mx, _, _, _, _, _, _, _, _, _, _, _) = dm.da_get_info()?;
         let h = 1.0 / (PetscScalar::from(mx as PetscReal) - 1.0);
         let (xs, _, _, xm, _, _) = dm.da_get_corners()?;
@@ -81,7 +78,8 @@ fn main() -> petsc_rs::Result<()> {
         Ok(())
     })?;
 
-    ksp.set_compute_operators(|_ksp, dm, _, jac| {
+    ksp.set_compute_operators(|ksp, _, jac| {
+        let dm = ksp.try_get_dm().unwrap();
         let (_, mx, _, _, _, _, _, _, _, _, _, _, _) = dm.da_get_info()?;
         let h = 1.0 / (PetscScalar::from(mx as PetscReal) - 1.0);
         let (xs, _, _, xm, _, _) = dm.da_get_corners()?;
@@ -116,8 +114,8 @@ fn main() -> petsc_rs::Result<()> {
 
     ksp.solve(None, &mut x)?;
 
-    let (a_mat,_) = ksp.get_operators()?;
     let b = ksp.get_rhs()?;
+    let (a_mat,_) = ksp.get_operators_or_create()?;
     let mut b2 = b.duplicate()?;
     Mat::mult(&a_mat,&x,&mut b2)?;
     b2.axpy(PetscScalar::from(-1.0), &b)?;
@@ -129,7 +127,8 @@ fn main() -> petsc_rs::Result<()> {
 
     //ksp.view_with(Some(&petsc.viewer_create_ascii_stdout()?))?;
     x.view_with(Some(&petsc.viewer_create_ascii_stdout()?))?;
-    petsc_println_all!(petsc.world(), "Process [{}]\n{:.5e}", petsc.world().rank(), *ksp.get_dm()?.da_vec_view(&x)?)?;
+    petsc_println_sync!(petsc.world(), "Process [{}]\n{:.5e}", petsc.world().rank(), 
+        *ksp.try_get_dm().unwrap().da_vec_view(&x)?)?;
 
     // return
     Ok(())

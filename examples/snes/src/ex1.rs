@@ -10,11 +10,10 @@
 static HELP_MSG: &str = "Newton's method for a two-variable system, sequential.\n\n";
 
 use petsc_rs::prelude::*;
+use mpi::traits::*;
 
 fn main() -> petsc_rs::Result<()> {
     let n = 2;
-    // TODO: make `hard` be a command line input
-    let hard_flg = true;
 
     // optionally initialize mpi
     // let _univ = mpi::initialize().unwrap();
@@ -27,9 +26,11 @@ fn main() -> petsc_rs::Result<()> {
     // or init with no options
     // let petsc = Petsc::init_no_args()?;
 
+    let hard_flg = petsc.options_try_get_bool("-hard_flg")?.unwrap_or(false);
+
     if petsc.world().size() != 1
     {
-        Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
+        Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
     }
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -41,7 +42,7 @@ fn main() -> petsc_rs::Result<()> {
     let mut x = petsc.vec_create()?;
     x.set_sizes(None, Some(n))?;
     x.set_from_options()?;
-    let r = x.duplicate()?;
+    let mut r = x.duplicate()?;
     x.set_name("soln")?;
 
     /*
@@ -62,7 +63,7 @@ fn main() -> petsc_rs::Result<()> {
         /*
             Set function evaluation routine and vector with closure.
         */
-        snes.set_function(Some(r), |_snes: &SNES, x: &Vector, f: &mut Vector| {
+        snes.set_function(&mut r, |_snes: &SNES, x: &Vector, f: &mut Vector| {
             let x_view = x.view()?;
             let mut f_view = f.view_mut()?;
 
@@ -74,7 +75,7 @@ fn main() -> petsc_rs::Result<()> {
         /*
             Set Jacobian matrix data structure and Jacobian evaluation routine with closure
         */
-        snes.set_jacobian_single_mat(J, |_snes: &SNES, x: &Vector, jac: &mut Mat| {
+        snes.set_jacobian_single_mat(&mut J, |_snes: &SNES, x: &Vector, jac: &mut Mat| {
             let x_view = x.view()?;
 
             jac.assemble_with([(0,0,2.0*x_view[0]), (0,1,x_view[0]), (1,0,x_view[1]), (1,1,x_view[0]+2.0*x_view[1])],
@@ -84,8 +85,8 @@ fn main() -> petsc_rs::Result<()> {
         })?;
     } else {
         // We can also use functions, not closures for input
-        snes.set_function(Some(r), from_function2)?;
-        snes.set_jacobian_single_mat(J, from_jacobian2)?;
+        snes.set_function(&mut r, from_function2)?;
+        snes.set_jacobian_single_mat(&mut J, from_jacobian2)?;
     }
 
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -96,8 +97,8 @@ fn main() -> petsc_rs::Result<()> {
         KSP and PC contexts from the SNES context, we can then
         directly call any KSP and PC routines to set various options.
     */
-    let ksp = snes.get_ksp_mut()?;
-    let pc = ksp.get_pc_mut()?;
+    let ksp = snes.get_ksp_or_create()?;
+    let pc = ksp.get_pc_or_create()?;
     pc.set_type(PCType::PCNONE)?;
     ksp.set_tolerances(Some(1.0e-4), None, None, Some(20))?;
 
@@ -122,7 +123,7 @@ fn main() -> petsc_rs::Result<()> {
     // Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
     // float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
     // call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
-    // but if `PetscScalar` is complex it will construct a complex value which the imaginary part being
+    // but if `PetscScalar` is complex it will construct a complex value with the imaginary part being
     // set to `0`.
     if !hard_flg {
         x.set_all(PetscScalar::from(0.5))?;
@@ -148,7 +149,7 @@ fn main() -> petsc_rs::Result<()> {
     Ok(())
 }
 
-fn from_function2(_snes: &SNES, x: &Vector, f: &mut Vector) -> petsc_rs::Result<()> {
+fn from_function2(_snes: &SNES, x: &Vector, f: &mut Vector) -> Result<(), petsc_rs::snes::DomainOrPetscError> {
     let x_view = x.view()?;
     let mut f_view = f.view_mut()?;
 
@@ -158,7 +159,7 @@ fn from_function2(_snes: &SNES, x: &Vector, f: &mut Vector) -> petsc_rs::Result<
     Ok(())
 }
 
-fn from_jacobian2(_snes: &SNES, x: &Vector, jac: &mut Mat) -> petsc_rs::Result<()> {
+fn from_jacobian2(_snes: &SNES, x: &Vector, jac: &mut Mat) -> Result<(), petsc_rs::snes::DomainOrPetscError> {
     let x_view = x.view()?;
 
     jac.assemble_with([(0,0,3.0*PetscScalar::cos(3.0*x_view[0])+1.0), (1,1,PetscScalar::from(1.0))],

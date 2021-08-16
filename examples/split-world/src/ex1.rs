@@ -17,85 +17,60 @@
 //! (ex23) Norm of error 1.14852e-2, Iters 318
 //! ```
 
-static HELP_MSG: &str = "Solves a linear system in parallel with KSP.
-Input parameters include:\n\n";
+static HELP_MSG: &str = "Introductory example that illustrates running PETSc on a subset of processes.\n\
+    Uses examples ksp-ex2 and ksp-ex23.\n\n";
 
-use mpi;
-use mpi::topology::Color;
 use petsc_rs::prelude::*;
-use structopt::StructOpt;
+use mpi::{self, traits::*, topology::Color};
 
-#[derive(Debug, PartialEq, StructOpt)]
-pub enum PetscOpt {
-    /// use `-- -help` for petsc help
-    #[structopt(name = "Petsc Args", external_subcommand)]
-    PetscArgs(Vec<String>),
-}
-
-impl PetscOpt
-{
-    pub fn petsc_args(self_op: Option<Self>) -> Vec<String>
-    {
-        match self_op
-        {
-            Some(PetscOpt::PetscArgs(mut vec)) => {
-                vec.push(std::env::args().next().unwrap());
-                vec.rotate_right(1);
-                vec
-            },
-            _ => vec![std::env::args().next().unwrap()]
-        }
-    }
-}
-
-#[derive(Debug, StructOpt)]
-#[structopt(name = "ex2", about = HELP_MSG)]
 struct Opt {
     /// number of mesh points in x-direction (for ex2)
-    #[structopt(short, default_value = "8")]
     m: PetscInt,
     
     /// number of mesh points in y-direction (for ex2)
-    #[structopt(short, default_value = "7")]
     n: PetscInt,
 
     /// write exact solution vector to stdout (for ex2)
-    #[structopt(short, long)]
     view_stuff: bool,
 
     /// Size of the vector and matrix (for ex23)
-    #[structopt(short = "k", long, default_value = "10")]
     num_elems: PetscInt,
+}
 
-    /// use `-- -help` for petsc help
-    #[structopt(subcommand)]
-    sub: Option<PetscOpt>,
+impl PetscOpt for Opt {
+    fn from_petsc_opt_builder(pob: &mut PetscOptBuilder) -> petsc_rs::Result<Self> {
+        let m = pob.options_int("-m", "", "sw-ex1", 8)?;
+        let n = pob.options_int("-n", "", "sw-ex1", 7)?;
+        let view_stuff = pob.options_bool("-view_stuff", "", "sw-ex1", false)?;
+        let num_elems = pob.options_int("-k", "", "sw-ex1", 10)?;
+        Ok(Opt { m, n, view_stuff, num_elems })
+    }
 }
 
 fn main() -> petsc_rs::Result<()> {
-    let Opt {m, n, view_stuff, num_elems, sub: ext_args} = Opt::from_args();
-    let petsc_args = PetscOpt::petsc_args(ext_args); // Is there an easier way to do this
-
     // optionally initialize mpi
     let univ = mpi::initialize().unwrap();
     let world = univ.world();
 
-    if world.size() == 1
-    {
+    if world.size() == 1 {
+        eprintln!("This is strictly not a uniprocessor example!");
         // We cant use Petsc::set_error because we haven't initialized PETSc yet
-        panic!("This is strictly not a uniprocessor example!");
+        // But we can use `petsc_panic!` without a message.
+        petsc_panic!(&world, PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE);
     }
 
-    // split world into two (off processes with even rank and processes odd rank).
+    // split world into two classes (even rank and odd rank).
     let my_color = world.rank() % 2;
     let comm = world.split_by_color(Color::with_value(my_color)).unwrap();
 
     // init with no options
     let petsc = Petsc::builder()
-        .args(petsc_args)
-        .world(Box::new(comm))
+        .args(std::env::args())
+        .world(comm)
         .help_msg(HELP_MSG)
         .init()?;
+
+    let Opt { m, n, view_stuff, num_elems } = petsc.options_get()?;
 
     // or init with no options
     // let petsc = Petsc::init_no_args()?;
@@ -223,9 +198,7 @@ fn do_ksp_ex2(petsc: &Petsc, m: PetscInt, n: PetscInt, view_exact_sol: bool) -> 
         Set operators. Here the matrix that defines the linear system
         also serves as the matrix that defines the preconditioner.
     */
-    #[allow(non_snake_case)]
-    let rc_A = std::rc::Rc::new(A);
-    ksp.set_operators(Some(rc_A.clone()), Some(rc_A.clone()))?;
+    ksp.set_operators(&A, &A)?;
 
     /*
         Set linear solver defaults for this problem (optional).
@@ -340,9 +313,7 @@ fn do_ksp_ex23(petsc: &Petsc, n: PetscInt, view_ksp: bool) -> petsc_rs::Result<(
         Set operators. Here the matrix that defines the linear system
         also serves as the matrix that defines the preconditioner.
     */
-    #[allow(non_snake_case)]
-    let rc_A = std::rc::Rc::new(A);
-    ksp.set_operators(Some(rc_A.clone()), Some(rc_A.clone()))?;
+    ksp.set_operators(&A, &A)?;
     
     /*
         Set linear solver defaults for this problem (optional).
@@ -353,7 +324,7 @@ fn do_ksp_ex23(petsc: &Petsc, n: PetscInt, view_ksp: bool) -> petsc_rs::Result<(
           parameters could alternatively be specified at runtime via
           KSPSetFromOptions();
     */
-    let pc = ksp.get_pc_mut()?;
+    let pc = ksp.get_pc_or_create()?;
     pc.set_type(PCType::PCJACOBI)?;
     ksp.set_tolerances(Some(1.0e-5), None, None, None)?;
 

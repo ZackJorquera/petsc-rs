@@ -17,37 +17,21 @@
 static HELP_MSG: &str = "Solves a tridiagonal linear system with KSP.\n\n";
 
 use petsc_rs::prelude::*;
-use structopt::StructOpt;
-
-mod opt;
-use opt::*;
-
-#[derive(Debug, StructOpt)]
-#[structopt(name = "ex23", about = HELP_MSG)]
-struct Opt {
-    /// Size of the vector and matrix
-    #[structopt(short, long, default_value = "10")]
-    num_elems: PetscInt,
-
-    /// use `-- -help` for petsc help
-    #[structopt(subcommand)]
-    sub: Option<PetscOpt>,
-}
+use mpi::traits::*;
 
 fn main() -> petsc_rs::Result<()> {
-    let Opt {num_elems: n, sub: ext_args} = Opt::from_args();
-    let petsc_args = PetscOpt::petsc_args(ext_args); // Is there an easier way to do this
-
     // optionally initialize mpi
     // let _univ = mpi::initialize().unwrap();
     // init with no options
     let petsc = Petsc::builder()
-        .args(petsc_args)
+        .args(std::env::args())
         .help_msg(HELP_MSG)
         .init()?;
 
     // or init with no options
     // let petsc = Petsc::init_no_args()?;
+
+    let n = petsc.options_try_get_int("-n")?.unwrap_or(10);
 
     petsc_println!(petsc.world(), "(petsc_println!) Hello parallel world of {} processes!", petsc.world().size() )?;
 
@@ -100,7 +84,7 @@ fn main() -> petsc_rs::Result<()> {
     // Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
     // float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
     // call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
-    // but if `PetscScalar` is complex it will construct a complex value which the imaginary part being
+    // but if `PetscScalar` is complex it will construct a complex value with the imaginary part being
     // set to `0`.
     A.assemble_with(vec_ownership_range.map(|i| (-1..=1).map(move |j| (i,i+j))).flatten()
             .filter(|&(i,j)| i < n && j < n) // we could also filter out negatives, but assemble_with does that for us
@@ -124,9 +108,7 @@ fn main() -> petsc_rs::Result<()> {
         Set operators. Here the matrix that defines the linear system
         also serves as the matrix that defines the preconditioner.
     */
-    #[allow(non_snake_case)]
-    let rc_A = std::rc::Rc::new(A);
-    ksp.set_operators(Some(rc_A.clone()), Some(rc_A.clone()))?;
+    ksp.set_operators(&A, &A)?;
     
     /*
         Set linear solver defaults for this problem (optional).
@@ -137,7 +119,7 @@ fn main() -> petsc_rs::Result<()> {
           parameters could alternatively be specified at runtime via
           KSPSetFromOptions();
     */
-    let pc = ksp.get_pc_mut()?;
+    let pc = ksp.get_pc_or_create()?;
     pc.set_type(PCType::PCJACOBI)?;
     ksp.set_tolerances(Some(1.0e-5), None, None, None)?;
 

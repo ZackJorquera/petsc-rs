@@ -13,11 +13,9 @@ static HELP_MSG: &str = "Newton method to solve u'' + u^{2} = f, sequentially.\n
 This example employs a user-defined monitoring routine.\n\n";
 
 use petsc_rs::prelude::*;
+use mpi::traits::*;
 
 fn main() -> petsc_rs::Result<()> {
-    // TODO: make n be a command line input
-    let n = 5;
-
     // optionally initialize mpi
     // let _univ = mpi::initialize().unwrap();
     // init with no options
@@ -29,15 +27,16 @@ fn main() -> petsc_rs::Result<()> {
     // or init with no options
     // let petsc = Petsc::init_no_args()?;
 
-    if petsc.world().size() != 1
-    {
-        Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
+    let n = petsc.options_try_get_int("-n")?.unwrap_or(5);
+
+    if petsc.world().size() != 1 {
+        Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
     }
 
     // Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
     // float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
     // call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
-    // but if `PetscScalar` is complex it will construct a complex value which the imaginary part being
+    // but if `PetscScalar` is complex it will construct a complex value with the imaginary part being
     // set to `0`.
     let h = 1.0/(PetscScalar::from(n as PetscReal) - 1.0);
 
@@ -48,9 +47,9 @@ fn main() -> petsc_rs::Result<()> {
     let mut x = petsc.vec_create()?;
     x.set_sizes(None, Some(n))?;
     x.set_from_options()?;
-    let r = x.duplicate()?;
     let mut g = x.duplicate()?;
     let mut u = x.duplicate()?;
+    let mut r = x.duplicate()?;
     x.set_name("Approximate Solution")?;
     u.set_name("Exact Solution")?;
     
@@ -78,6 +77,15 @@ fn main() -> petsc_rs::Result<()> {
     */
     x.set_all(PetscScalar::from(0.5))?;
 
+    /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        Create matrix data structure; set Jacobian evaluation routine
+    - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+    #[allow(non_snake_case)]
+    let mut J = petsc.mat_create()?;
+    J.set_sizes(None, None, Some(n), Some(n))?;
+    J.set_from_options()?;
+    J.seq_aij_set_preallocation(3, None)?;
+
     /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
      Create nonlinear solver context
      - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
@@ -86,7 +94,7 @@ fn main() -> petsc_rs::Result<()> {
     /*
         Set function evaluation routine and vector
     */
-    snes.set_function(Some(r), |_snes, x: &Vector, f: &mut Vector| {
+    snes.set_function(Some(&mut r), |_snes, x: &Vector, f: &mut Vector| {
         /*
             Evaluates nonlinear function, F(x).
 
@@ -113,15 +121,6 @@ fn main() -> petsc_rs::Result<()> {
         Ok(())
     })?;
 
-    /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-        Create matrix data structure; set Jacobian evaluation routine
-    - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
-    #[allow(non_snake_case)]
-    let mut J = petsc.mat_create()?;
-    J.set_sizes(None, None, Some(n), Some(n))?;
-    J.set_from_options()?;
-    J.seq_aij_set_preallocation(3, None)?;
-
     /*
         Set Jacobian matrix data structure and default Jacobian evaluation
         routine. User can override with:
@@ -132,7 +131,7 @@ fn main() -> petsc_rs::Result<()> {
                             but use matrix-free approx for Jacobian-vector
                             products within Newton-Krylov method
     */
-    snes.set_jacobian_single_mat(J,|_snes, x: &Vector, ap_mat: &mut Mat| {
+    snes.set_jacobian_single_mat(&mut J, |_snes, x: &Vector, ap_mat: &mut Mat| {
         /*
             Evaluates Jacobian matrix.
 
@@ -153,6 +152,14 @@ fn main() -> petsc_rs::Result<()> {
                 .flatten(), 
             InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
 
+        Ok(())
+    })?;
+    
+    // Set an optional user-defined monitoring routine
+    snes.monitor_set(|snes, its, fnorm| {
+        petsc_println!(petsc.world(), "iter: {}, SNES function norm: {:.5e}", its, fnorm)?;
+        let x = snes.get_solution()?;
+        x.view_with(None)?;
         Ok(())
     })?;
 

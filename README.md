@@ -1,17 +1,22 @@
-# petsc-rs: PETSc rust bindings
+# `petsc-rs`: PETSc rust bindings
 
-PETSc, pronounced PET-see (/ˈpɛt-siː/), is a suite of data structures and routines for the scalable (parallel) solution of scientific applications modeled by partial differential equations. It supports MPI, ~~and GPUs through CUDA or OpenCL, as well as hybrid MPI-GPU parallelism~~. ~~PETSc (sometimes called PETSc/TAO) also contains the TAO optimization software library~~. (I crossed these out because petsc-rs does not support them).
+PETSc, pronounced PET-see (/ˈpɛt-siː/), is a suite of data structures and routines for the scalable (parallel) solution of scientific applications modeled by partial differential equations. It supports MPI, ~~and GPUs through CUDA or OpenCL, as well as hybrid MPI-GPU parallelism~~. ~~PETSc (sometimes called PETSc/TAO) also contains the TAO optimization software library~~. (I crossed these out because `petsc-rs` does not support them yet).
 
-PETSc is intended for use in large-scale application projects, many ongoing computational science projects are built around the PETSc libraries. PETSc is easy to use for beginners. Moreover, its careful design allows advanced users to have detailed control over the solution process. petsc-rs includes a large suite of parallel linear, nonlinear equation solvers and ODE integrators that are easily used in application codes written in Rust. PETSc provides many of the mechanisms needed within parallel application codes, such as simple parallel matrix and vector assembly routines that allow the overlap of communication and computation. In addition, PETSc includes support for parallel distributed arrays useful for finite difference methods.
+PETSc is intended for use in large-scale application projects, many ongoing computational science projects are built around the PETSc libraries. PETSc is easy to use for beginners. Moreover, its careful design allows advanced users to have detailed control over the solution process. `petsc-rs` includes a large suite of parallel linear, nonlinear equation solvers and ODE integrators that are easily used in application codes written in Rust. PETSc provides many of the mechanisms needed within parallel application codes, such as simple parallel matrix and vector assembly routines that allow the overlap of communication and computation. In addition, PETSc includes support for parallel distributed arrays useful for finite difference methods.
+
+Note, `petsc-rs` is a work in progress, so expect that a lot of functionality will be missing. Furthermore, many existing functions and structs may be incorrect wrappers to the C API and/or subject to change in the future.
 
 ## Usage
 
-To call petsc-rs from a Rust package, the following Cargo.toml can be used.
+To use `petsc-rs` from a Rust package, the following can be put in your `Cargo.toml`. Note, `petsc-rs` is supported for rust 1.54 and above.
 ```toml
-petsc-rs = { git = "https://github.com/ZackJorquera/petsc-rs/", branch = "main" }
+[dependencies]
+petsc-rs = { git = "https://gitlab.com/petsc/petsc-rs/", branch = "main" }
 ```
 
-In order for this to work correctly, you need to [download PETSc](https://www.mcs.anl.gov/petsc/download/index.html) (version 3.15 or above). Then you need to [configure and install PETSc](https://www.mcs.anl.gov/petsc/documentation/installation.html). I haven't tested all the different ways to install PETSc, but the following works. Note, it is required that you install an MPI library globally and not have PETSc install it for you. Im using `openmpi`, which gives me `mpicc` and `mpicxx`.
+In order for `petsc-rs` to work correctly, you need to [download PETSc](https://petsc.org/release/download/). Note, `petsc-rs` requires PETSc version `3.15` or the main branch (prerelease version `3.16-dev.0`). Using the main branch is unstable as new breaking changes could be added (`petsc-rs` has been tested using commit [`ee14c70`](https://gitlab.com/petsc/petsc/tree/ee14c7024d937659fa3550ba1b9a77d7ae2cc83e) of PETSc). Regardless, `petsc-rs` will automatically detect what version of PETSc you are using and build the correct wrappers. If the version of PETSc you are using is not supported, then `petsc-rs` will fail to build.
+
+Next, you need to [configure and install PETSc](https://petsc.org/release/install/). I haven't tested all the different ways to install PETSc, but the following I know works for `petsc-rs`. Note, it is required that you install an MPI library globally and not have PETSc install it for you. This is needed by the [rsmpi](https://github.com/rsmpi/rsmpi) crate (look at its [requirements](https://github.com/rsmpi/rsmpi#requirements) for more information). I'm using `openmpi` 3.1.3, which gives me `mpicc` and `mpicxx`.
 ```text
 ./configure --with-cc=mpicc --with-cxx=mpicxx --download-f2cblaslapack --with-fc=0
 make all check
@@ -19,18 +24,24 @@ make all check
 
 Then you must set the environment variables `PETSC_DIR` and `PETSC_ARCH` to where you installed PETSc.
 
-Note, for the linking on the Rust side to work, you will also need to install a version of LLVM/Clang.
+Note, for the linking on the Rust side to work, you will also need to install `libclang`. See the [bindgen project's requirements](https://rust-lang.github.io/rust-bindgen/requirements.html) for more information.
 
-From here, you should be able to compile your projects using petsc-rs. However, if you get linking errors when you run a program, you might need to set the `LD_LIBRARY_PATH` environment variable to include `$PETSC_DIR/$PETSC_ARCH/lib`.
+From here, you should be able to compile your projects using cargo. However, if you get linking errors when you run a program, you might need to set the `LD_LIBRARY_PATH` environment variable to include `$PETSC_DIR/$PETSC_ARCH/lib`. This is automatically done when you use any cargo command such as `cargo run`, but might not be set when you manually run the binary.
 
 ### Optional Build Parameters
 
-If you want to use a PETSc with non-standard precisions for floats or integers, or complex numbers you can include something like the following in your Cargo.toml.
+If you want to use a PETSc with non-standard precisions for floats or integers, or for complex numbers (experimental only) you can include something like the following in your Cargo.toml.
 ```toml
-petsc-rs = { git = "https://github.com/ZackJorquera/petsc-rs/", branch = "main", default-features = false, features = ["petsc-real-f32", "petsc-int-i64"] }
+[dependencies.petsc-rs]
+git = "https://gitlab.com/petsc/petsc-rs/"
+branch = "main"  # for complex numbers use the "complex-scalar" branch
+default-features = false  # note, default turns on "petsc-real-f64" and "petsc-int-i32"
+features = ["petsc-real-f32", "petsc-int-i64"]
 ```
 
-If you want to have a release build you will have to set the `PETSC_ARCH_RELEASE` environment variable with the directory in `PETSC_DIR` where the release build is. Then when compile with release mode, the PETSc release build will be used. 
+Note, you will have to build PETSc with the same settings that you wish to use for `petsc-rs`. When building, the `petsc-sys` package will validate that the PETSc install matches the requested feature flags.
+
+If you want to have a release build you will have to set the `PETSC_ARCH_RELEASE` environment variable with the directory in `PETSC_DIR` where the release build is. Then when compiling with release mode, the PETSc release build will be used.
 
 ### Features
 
@@ -38,14 +49,37 @@ PETSc has support for multiple different sizes of scalars and integers. To expos
 to rust, we require you set different features. The following are all the features that
 can be set. Note, you are required to have exactly one scalar feature set and exactly
 one integer feature set. And it must match the PETSc install.
-- **`petsc-real-f64`** *(enabled by default)* — Sets the real type, [`PetscReal`], to be `f64`.
-Also sets the complex type, [`PetscComplex`], to be `Complex<f64>`.
-- **`petsc-real-f32`** — Sets the real type, [`PetscReal`] to be `f32`.
-Also sets the complex type, [`PetscComplex`], to be `Complex<f32>`.
-- **`petsc-use-complex`** *(disabled by default)* *(experimental only)* - Sets the scalar type, [`PetscScalar`], to
-be the complex type, [`PetscComplex`]. If disabled then the scalar type is the real type, [`PetscReal`].
-- **`petsc-int-i32`** *(enabled by default)* — Sets the integer type, [`PetscInt`], to be `i32`.
-- **`petsc-int-i64`** — Sets the integer type, [`PetscInt`], to be `i64`.
+- **`petsc-real-f64`** *(enabled by default)* — Sets the real type, `PetscReal`, to be `f64`.
+Also sets the complex type, `PetscComplex`, to be `Complex<f64>`.
+- **`petsc-real-f32`** — Sets the real type, `PetscReal` to be `f32`.
+Also sets the complex type, `PetscComplex`, to be `Complex<f32>`.
+- **`petsc-use-complex`** *(disabled by default)* *(experimental only)* - Sets the scalar type, `PetscScalar`, to
+be the complex type, `PetscComplex`. If disabled then the scalar type is the real type, `PetscReal`.
+You must be using the `complex-scalar` branch to enable this feature.
+- **`petsc-int-i32`** *(enabled by default)* — Sets the integer type, `PetscInt`, to be `i32`.
+- **`petsc-int-i64`** — Sets the integer type, `PetscInt`, to be `i64`.
+
+### Using `petsc-sys`
+
+If you wish to use raw bindings from `petsc-sys` in the same crate that you are using `petsc-rs` you can import the `petsc-sys` crate with the following line in your `Cargo.toml`. An example of using both `petsc-rs` and `petsc-sys` can be found in [`examples/snes/src/ex12.rs`](https://gitlab.com/petsc/petsc-rs/-/blob/main/examples/snes/src/ex12.rs).
+
+```toml
+[dependencies]
+petsc-sys = { git = "https://gitlab.com/petsc/petsc-rs/", branch = "main", default-features = false }
+```
+
+Note, `petsc-sys` has the same type related feature flags as `petsc-rs` and `petsc-rs` will pass its flags to `petsc-sys`. To avoid conflicts you should use `default-features = false` when importing `petsc-sys` so that you don't accidentally enable any additional flags.
+
+### Using `mpi`
+
+If you want to use `mpi` in your project, you MUST use `rsmpi v0.6` or above. Currently, this isn't available on [crates.io](https://crates.io/) so you will have to get it from the GitHub repo. You can do that by adding the following to your `Cargo.toml`.
+
+```toml
+[dependencies]
+mpi = {git = "https://github.com/rsmpi/rsmpi.git", branch = "main" }
+```
+
+Or to be consistent with `petsc-rs` you can use `rev = "82e1d35"` instead of `branch = "main"`.
 
 ## Running PETSc Programs
 
@@ -63,7 +97,7 @@ mpiexec -n 8 target/debug/petsc_program_name [petsc_options]
 
 ## Getting Started Example
 
-To help the user start using PETSc immediately, we begin with a simple uniprocessor example that solves the one-dimensional Laplacian problem with finite differences. This sequential code, which can be found in `examples/ksp/src/ex1.rs`, illustrates the solution of a linear system with KSP, the interface to the preconditioners, Krylov subspace methods, and direct linear solvers of PETSc.
+To help the user start using PETSc immediately, we begin with a simple uniprocessor example that solves the one-dimensional Laplacian problem with finite differences. This sequential code, which can be found in [`examples/ksp/src/ex1.rs`](https://gitlab.com/petsc/petsc-rs/-/blob/main/examples/ksp/src/ex1.rs), illustrates the solution of a linear system with KSP, the interface to the preconditioners, Krylov subspace methods, and direct linear solvers of PETSc. Note, to compile and run this code, you should be in the [`examples/`](https://gitlab.com/petsc/petsc-rs/-/tree/main/examples/) directory.
 
 ```rust
 //! This file will show how to do the kps ex1 example in rust using the petsc-rs bindings.
@@ -71,8 +105,8 @@ To help the user start using PETSc immediately, we begin with a simple uniproces
 //! Concepts: KSP^solving a system of linear equations
 //! Processors: 1
 //!
-//! Use "petsc_rs::prelude::*" to get direct access to all important petsc-rs bindings
-//!     and mpi traits which allow you to call things like `world.size()`.
+//! Use "petsc_rs::prelude::*" to get direct access to all important petsc-rs bindings.
+//! Use "mpi::traits::*" to get access to all mpi traits which allow you to call things like `world.size()`.
 //!
 //! To run:
 //! ```text
@@ -90,18 +124,19 @@ To help the user start using PETSc immediately, we begin with a simple uniproces
 static HELP_MSG: &str = "Solves a tridiagonal linear system with KSP.\n\n";
 
 use petsc_rs::prelude::*;
+use mpi::traits::*;
 
 fn main() -> petsc_rs::Result<()> {
-    // TODO: get from args
-    let n = 10;
-
     let petsc = Petsc::builder()
         .args(std::env::args())
         .help_msg(HELP_MSG)
         .init()?;
 
+    let n = petsc.options_try_get_int("-n")?.unwrap_or(10);
+    let show_solution = petsc.options_try_get_bool("-show_solution")?.unwrap_or(false);
+
     if petsc.world().size() != 1 {
-        Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE,
+        Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE,
             "This is a uniprocessor example only!")?;
     }
 
@@ -114,14 +149,14 @@ fn main() -> petsc_rs::Result<()> {
     // then duplicate as needed.
     let mut x = petsc.vec_create()?;
     x.set_name("Solution")?;
-    x.set_sizes(None, Some(n))?;
+    x.set_sizes(None, n)?;
     x.set_from_options()?;
-    let mut b = x.duplicate()?;
-    let mut u = x.duplicate()?;
+    let mut b = x.clone();
+    let mut u = x.clone();
 
     #[allow(non_snake_case)]
     let mut A = petsc.mat_create()?;
-    A.set_sizes(None, None, Some(n), Some(n))?;
+    A.set_sizes(None, None, n, n)?;
     A.set_from_options()?;
     A.set_up()?;
 
@@ -129,10 +164,11 @@ fn main() -> petsc_rs::Result<()> {
     // Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
     // float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
     // call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
-    // but if `PetscScalar` is complex it will construct a complex value which the imaginary part being
+    // but if `PetscScalar` is complex it will construct a complex value with the imaginary part being
     // set to `0`.
     A.assemble_with((0..n).map(|i| (-1..=1).map(move |j| (i,i+j))).flatten()
-            .filter(|&(i, j)| i < n && j < n) // we could also filter out negatives, but assemble_with does that for us
+            // we could also filter out negatives, but `assemble_with` does that for us
+            .filter(|&(i, j)| i < n && j < n)
             .map(|(i,j)| if i == j { (i, j, PetscScalar::from(2.0)) }
                          else { (i, j, PetscScalar::from(-1.0)) }),
         InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
@@ -148,20 +184,18 @@ fn main() -> petsc_rs::Result<()> {
 
     // Set operators. Here the matrix that defines the linear system
     // also serves as the matrix that defines the preconditioner.
-    #[allow(non_snake_case)]
-    let rc_A = std::rc::Rc::new(A);
-    ksp.set_operators(Some(rc_A.clone()), Some(rc_A.clone()))?;
+    ksp.set_operators(&A, &A)?;
 
     // Set linear solver defaults for this problem (optional).
     // - By extracting the KSP and PC contexts from the KSP context,
     //     we can then directly call any KSP and PC routines to set
     //     various options.
-    // - The following four statements are optional; all of these
+    // - The following statements are optional; all of these
     //     parameters could alternatively be specified at runtime via
     //     `KSP::set_from_options()`.
-    let pc = ksp.get_pc_mut()?;
+    let pc = ksp.get_pc_or_create()?;
     pc.set_type(PCType::PCJACOBI)?;
-    ksp.set_tolerances(Some(1.0e-5), None, None, None)?;
+    ksp.set_tolerances(1.0e-5, None, None, None)?;
 
     // Set runtime options, e.g.,
     //     `-ksp_type <type> -pc_type <type> -ksp_monitor -ksp_rtol <rtol>`
@@ -170,19 +204,25 @@ fn main() -> petsc_rs::Result<()> {
     // routines.
     ksp.set_from_options()?;
 
-    /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-                        Solve the linear system
-        - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
-    ksp.solve(Some(&b), &mut x)?;
+    // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    //                  Solve the linear system
+    // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    ksp.solve(&b, &mut x)?;
 
     // View solver info; we could instead use the option -ksp_view to
     // print this info to the screen at the conclusion of `KSP::solve()`.
     let viewer = Viewer::create_ascii_stdout(petsc.world())?;
-    ksp.view_with(Some(&viewer))?;
+    viewer.view(&ksp)?;
 
-    /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-                      Check the solution and clean up
-     - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
+    // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    //                Check the solution and clean up
+    // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    if show_solution {
+        viewer.view(&x)?;
+        // Or we can do the following. Note, in a multi-process comm
+        // world we should instead use `petsc_println_sync!`.
+        println!("{}: {:.2}", x.get_name()?, *x.view()?);
+    }
     x.axpy(PetscScalar::from(-1.0), &u)?;
     let x_norm = x.norm(NormType::NORM_2)?;
     let iters = ksp.get_iteration_number()?;
@@ -198,7 +238,15 @@ fn main() -> petsc_rs::Result<()> {
 
 ## Examples
 
-More examples can be found in [`examples/`](examples/)
+More examples can be found in [`examples/`](https://gitlab.com/petsc/petsc-rs/-/tree/main/examples/)
+
+## Documentation
+
+Currently, the `petsc-rs` documentation is not hosted anywhere. However, you can build the documentation with:
+```text
+cargo doc
+```
+You can use the `--open` flag to open it in your browser.
 
 ## C API Documentation
 

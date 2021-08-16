@@ -1,15 +1,12 @@
 [package]
-name = "vec"
+name = "build-probe-petsc"
 version = "0.1.0"
 authors = ["Zack Jorquera <zackary.jorquera@colorado.edu>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[[bin]]
-name = "vec-ex2"
-path = "src/ex2.rs"
-
 [dependencies]
-mpi = {git = "https://github.com/rsmpi/rsmpi.git", rev = "82e1d35", default-features = false }
-petsc-rs = { path = "../../" }
+semver = "1.0"
+pkg-config = "0.3"
+regex = "1.5"

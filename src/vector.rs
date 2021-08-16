@@ -1,63 +1,120 @@
-//! PETSc vectors (Vec objects) are used to store the field variables in PDE-based (or other) simulations.
+//! PETSc vectors ([`Vector`] objects) are used to store the field variables in PDE-based (or other) simulations.
 //!
-//! PETSc C API docs: <https://www.mcs.anl.gov/petsc/petsc-current/docs/manualpages/Vec/index.html>
+//! PETSc C API docs: <https://petsc.org/release/docs/manualpages/Vec/index.html>
 
-use std::ops::{Deref, DerefMut};
-
-use crate::prelude::*;
+use std::{ffi::{CStr, CString}, marker::PhantomData, ops::{Deref, DerefMut}};
+use std::mem::{MaybeUninit, ManuallyDrop};
+use crate::{
+    Petsc,
+    petsc_raw,
+    Result,
+    PetscAsRaw,
+    PetscObject,
+    PetscScalar,
+    PetscReal,
+    PetscInt,
+    InsertMode,
+    NormType,
+};
+use mpi::topology::UserCommunicator;
+use mpi::traits::*;
 
 use ndarray::{ArrayView, ArrayViewMut};
 
+/// [`Vector`] Type
+pub type VectorType = crate::petsc_raw::VecTypeEnum;
+
 /// Abstract PETSc vector object
 pub struct Vector<'a> {
-    pub(crate) world: &'a dyn Communicator,
+    pub(crate) world: &'a UserCommunicator,
 
     pub(crate) vec_p: *mut petsc_raw::_p_Vec, // I could use Vec which is the same thing, but i think using a pointer is more clear
 }
 
-/// A immutable view of a Vector with Deref to slice.
+/// A immutable view of a Vector with [`Deref`] to [`ndarray::ArrayView`].
 pub struct VectorView<'a, 'b> {
     pub(crate) vec: &'b Vector<'a>,
     pub(crate) array: *const PetscScalar,
     pub(crate) ndarray: ArrayView<'b, PetscScalar, ndarray::IxDyn>,
 }
 
-/// A mutable view of a Vector with Deref to slice.
+/// A mutable view of a Vector with [`DerefMut`] to [`ndarray::ArrayViewMut`].
 pub struct VectorViewMut<'a, 'b> {
     pub(crate) vec: &'b mut Vector<'a>,
     pub(crate) array: *mut PetscScalar,
     pub(crate) ndarray: ArrayViewMut<'b, PetscScalar, ndarray::IxDyn>,
 }
 
-impl<'a> Drop for Vector<'a> {
+/// A wrapper around [`Vector`] that is used when the [`Vector`] shouldn't be destroyed.
+///
+/// Gives mutable access to the underlining [`Vector`].
+///
+/// For example, it is used with [`DM::get_local_vector()`](crate::dm::DM::get_local_vector()).
+pub struct BorrowVectorMut<'a, 'bv> {
+    pub(crate) owned_vec: ManuallyDrop<Vector<'a>>,
+    drop_func: Option<Box<dyn FnOnce(&mut Self) + 'bv>>,
+    // do we need this phantom data?
+    // also should 'bv be used for the closure
+    _phantom: PhantomData<&'bv mut Vector<'a>>,
+}
+
+/// A wrapper around [`Vector`] that is used when the [`Vector`] shouldn't be destroyed.
+///
+/// For example, it is used with [`DM::get_local_vector()`](crate::dm::DM::get_local_vector()).
+pub struct BorrowVector<'a, 'bv> {
+    pub(crate) owned_vec: ManuallyDrop<Vector<'a>>,
+    drop_func: Option<Box<dyn FnOnce(&mut Self) + 'bv>>,
+    // do we need this phantom data?
+    // also should 'bv be used for the closure
+    _phantom: PhantomData<&'bv Vector<'a>>,
+}
+
+impl Drop for BorrowVectorMut<'_, '_> {
     fn drop(&mut self) {
-        unsafe {
-            let ierr = petsc_raw::VecDestroy(&mut self.vec_p as *mut *mut petsc_raw::_p_Vec);
-            let _ = Petsc::check_error(self.world, ierr); // TODO should i unwrap or what idk?
-        }
+        self.drop_func.take().map(|f| f(self));
     }
 }
 
-// TODO: move NormType out of vector mod, it is used my matrix
-pub use petsc_raw::NormType;
+impl Drop for BorrowVector<'_, '_> {
+    fn drop(&mut self) {
+        self.drop_func.take().map(|f| f(self));
+    }
+}
+
 pub use petsc_raw::VecOption;
 
 impl<'a> Vector<'a> {
-    /// Creates an empty vector object. The type can then be set with [`Vector::set_type`](#), or [`Vector::set_from_options`].
-    /// Same as [`Petsc::vec_create`].
+    /// Creates an empty vector object. The type can then be set with [`Vector::set_type`], or [`Vector::set_from_options`].
+    /// Same as [`Petsc::vec_create`](crate::Petsc::vec_create).
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// let petsc = Petsc::init_no_args().unwrap();
     ///
     /// Vector::create(petsc.world()).unwrap();
     /// ```
-    pub fn create(world: &'a dyn Communicator) -> Result<Self> {
+    pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut vec_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::VecCreate(world.as_raw(), vec_p.as_mut_ptr()) };
-        Petsc::check_error(world, ierr)?;
+        unsafe { chkerrq!(world, ierr) }?;
 
         Ok(Vector { world, vec_p: unsafe { vec_p.assume_init() } })
+    }
+
+    /// Builds a [`Vector`], for a particular vector implementation.  (given as `&str`).
+    pub fn set_type_str(&mut self, vec_type: &str) -> Result<()> {
+        let cstring = CString::new(vec_type).expect("`CString::new` failed");
+        let ierr = unsafe { petsc_raw::VecSetType(self.vec_p, cstring.as_ptr()) };
+        unsafe { chkerrq!(self.world, ierr) }
+    }
+
+    /// Builds a [`Vector`], for a particular vector implementation.
+    pub fn set_type(&mut self, vec_type: VectorType) -> Result<()>
+    {
+        let cstring = petsc_raw::VECTYPE_TABLE[vec_type as usize];
+        let ierr = unsafe { petsc_raw::VecSetType(self.vec_p, cstring.as_ptr() as *const _) };
+        unsafe { chkerrq!(self.world, ierr) }
     }
 
     /// Creates a new vector of the same type as an existing vector.
@@ -66,10 +123,10 @@ impl<'a> Vector<'a> {
     /// allocates storage for the new vector. Use [`Vector::copy_data_from()`] to copy a vector.
     ///
     /// Note, if you want to duplicate and copy data you should use [`Vector::clone()`].
-    pub fn duplicate(&self) -> Result<Self> {
+    pub fn duplicate(&self) -> Result<Vector<'a>> {
         let mut vec2_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::VecDuplicate(self.vec_p, vec2_p.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
+        unsafe { chkerrq!(self.world, ierr) }?;
 
         Ok(Vector { world: self.world, vec_p: unsafe { vec2_p.assume_init() } })
     }
@@ -78,7 +135,6 @@ impl<'a> Vector<'a> {
     pub fn assemble(&mut self) -> Result<()>
     {
         self.assembly_begin()?;
-        // TODO: what would even go here?
         self.assembly_end()
     }
 
@@ -87,11 +143,11 @@ impl<'a> Vector<'a> {
     /// The inputs can be `None` to have PETSc decide the size.
     /// `local_size` and `global_size` cannot be both `None`. If one processor calls this with
     /// `global_size` of `None` then all processors must, otherwise the program will hang.
-    pub fn set_sizes(&mut self, local_size: Option<PetscInt>, global_size: Option<PetscInt>) -> Result<()> {
+    pub fn set_sizes(&mut self, local_size: impl Into<Option<PetscInt>>, global_size: impl Into<Option<PetscInt>>) -> Result<()> {
         let ierr = unsafe { petsc_raw::VecSetSizes(
-            self.vec_p, local_size.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
-            global_size.unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER)) };
-        Petsc::check_error(self.world, ierr)
+            self.vec_p, local_size.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
+            global_size.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER)) };
+        unsafe { chkerrq!(self.world, ierr) }
     }
 
     /// Inserts or adds values into certain locations of a vector.
@@ -121,11 +177,12 @@ impl<'a> Vector<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # let petsc = Petsc::init_no_args().unwrap();
     /// if petsc.world().size() != 1 {
     ///     // note, cargo wont run tests with mpi so this will never be reached,
     ///     // but this example will only work in a uniprocessor comm world
-    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!").unwrap();
+    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, "This is a uniprocessor example only!").unwrap();
     /// }
     ///
     /// let mut v = petsc.vec_create().unwrap();
@@ -152,15 +209,13 @@ impl<'a> Vector<'a> {
     /// assert_eq!(v.get_values(0..10).unwrap(), [2.1,0.0,2.0,2.2,0.0,0.0,0.0,3.3,3.0,8.4]
     ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
     /// ```
-    pub fn set_values(&mut self, ix: &[PetscInt], v: &[PetscScalar], iora: InsertMode) -> Result<()>
-    {
-        // TODO: should I do these asserts?
+    pub fn set_values(&mut self, ix: &[PetscInt], v: &[PetscScalar], iora: InsertMode) -> Result<()> {
         assert!(iora == InsertMode::INSERT_VALUES || iora == InsertMode::ADD_VALUES);
         assert_eq!(ix.len(), v.len());
 
         let ni = ix.len() as PetscInt;
         let ierr = unsafe { petsc_raw::VecSetValues(self.vec_p, ni, ix.as_ptr(), v.as_ptr() as *mut _, iora) };
-        Petsc::check_error(self.world, ierr)
+        unsafe { chkerrq!(self.world, ierr) }
     }
 
     /// Allows you to give an iter that will be use to make a series of calls to [`Vector::set_values()`].
@@ -173,12 +228,13 @@ impl<'a> Vector<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
     /// if petsc.world().size() != 1 {
     ///     // note, cargo wont run tests with mpi so this will never be reached,
     ///     // but this example will only work in a uniprocessor comm world
-    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
+    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
     /// }
     ///
     /// let mut v = petsc.vec_create()?;
@@ -227,12 +283,13 @@ impl<'a> Vector<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
     /// if petsc.world().size() != 1 {
     ///     // note, cargo wont run tests with mpi so this will never be reached,
     ///     // but this example will only work in a uniprocessor comm world
-    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
+    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
     /// }
     ///
     /// let mut v = petsc.vec_create()?;
@@ -280,45 +337,47 @@ impl<'a> Vector<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
-    /// # let petsc = Petsc::init_no_args().unwrap();
+    /// # use mpi::traits::*;
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// # let petsc = Petsc::init_no_args()?;
     /// if petsc.world().size() != 1 {
     ///     // note, cargo wont run tests with mpi so this will never be reached,
     ///     // but this example will only work in a uniprocessor comm world
-    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!").unwrap();
+    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
     /// }
     ///
-    /// let mut v = petsc.vec_create().unwrap();
-    /// v.set_sizes(None, Some(10)).unwrap(); // create vector of size 10
-    /// v.set_from_options().unwrap();
+    /// let mut v = petsc.vec_create()?;
+    /// v.set_sizes(None, Some(10))?; // create vector of size 10
+    /// v.set_from_options()?;
     ///
     /// let ix = [0, 2, 7, 9];
     /// v.set_values(&ix, &[PetscScalar::from(1.1), PetscScalar::from(2.2),
     ///                     PetscScalar::from(3.3), PetscScalar::from(4.4)],
-    ///     InsertMode::INSERT_VALUES).unwrap();
+    ///     InsertMode::INSERT_VALUES)?;
     ///
     /// // We do the map in the case that `PetscScalar` is complex.
-    /// assert_eq!(v.get_values(ix).unwrap(),
+    /// assert_eq!(v.get_values(ix)?,
     ///     [1.1, 2.2, 3.3, 4.4].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
-    /// assert_eq!(v.get_values(vec![2, 0, 9, 7]).unwrap(),
+    /// assert_eq!(v.get_values(vec![2, 0, 9, 7])?,
     ///     [2.2, 1.1, 4.4, 3.3].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
-    /// assert_eq!(v.get_values(0..10).unwrap(),
+    /// assert_eq!(v.get_values(0..10)?,
     ///     [1.1,0.0,2.2,0.0,0.0,0.0,0.0,3.3,0.0,4.4].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
-    /// assert_eq!(v.get_values((0..5).map(|v| v*2)).unwrap(),
+    /// assert_eq!(v.get_values((0..5).map(|v| v*2))?,
     ///     [1.1,2.2,0.0,0.0,0.0].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn get_values<T>(&self, ix: T) -> Result<Vec<PetscScalar>>
     where
         T: IntoIterator<Item = PetscInt>,
     {
-        // TODO: i added Vector::view which returns a slice, do we still need this method?
-
         let ix_iter = ix.into_iter();
         let ix_array = ix_iter.collect::<Vec<_>>();
         let ni = ix_array.len();
         let mut out_vec = vec![PetscScalar::default();ni];
 
         let ierr = unsafe { petsc_raw::VecGetValues(self.vec_p, ni as PetscInt, ix_array.as_ptr(), out_vec[..].as_mut_ptr() as *mut _) };
-        Petsc::check_error(self.world, ierr)?;
+        unsafe { chkerrq!(self.world, ierr) }?;
 
         Ok(out_vec)
     }
@@ -333,6 +392,7 @@ impl<'a> Vector<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
     /// // note, cargo wont run tests with mpi so this will always be run with
@@ -367,7 +427,7 @@ impl<'a> Vector<'a> {
         let mut low = MaybeUninit::<PetscInt>::uninit();
         let mut high = MaybeUninit::<PetscInt>::uninit();
         let ierr = unsafe { petsc_raw::VecGetOwnershipRange(self.vec_p, low.as_mut_ptr(), high.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
+        unsafe { chkerrq!(self.world, ierr) }?;
 
         Ok(unsafe { low.assume_init()..high.assume_init() })
     }
@@ -380,7 +440,7 @@ impl<'a> Vector<'a> {
     pub fn get_ownership_ranges(&self) -> Result<Vec<std::ops::Range<PetscInt>>> {
         let mut array = MaybeUninit::<*const PetscInt>::uninit();
         let ierr = unsafe { petsc_raw::VecGetOwnershipRanges(self.vec_p, array.as_mut_ptr()) };
-        Petsc::check_error(self.world, ierr)?;
+        unsafe { chkerrq!(self.world, ierr) }?;
 
         // SAFETY: Petsc says it is an array of length size+1
         let slice_from_array = unsafe { 
@@ -401,7 +461,7 @@ impl<'a> Vector<'a> {
     /// used in some internal functions in PETSc.
     pub fn copy_data_from(&mut self, x: &Vector) -> Result<()> {
         let ierr = unsafe { petsc_raw::VecCopy(x.vec_p, self.vec_p) };
-        Petsc::check_error(self.world, ierr)
+        unsafe { chkerrq!(self.world, ierr) }
     }
 
     /// Create an immutable view of the this processor's portion of the vector.
@@ -417,12 +477,13 @@ impl<'a> Vector<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
     /// if petsc.world().size() != 1 {
     ///     // note, cargo wont run tests with mpi so this will never be reached,
     ///     // but this example will only work in a uniprocessor comm world
-    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!").unwrap();
+    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, "This is a uniprocessor example only!").unwrap();
     /// }
     /// let mut v = petsc.vec_create()?;
     /// v.set_sizes(None, Some(10))?; // create vector of size 10
@@ -474,12 +535,13 @@ impl<'a> Vector<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
     /// if petsc.world().size() != 1 {
     ///     // note, cargo wont run tests with mpi so this will never be reached,
     ///     // but this example will only work in a uniprocessor comm world
-    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERROR_WRONG_MPI_SIZE, "This is a uniprocessor example only!").unwrap();
+    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, "This is a uniprocessor example only!").unwrap();
     /// }
     /// let mut v = petsc.vec_create()?;
     /// v.set_sizes(None, Some(10))?; // create vector of size 10
@@ -519,6 +581,7 @@ impl<'a> Vector<'a> {
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
     /// // note, cargo wont run tests with mpi so this will always be run with
@@ -537,7 +600,7 @@ impl<'a> Vector<'a> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn from_slice(world: &'a dyn Communicator, slice: &[PetscScalar]) -> Result<Self> {
+    pub fn from_slice(world: &'a UserCommunicator, slice: &[PetscScalar]) -> Result<Vector<'a>> {
         let mut v = Vector::create(world)?;
         v.set_sizes(Some(slice.len() as PetscInt), None)?; // create vector of size 10
         v.set_from_options()?;
@@ -549,36 +612,50 @@ impl<'a> Vector<'a> {
 
         Ok(v)
     }
+
+    /// Determines whether a PETSc [`Vector`] is of a particular type.
+    pub fn type_compare(&self, type_kind: VectorType) -> Result<bool> {
+        self.type_compare_str(&type_kind.to_string())
+    }
+
+    /// Gets the [`Vector`] type name (as a [`String`]). 
+    pub fn get_type_str(&self) -> Result<String> {
+        let mut s_p = MaybeUninit::uninit();
+        let ierr = unsafe { petsc_raw::VecGetType(self.vec_p, s_p.as_mut_ptr()) };
+        unsafe { chkerrq!(self.world, ierr) }?;
+        
+        let c_str: &CStr = unsafe { CStr::from_ptr(s_p.assume_init()) };
+        let str_slice: &str = c_str.to_str().unwrap();
+        Ok(str_slice.to_owned())
+    }
 }
 
-impl Clone for Vector<'_> {
+impl<'a> Clone for Vector<'a> {
     /// Will use [`Vector::duplicate()`] and [`Vector::copy_data_from()`].
-    fn clone(&self) -> Self {
-        let mut new_vec = self.duplicate().unwrap();
+    ///
+    /// Will [`petsc_panic!`] on error.
+    fn clone(&self) -> Vector<'a> {
+        let mut new_vec = Petsc::unwrap_or_abort(self.duplicate(), self.world);
         // TODO: only copy data if data has been set. It is hard to tell if data has been set.
         // We could maybe use something like `PetscObjectStateGet` to check if the vec has been modified
         // it seems like this is only incremented when data is changed so it could work. The problem is
         // that this is hidden in a private header so we can use it with the way we create raw bindings.
-        new_vec.copy_data_from(self).unwrap();
+        Petsc::unwrap_or_abort(new_vec.copy_data_from(self), self.world);
         new_vec
     }
 }
 
 impl Drop for VectorViewMut<'_, '_> {
     fn drop(&mut self) {
-        unsafe {
-            let ierr = petsc_raw::VecRestoreArray(self.vec.vec_p, &mut self.array as *mut *mut _ as *mut *mut _);
-            let _ = Petsc::check_error(self.vec.world, ierr); // TODO should i unwrap or what idk?
-        }
+        let ierr = unsafe { petsc_raw::VecRestoreArray(self.vec.vec_p, &mut self.array as *mut _) };
+        let _ = unsafe { chkerrq!(self.vec.world, ierr) }; // TODO: should I unwrap or what idk?
     }
 }
 
 impl Drop for VectorView<'_, '_> {
     fn drop(&mut self) {
-        unsafe {
-            let ierr = petsc_raw::VecRestoreArrayRead(self.vec.vec_p, &mut self.array as *mut *const _ as *mut *const _);
-            let _ = Petsc::check_error(self.vec.world, ierr); // TODO should i unwrap or what idk?
-        }
+        let ierr = unsafe { petsc_raw::VecRestoreArray(self.vec.vec_p, &mut self.array as *mut _ as *mut _) };
+        let _ = unsafe { chkerrq!(self.vec.world, ierr) }; // TODO: should I unwrap or what idk?
     }
 }
 
@@ -587,7 +664,7 @@ impl<'a, 'b> VectorViewMut<'a, 'b> {
     fn new(vec: &'b mut Vector<'a>) -> Result<Self> {
         let mut array = MaybeUninit::<*mut PetscScalar>::uninit();
         let ierr = unsafe { petsc_raw::VecGetArray(vec.vec_p, array.as_mut_ptr() as *mut *mut _) };
-        Petsc::check_error(vec.world, ierr)?;
+        unsafe { chkerrq!(vec.world, ierr) }?;
 
         let ndarray = unsafe { 
             ArrayViewMut::from_shape_ptr(ndarray::IxDyn(&[vec.get_local_size().unwrap() as usize]), array.assume_init()) };
@@ -601,7 +678,7 @@ impl<'a, 'b> VectorView<'a, 'b> {
     fn new(vec: &'b Vector<'a>) -> Result<Self> {
         let mut array = MaybeUninit::<*const PetscScalar>::uninit();
         let ierr = unsafe { petsc_raw::VecGetArrayRead(vec.vec_p, array.as_mut_ptr() as *mut *const _) };
-        Petsc::check_error(vec.world, ierr)?;
+        unsafe { chkerrq!(vec.world, ierr) }?;
 
         let ndarray = unsafe { 
             ArrayView::from_shape_ptr(ndarray::IxDyn(&[vec.get_local_size().unwrap() as usize]), array.assume_init()) };
@@ -610,8 +687,6 @@ impl<'a, 'b> VectorView<'a, 'b> {
     }
 }
 
-// TODO: im not sure if i like this, it would make more sense for Vector::view to return an ArrayView
-// Be also we need to run out own custom drop.
 impl<'b> Deref for VectorViewMut<'_, 'b> {
     type Target = ArrayViewMut<'b, PetscScalar, ndarray::IxDyn>;
     fn deref(&self) -> &ArrayViewMut<'b, PetscScalar, ndarray::IxDyn> {
@@ -644,31 +719,66 @@ impl std::fmt::Debug for VectorView<'_, '_> {
     }
 }
 
-// macro impls
-impl<'a> Vector<'a> {
-    wrap_simple_petsc_member_funcs! {
-        VecSetFromOptions, set_from_options, vec_p, takes mut, #[doc = "Configures the vector from the options database."];
-        VecSetUp, set_up, vec_p, takes mut, #[doc = "Sets up the internal vector data structures for the later use."];
-        VecAssemblyBegin, assembly_begin, vec_p, takes mut, #[doc = "Begins assembling the vector. This routine should be called after completing all calls to VecSetValues()."];
-        VecAssemblyEnd, assembly_end, vec_p, takes mut, #[doc = "Completes assembling the vector. This routine should be called after VecAssemblyBegin()."];
-        VecSet, set_all, vec_p, input PetscScalar, alpha, takes mut, #[doc = "Sets all components of a vector to a single scalar value.\n\nYou CANNOT call this after you have called [`Vector::set_values()`]."];
-        VecGetLocalSize, get_local_size, vec_p, output PetscInt, ls, #[doc = "Returns the number of elements of the vector stored in local memory."];
-        VecGetSize, get_global_size, vec_p, output PetscInt, gs, #[doc = "Returns the global number of elements of the vector."];
-        VecNorm, norm, vec_p, input NormType, norm_type, output PetscReal, tmp1, #[doc = "Computes the vector norm."];
-        VecScale, scale, vec_p, input PetscScalar, alpha, takes mut, #[doc = "Scales a vector (`x[i] *= alpha` for each `i`)."];
-        VecAXPY, axpy, vec_p, input PetscScalar, alpha, input &Vector, other.vec_p, takes mut, #[doc = "Computes `self += alpha * other`."];
-        VecAYPX, aypx, vec_p, input PetscScalar, alpha, input &Vector, other.vec_p, takes mut, #[doc = "Computes `self = other + alpha * self`."];
-        VecAXPBY, axpby, vec_p, input PetscScalar, alpha, input PetscScalar, beta, input &Vector, other.vec_p, takes mut, #[doc = "Computes `self = alpha * other + beta * self`."];
-        VecAXPBYPCZ, axpbypcz, vec_p, input PetscScalar, alpha, input PetscScalar, beta, input PetscScalar, gamma, input &Vector, x.vec_p, input &Vector, y.vec_p, takes mut, #[doc = "Computes `self = alpha * x + beta * y + gamma * self`."];
-        VecDot, dot, vec_p, input &Vector, y.vec_p, output PetscScalar, res, #[doc = "Computes the vector dot product.\n\n\
-            Note, for complex vectors it does `val = (x,y) = y^H x` where `y^H` denotes the conjugate transpose of y.\
-            If you with to force using the transpose you should use [`dot_t`](Vector::dot_t)."];
-        VecTDot, dot_t, vec_p, input &Vector, y.vec_p, output PetscScalar, res, #[doc = "Computes an indefinite vector dot product.\n\n\
-            That is, as opposed to [`dot`](Vector::dot), this routine does NOT use the complex conjugate."];
-        VecSetOption, set_option, vec_p, input VecOption, option, input bool, flg, #[doc = "Sets an option for controling a vector's behavior."];
+impl<'a, 'bv> BorrowVector<'a, 'bv> {
+    #[allow(dead_code)]
+    pub(crate) fn new(owned_vec: ManuallyDrop<Vector<'a>>, drop_func: Option<Box<dyn FnOnce(&mut BorrowVector<'a, 'bv>) + 'bv>>) -> Self {
+        BorrowVector { owned_vec, drop_func, _phantom: PhantomData }
     }
 }
 
-impl_petsc_object_funcs!{ Vector, vec_p }
+impl<'a, 'bv> BorrowVectorMut<'a, 'bv> {
+    #[allow(dead_code)]
+    pub(crate) fn new(owned_vec: ManuallyDrop<Vector<'a>>, drop_func: Option<Box<dyn FnOnce(&mut BorrowVectorMut<'a, 'bv>) + 'bv>>) -> Self {
+        BorrowVectorMut { owned_vec, drop_func, _phantom: PhantomData }
+    }
+}
 
-impl_petsc_view_func!{ Vector, vec_p, VecView }
+impl<'a> Deref for BorrowVector<'a, '_> {
+    type Target = Vector<'a>;
+
+    fn deref(&self) -> &Vector<'a> {
+        self.owned_vec.deref()
+    }
+}
+
+impl<'a> Deref for BorrowVectorMut<'a, '_> {
+    type Target = Vector<'a>;
+
+    fn deref(&self) -> &Vector<'a> {
+        self.owned_vec.deref()
+    }
+}
+
+impl<'a> DerefMut for BorrowVectorMut<'a, '_> {
+    fn deref_mut(&mut self) -> &mut Vector<'a> {
+        self.owned_vec.deref_mut()
+    }
+}
+
+// macro impls
+impl<'a> Vector<'a> {
+    wrap_simple_petsc_member_funcs! {
+        VecSetFromOptions, pub set_from_options, takes mut, #[doc = "Configures the vector from the options database."];
+        VecSetUp, pub set_up, takes mut, #[doc = "Sets up the internal vector data structures for the later use."];
+        VecAssemblyBegin, pub assembly_begin, takes mut, #[doc = "Begins assembling the vector. This routine should be called after completing all calls to VecSetValues()."];
+        VecAssemblyEnd, pub assembly_end, takes mut, #[doc = "Completes assembling the vector. This routine should be called after VecAssemblyBegin()."];
+        VecSet, pub set_all, input PetscScalar, alpha, takes mut, #[doc = "Sets all components of a vector to a single scalar value.\n\nYou CANNOT call this after you have called [`Vector::set_values()`]."];
+        VecGetLocalSize, pub get_local_size, output PetscInt, ls, #[doc = "Returns the number of elements of the vector stored in local memory."];
+        VecGetSize, pub get_global_size, output PetscInt, gs, #[doc = "Returns the global number of elements of the vector."];
+        VecNorm, pub norm, input NormType, norm_type, output PetscReal, tmp1, #[doc = "Computes the vector norm."];
+        VecScale, pub scale, input PetscScalar, alpha, takes mut, #[doc = "Scales a vector (`x[i] *= alpha` for each `i`)."];
+        VecAXPY, pub axpy, input PetscScalar, alpha, input &Vector, other.as_raw, takes mut, #[doc = "Computes `self += alpha * other`."];
+        VecAYPX, pub aypx, input PetscScalar, alpha, input &Vector, other.as_raw, takes mut, #[doc = "Computes `self = other + alpha * self`."];
+        VecAXPBY, pub axpby, input PetscScalar, alpha, input PetscScalar, beta, input &Vector, other.as_raw, takes mut, #[doc = "Computes `self = alpha * other + beta * self`."];
+        VecAXPBYPCZ, pub axpbypcz, input PetscScalar, alpha, input PetscScalar, beta, input PetscScalar, gamma, input &Vector, x.as_raw, input &Vector, y.as_raw, takes mut, #[doc = "Computes `self = alpha * x + beta * y + gamma * self`."];
+        VecDot, pub dot, input &Vector, y.as_raw, output PetscScalar, res, #[doc = "Computes the vector dot product.\n\n\
+            Note, for complex vectors it does `val = (x,y) = y^H x` where `y^H` denotes the conjugate transpose of y.\
+            If you with to force using the transpose you should use [`dot_t`](Vector::dot_t)."];
+        VecTDot, pub dot_t, input &Vector, y.as_raw, output PetscScalar, res, #[doc = "Computes an indefinite vector dot product.\n\n\
+            That is, as opposed to [`dot`](Vector::dot), this routine does NOT use the complex conjugate."];
+        VecSetOption, pub set_option, input VecOption, option, input bool, flg, #[doc = "Sets an option for controling a vector's behavior."];
+        VecChop, pub chop, input PetscReal, tol, takes mut, #[doc = "Set all values in the vector with an absolute value less than the tolerance to zero"];
+    }
+}
+
+impl_petsc_object_traits! { Vector, vec_p, petsc_raw::_p_Vec, VecView, VecDestroy; }
