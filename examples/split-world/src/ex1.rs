@@ -52,13 +52,14 @@ fn main() -> petsc_rs::Result<()> {
     let univ = mpi::initialize().unwrap();
     let world = univ.world();
 
-    if world.size() == 1
-    {
+    if world.size() == 1 {
+        eprintln!("This is strictly not a uniprocessor example!");
         // We cant use Petsc::set_error because we haven't initialized PETSc yet
-        panic!("This is strictly not a uniprocessor example!");
+        // But we can use `petsc_panic!` without a message.
+        petsc_panic!(&world, PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE);
     }
 
-    // split world into two (off processes with even rank and processes odd rank).
+    // split world into two classes (even rank and odd rank).
     let my_color = world.rank() % 2;
     let comm = world.split_by_color(Color::with_value(my_color)).unwrap();
 

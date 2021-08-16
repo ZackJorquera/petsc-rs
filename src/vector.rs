@@ -5,6 +5,7 @@
 use std::{ffi::{CStr, CString}, marker::PhantomData, ops::{Deref, DerefMut}};
 use std::mem::{MaybeUninit, ManuallyDrop};
 use crate::{
+    Petsc,
     petsc_raw,
     Result,
     PetscAsRaw,
@@ -337,31 +338,34 @@ impl<'a> Vector<'a> {
     /// ```
     /// # use petsc_rs::prelude::*;
     /// # use mpi::traits::*;
-    /// # let petsc = Petsc::init_no_args().unwrap();
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// # let petsc = Petsc::init_no_args()?;
     /// if petsc.world().size() != 1 {
     ///     // note, cargo wont run tests with mpi so this will never be reached,
     ///     // but this example will only work in a uniprocessor comm world
-    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, "This is a uniprocessor example only!").unwrap();
+    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
     /// }
     ///
-    /// let mut v = petsc.vec_create().unwrap();
-    /// v.set_sizes(None, Some(10)).unwrap(); // create vector of size 10
-    /// v.set_from_options().unwrap();
+    /// let mut v = petsc.vec_create()?;
+    /// v.set_sizes(None, Some(10))?; // create vector of size 10
+    /// v.set_from_options()?;
     ///
     /// let ix = [0, 2, 7, 9];
     /// v.set_values(&ix, &[PetscScalar::from(1.1), PetscScalar::from(2.2),
     ///                     PetscScalar::from(3.3), PetscScalar::from(4.4)],
-    ///     InsertMode::INSERT_VALUES).unwrap();
+    ///     InsertMode::INSERT_VALUES)?;
     ///
     /// // We do the map in the case that `PetscScalar` is complex.
-    /// assert_eq!(v.get_values(ix).unwrap(),
+    /// assert_eq!(v.get_values(ix)?,
     ///     [1.1, 2.2, 3.3, 4.4].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
-    /// assert_eq!(v.get_values(vec![2, 0, 9, 7]).unwrap(),
+    /// assert_eq!(v.get_values(vec![2, 0, 9, 7])?,
     ///     [2.2, 1.1, 4.4, 3.3].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
-    /// assert_eq!(v.get_values(0..10).unwrap(),
+    /// assert_eq!(v.get_values(0..10)?,
     ///     [1.1,0.0,2.2,0.0,0.0,0.0,0.0,3.3,0.0,4.4].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
-    /// assert_eq!(v.get_values((0..5).map(|v| v*2)).unwrap(),
+    /// assert_eq!(v.get_values((0..5).map(|v| v*2))?,
     ///     [1.1,2.2,0.0,0.0,0.0].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn get_values<T>(&self, ix: T) -> Result<Vec<PetscScalar>>
     where
@@ -628,13 +632,15 @@ impl<'a> Vector<'a> {
 
 impl<'a> Clone for Vector<'a> {
     /// Will use [`Vector::duplicate()`] and [`Vector::copy_data_from()`].
+    ///
+    /// Will [`petsc_panic!`] on error.
     fn clone(&self) -> Vector<'a> {
-        let mut new_vec = self.duplicate().unwrap();
+        let mut new_vec = Petsc::unwrap_or_abort(self.duplicate(), self.world);
         // TODO: only copy data if data has been set. It is hard to tell if data has been set.
         // We could maybe use something like `PetscObjectStateGet` to check if the vec has been modified
         // it seems like this is only incremented when data is changed so it could work. The problem is
         // that this is hidden in a private header so we can use it with the way we create raw bindings.
-        new_vec.copy_data_from(self).unwrap();
+        Petsc::unwrap_or_abort(new_vec.copy_data_from(self), self.world);
         new_vec
     }
 }

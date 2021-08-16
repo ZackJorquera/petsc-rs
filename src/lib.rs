@@ -138,6 +138,7 @@ pub mod prelude {
         petsc_println_sync,
         petsc_print,
         petsc_print_sync,
+        petsc_panic,
         vector::{Vector, VecOption, VectorType, },
         mat::{Mat, MatAssemblyType, MatOption, MatDuplicateOption, MatStencil, NullSpace, MatType,
             MatOperation, },
@@ -257,6 +258,42 @@ macro_rules! petsc_print_sync {
     })
 }
 
+/// Aborts the PETSc program with an error code.
+///
+/// Similar to [`panic!`], but will call [`Petsc::set_error()`] and [`Petsc::abort()`],
+/// and not rust's panic.
+///
+/// If you `petsc_panic!` with a message, than PETSc must be initialized. Otherwise,
+/// `petsc_panic!` with out a message only requires MPI to be initialized.
+///
+/// # Example
+///
+/// ```should_panic
+/// # use petsc_rs::prelude::*;
+/// # use mpi::traits::*;
+/// # fn main() -> petsc_rs::Result<()> {
+/// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
+///
+/// petsc_panic!(petsc.world(), PetscErrorKind::PETSC_ERR_USER);
+/// petsc_panic!(petsc.world(), PetscErrorKind::PETSC_ERR_USER,
+///     "this is a terrible mistake!");
+/// petsc_panic!(petsc.world(), PetscErrorKind::PETSC_ERR_USER,
+///     "this is a {} {message}", "fancy", message = "message");
+/// # Ok(())
+/// # }
+/// ```
+#[macro_export]
+macro_rules! petsc_panic {
+    ($world:expr, $err_kind:expr) => ({
+        Petsc::abort($world, $err_kind)
+    });
+    ($world:expr, $err_kind:expr, $($arg:tt)*) => ({
+        let s = ::std::fmt::format(format_args!($($arg)*));
+        let _ = Petsc::set_error($world, $err_kind, s).unwrap_err();
+        Petsc::abort($world, $err_kind)
+    })
+}
+
 /// PETSc result
 pub type Result<T> = std::result::Result<T, PetscError>;
 
@@ -269,6 +306,11 @@ pub struct PetscError {
     pub(crate) error: Box<dyn std::error::Error + Send + Sync>,
 }
 
+impl Display for PetscError {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(fmt)
+    }
+}
 
 /// A list specifying types of PETSc errors.
 pub type PetscErrorType = petsc_raw::PetscErrorType;
@@ -770,6 +812,29 @@ impl Petsc {
         }
 
         return Err(error);
+    }
+
+    /// Aborts PETSc program execution.
+    ///
+    /// Note, this does not require PETSc to be initialized.
+    ///
+    /// Same as [`mpi::topology::Communicator::abort()`].
+    #[inline]
+    #[track_caller]
+    pub fn abort<C: Communicator>(world: &C, error_kind: PetscErrorKind) -> ! {
+        // TODO: the c code also does this: `if (petscindebugger) abort();`
+        world.abort(error_kind as i32)
+    }
+
+    /// Internal unwrap but calls [`petsc_panic!`].
+    #[inline]
+    #[track_caller]
+    pub(crate) fn unwrap_or_abort<T, C: Communicator>(res: Result<T>, world: &C) -> T {
+        // TODO: we should make this work for non PetscError error types
+        match res {
+            Ok(t) => t,
+            Err(e) => petsc_panic!(world, e.kind, "called `Petsc::unwrap_or_abort()` on an `Err` value: {}", &e),
+        }
     }
 
     /// replacement for the `PetscPrintf` function in the C api. 

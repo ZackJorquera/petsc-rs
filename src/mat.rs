@@ -7,6 +7,7 @@ use std::{ffi::CString, marker::PhantomData, ops::{Deref, DerefMut}};
 use std::mem::{MaybeUninit, ManuallyDrop};
 use std::rc::Rc;
 use crate::{
+    Petsc,
     petsc_raw,
     Result,
     PetscAsRaw,
@@ -757,6 +758,7 @@ pub mod mat_shell {
     use std::mem::{MaybeUninit, ManuallyDrop};
     use super::{MatOperation, Mat, MatDuplicateOption};
     use crate::{
+        Petsc,
         petsc_raw,
         Result,
         PetscAsRaw,
@@ -1817,7 +1819,7 @@ pub mod mat_shell {
     impl<'a, 'tl, T> Clone for MatShell<'a, 'tl, T> {
         /// Same as [`x.duplicate(MatDuplicateOption::MAT_COPY_VALUES)`](MatShell::duplicate()).
         fn clone(&self) -> Self {
-            MatShell::duplicate(&self, MatDuplicateOption::MAT_COPY_VALUES).unwrap()
+            Petsc::unwrap_or_abort(MatShell::duplicate(&self, MatDuplicateOption::MAT_COPY_VALUES), self.world())
         }
     }
 
@@ -1841,6 +1843,7 @@ pub mod mat_shell {
                 MatOperation::MATOP_SOLVE => MatOperationMVV::MATOP_SOLVE,
                 MatOperation::MATOP_SOLVE_TRANSPOSE => MatOperationMVV::MATOP_SOLVE_TRANSPOSE,
                 // There are more
+                // TODO: use petsc_panic, maybe grab the global comm world from mpi
                 _ => panic!("The given op: `{:?}` can not be turned into a `MatOperationMVV`", op)
             }
         }
@@ -1941,7 +1944,7 @@ pub mod mat_shell {
 impl<'a, 'tl> Clone for Mat<'a, 'tl> {
     /// Same as [`x.duplicate(MatDuplicateOption::MAT_COPY_VALUES)`](Mat::duplicate()).
     fn clone(&self) -> Self {
-        self.duplicate(MatDuplicateOption::MAT_COPY_VALUES).unwrap()
+        Petsc::unwrap_or_abort(self.duplicate(MatDuplicateOption::MAT_COPY_VALUES), self.world())
     }
 }
 

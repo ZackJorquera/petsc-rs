@@ -23,6 +23,7 @@ use std::pin::Pin;
 use std::ptr::NonNull;
 use std::rc::Rc;
 use crate::{
+    Petsc,
     petsc_raw,
     Result,
     PetscAsRaw,
@@ -37,6 +38,7 @@ use crate::{
     mat::{Mat, MatType, },
     indexset::{IS, },
     spaces::{Space, DualSpace, },
+    petsc_panic,
 };
 use mpi::topology::UserCommunicator;
 use mpi::traits::*;
@@ -188,14 +190,14 @@ impl<'a, 'tl> FieldDiscPriv<'a, 'tl> {
         match self {
             FieldDiscPriv::Known(fd) => fd,
             FieldDiscPriv::Unknown(ufd) => {
-                let id = ufd.get_class_id().unwrap();
+                let id = Petsc::unwrap_or_abort(ufd.get_class_id(), ufd.world());
                 if id == unsafe { petsc_raw::PETSCFE_CLASSID } {
                     FEDisc::new(ufd.world, ufd.po_p as *mut _).into()
                 } else if id == unsafe { petsc_raw::PETSCFV_CLASSID } {
                     FVDisc::new(ufd.world, ufd.po_p as *mut _).into()
                 } else {
-                    seterrq!(ufd.world, PetscErrorKind::PETSC_ERR_ARG_WRONG, 
-                        "Unknown discretization type for field").map(|_| unreachable!()).unwrap()
+                    petsc_panic!(ufd.world, PetscErrorKind::PETSC_ERR_ARG_WRONG, 
+                        "Unknown discretization type for field")
                 }
             }
         }
@@ -1240,8 +1242,8 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// Right now this is only implemented for DM Composite, for any other type this wont
     /// do anything.
     pub(crate) unsafe fn set_inner_values_for_readonly(dm: &mut Self) -> petsc_raw::PetscErrorCode {
-        if dm.type_compare(DMType::DMCOMPOSITE).unwrap() {
-            let len = dm.composite_get_num_dms_petsc().unwrap();
+        if Petsc::unwrap_or_abort(dm.type_compare(DMType::DMCOMPOSITE), dm.world()) {
+            let len = Petsc::unwrap_or_abort(dm.composite_get_num_dms_petsc(), dm.world());
             let mut dms_p = vec![std::ptr::null_mut(); len as usize]; // use MaybeUninit if we can
             let ierr = petsc_raw::DMCompositeGetEntriesArray(dm.dm_p, dms_p.as_mut_ptr());
             if ierr != 0 { let _ = chkerrq!(dm.world, ierr); return ierr; }
@@ -1259,11 +1261,11 @@ impl<'a, 'tl> DM<'a, 'tl> {
                 this_dm
             }).collect::<Vec<_>>());
             0
-        } else if dm.type_compare(DMType::DMDA).unwrap() {
+        } else if Petsc::unwrap_or_abort(dm.type_compare(DMType::DMDA), dm.world()) {
             0
-        } else if dm.type_compare(DMType::DMPLEX).unwrap() {
+        } else if Petsc::unwrap_or_abort(dm.type_compare(DMType::DMPLEX), dm.world()) {
             0 // TODO: should we do stuff here
-        } else if dm.type_compare(DMType::DMSHELL).unwrap() {
+        } else if Petsc::unwrap_or_abort(dm.type_compare(DMType::DMSHELL), dm.world()) {
             // TODO: This is for the case when you dont set a `DM`.
             // If we add DM shell bindings then we will need to
             // change this.

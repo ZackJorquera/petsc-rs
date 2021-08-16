@@ -98,7 +98,7 @@ There are also a lot of `TODO` comments throughout the repository that I try to 
 - [ ] add `KSP::set_compute_operators_single_mat`, if it would even make a different. Right now we just ignore one of the operators.
 - [ ] create wrapper macro to synchronize method calls, for example, we could do something like `sync! { petsc.world(), println!("hello process: {}", petsc.world().rank()) }` in place of `petsc_println_all!(petsc.world(), "hello process: {}", petsc.world().rank())`. Would this even work?
 - [ ] should rename the `create` methods to be `new` (make things rustier). We would have to change the name of the existing private `new` methods.
-- [ ] make it so panic! aborts nicely (i.e. it calls PetscAbort and MPI_Abort), maybe we have to make a petsc_abort!. Make all uses of panic! use petsc_abort! instead. this includes unwrap, assert_eq, and others probably.
+- [ ] make it so panic! aborts nicely (i.e. it calls PetscAbort and MPI_Abort), maybe we have to make a petsc_abort!. Make all uses of panic! use petsc_abort! instead. this includes unwrap, assert_eq, and others probably. I started this to test out the API, but never finished it.
 - [ ] add Quadrature type (https://petsc.org/release/docs/manualpages/FE/PetscQuadrature.html)
   - [ ] do `PetscDTStroudConicalQuadrature`
 - [ ] do `https://petsc.org/release/docs/manualpages/DMPLEX/DMPlexSetClosurePermutationTensor.html`
