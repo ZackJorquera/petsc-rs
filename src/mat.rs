@@ -100,7 +100,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     pub fn create(world: &'a UserCommunicator,) -> Result<Self> {
         let mut mat_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::MatCreate(world.as_raw(), mat_p.as_mut_ptr()) };
-        chkerrq!(world, ierr)?;
+        unsafe { chkerrq!(world, ierr) }?;
 
         Ok(Mat::new(world, unsafe { mat_p.assume_init() }))
     }
@@ -130,7 +130,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
 
         let mut mat2_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::MatDuplicate(self.mat_p, op, mat2_p.as_mut_ptr()) };
-        chkerrq!(self.world, ierr)?;
+        unsafe { chkerrq!(self.world, ierr) }?;
 
         Ok(Mat::new(self.world, unsafe { mat2_p.assume_init() }))
     }
@@ -145,7 +145,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
             local_cols.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
             global_rows.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
             global_cols.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER)) };
-        chkerrq!(self.world, ierr)
+        unsafe { chkerrq!(self.world, ierr) }
     }
 
     /// Inserts or adds a block of values into a matrix. 
@@ -236,7 +236,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
         assert_eq!(v.len(), m*n);
         let ierr = unsafe { petsc_raw::MatSetValues(self.mat_p, m as PetscInt, idxm.as_ptr(), n as PetscInt,
             idxn.as_ptr(), v.as_ptr() as *mut _, addv) };
-        chkerrq!(self.world, ierr)
+        unsafe { chkerrq!(self.world, ierr) }
     }
 
     /// Inserts or adds a block of values into a matrix. Using structured grid indexing
@@ -265,7 +265,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
         assert_eq!(v.len(), m*n);
         let ierr = unsafe { petsc_raw::MatSetValuesStencil(self.mat_p, m as PetscInt, idxm.as_ptr(), n as PetscInt,
             idxn.as_ptr(), v.as_ptr() as *mut _, addv) };
-        chkerrq!(self.world, ierr)
+        unsafe { chkerrq!(self.world, ierr) }
     }
 
     /// Inserts or adds values into certain locations of a matrix, using a local numbering of the nodes.
@@ -277,7 +277,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
         assert_eq!(v.len(), m*n);
         let ierr = unsafe { petsc_raw::MatSetValuesLocal(self.mat_p, m as PetscInt, idxm.as_ptr(), n as PetscInt,
             idxn.as_ptr(), v.as_ptr() as *mut _, addv) };
-        chkerrq!(self.world, ierr)
+        unsafe { chkerrq!(self.world, ierr) }
     }
 
     /// Returns the range of matrix rows owned by this processor.
@@ -289,7 +289,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
         let mut low = MaybeUninit::<PetscInt>::uninit();
         let mut high = MaybeUninit::<PetscInt>::uninit();
         let ierr = unsafe { petsc_raw::MatGetOwnershipRange(self.mat_p, low.as_mut_ptr(), high.as_mut_ptr()) };
-        chkerrq!(self.world, ierr)?;
+        unsafe { chkerrq!(self.world, ierr) }?;
 
         Ok(unsafe { low.assume_init()..high.assume_init() })
     }
@@ -302,7 +302,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     pub fn get_ownership_ranges(&self) -> Result<Vec<std::ops::Range<PetscInt>>> {
         let mut array = MaybeUninit::<*const PetscInt>::uninit();
         let ierr = unsafe { petsc_raw::MatGetOwnershipRanges(self.mat_p, array.as_mut_ptr()) };
-        chkerrq!(self.world, ierr)?;
+        unsafe { chkerrq!(self.world, ierr) }?;
 
         // SAFETY: Petsc says it is an array of length size+1
         let slice_from_array = unsafe { 
@@ -602,7 +602,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
 
         let ierr = unsafe { petsc_raw::MatGetValues(self.mat_p, mi as PetscInt, idxm_array.as_ptr(),
             ni as PetscInt, idxn_array.as_ptr(), out_vec[..].as_mut_ptr() as *mut _) };
-        chkerrq!(self.world, ierr)?;
+        unsafe { chkerrq!(self.world, ierr) }?;
 
         Ok(out_vec)
     }
@@ -623,7 +623,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
         // TODO: do we want other MatReuse options
         let ierr = unsafe { petsc_raw::MatMatMult(self.mat_p, other.mat_p, MatReuse::MAT_INITIAL_MATRIX,
             fill.into().unwrap_or(petsc_raw::PETSC_DEFAULT_REAL), mat_out_p.as_mut_ptr()) };
-        chkerrq!(self.world, ierr)?;
+        unsafe { chkerrq!(self.world, ierr) }?;
 
         Ok(Mat::new(self.world, unsafe { mat_out_p.assume_init() }))
     }
@@ -641,7 +641,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     pub fn set_nullspace(&mut self, nullspace: impl Into<Option<Rc<NullSpace<'a>>>>) -> Result<()> {
         let ierr = unsafe { petsc_raw::MatSetNullSpace(self.mat_p,
             nullspace.into().as_ref().map_or(std::ptr::null_mut(), |ns| ns.ns_p)) };
-        chkerrq!(self.world, ierr)
+        unsafe { chkerrq!(self.world, ierr) }
     }
 
     /// Attaches a left null space to a matrix.
@@ -654,7 +654,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     pub fn set_left_nullspace(&mut self, nullspace: impl Into<Option<Rc<NullSpace<'a>>>>) -> Result<()> {
         let ierr = unsafe { petsc_raw::MatSetTransposeNullSpace(self.mat_p,
             nullspace.into().as_ref().map_or(std::ptr::null_mut(), |ns| ns.ns_p)) };
-        chkerrq!(self.world, ierr)
+        unsafe { chkerrq!(self.world, ierr) }
     }
 
     /// Attaches a null space to a matrix, which is often the null space (rigid body modes)
@@ -666,7 +666,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     pub fn set_near_nullspace(&mut self, nullspace: impl Into<Option<Rc<NullSpace<'a>>>>) -> Result<()> {
         let ierr = unsafe { petsc_raw::MatSetNearNullSpace(self.mat_p,
             nullspace.into().as_ref().map_or(std::ptr::null_mut(), |ns| ns.ns_p)) };
-        chkerrq!(self.world, ierr)
+        unsafe { chkerrq!(self.world, ierr) }
     }
 
     /// Gets a reference to a submatrix specified in local numbering.
@@ -684,13 +684,13 @@ impl<'a, 'tl> Mat<'a, 'tl> {
         let mut mat_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::MatGetLocalSubMatrix(self.mat_p,
             is_row.is_p, is_col.is_p, mat_p.as_mut_ptr()) };
-        chkerrq!(self.world, ierr)?;
+        unsafe { chkerrq!(self.world, ierr) }?;
         Ok(BorrowMatMut::new( 
             ManuallyDrop::new( Mat::new(self.world, unsafe { mat_p.assume_init() })),
             Some(Box::new(move |borrow_mat| {
                     let ierr = unsafe { petsc_raw::MatRestoreLocalSubMatrix(self.mat_p,
                         is_row.is_p, is_col.is_p, &mut borrow_mat.owned_mat.mat_p as *mut _) };
-                    let _ = chkerrq!(self.world, ierr); // TODO: should I unwrap ?
+                    let _ = unsafe { chkerrq!(self.world, ierr) }; // TODO: should I unwrap ?
                 })),
         ))
     }
@@ -699,14 +699,14 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     pub fn set_type_str(&mut self, mat_type: &str) -> Result<()> {
         let cstring = CString::new(mat_type).expect("`CString::new` failed");
         let ierr = unsafe { petsc_raw::MatSetType(self.mat_p, cstring.as_ptr()) };
-        chkerrq!(self.world, ierr)
+        unsafe { chkerrq!(self.world, ierr) }
     }
 
     /// Builds [`Mat`] for a particular type
     pub fn set_type(&mut self, mat_type: MatType) -> Result<()> {
         let option_cstr = petsc_raw::MATTYPE_TABLE[mat_type as usize];
         let ierr = unsafe { petsc_raw::MatSetType(self.mat_p, option_cstr.as_ptr() as *const _) };
-        chkerrq!(self.world, ierr)
+        unsafe { chkerrq!(self.world, ierr) }
     }
 
     /// Sets the type of the [`Mat`] to be [`MatType::MATSHELL`](petsc_raw::MatTypeEnum::MATSHELL) and then returns a [`MatShell`].
@@ -736,7 +736,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     pub fn create_left_vector(&self) -> Result<Vector<'a>> {
         let mut vec_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::MatCreateVecs(self.as_raw(), std::ptr::null_mut(), vec_p.as_mut_ptr()) };
-        chkerrq!(self.world, ierr)?;
+        unsafe { chkerrq!(self.world, ierr) }?;
 
         Ok(Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } })
     }
@@ -745,7 +745,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     pub fn create_right_vector(&self) -> Result<Vector<'a>> {
         let mut vec_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::MatCreateVecs(self.as_raw(), vec_p.as_mut_ptr(), std::ptr::null_mut()) };
-        chkerrq!(self.world, ierr)?;
+        unsafe { chkerrq!(self.world, ierr) }?;
 
         Ok(Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } })
     }
@@ -954,7 +954,7 @@ pub mod mat_shell {
                 global_cols.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
                 std::mem::transmute(ctx.as_ref()),
                 mat_p.as_mut_ptr()) };
-            chkerrq!(world, ierr)?;
+            unsafe { chkerrq!(world, ierr) }?;
 
             let inner_mat = Mat::new(world, unsafe { mat_p.assume_init() });
             let mut ms = MatShell::new(inner_mat);
@@ -978,7 +978,7 @@ pub mod mat_shell {
                 let td_anchor = Box::pin(td);
                 let ierr = unsafe { petsc_raw::MatShellSetContext(self.mat_p,
                     std::mem::transmute(td_anchor.as_ref())) }; // this will also erase the lifetimes
-                chkerrq!(self.world, ierr)?;
+                unsafe { chkerrq!(self.world, ierr) }?;
                 self.shell_trampoline_data = Some(td_anchor);
             }
             Ok(())
@@ -1109,7 +1109,7 @@ pub mod mat_shell {
                 let td_anchor = Box::pin(td);
                 let ierr = unsafe { petsc_raw::MatShellSetContext(self.mat_p,
                     std::mem::transmute(td_anchor.as_ref())) }; // this will also erase the lifetimes
-                chkerrq!(self.world, ierr)?;
+                unsafe { chkerrq!(self.world, ierr) }?;
                 self.shell_trampoline_data = Some(td_anchor);
             }
 
@@ -1181,7 +1181,7 @@ pub mod mat_shell {
 
             let ierr = unsafe { petsc_raw::MatShellSetOperation(self.mat_p, op.into(),
                 std::mem::transmute(mat_shell_operation_trampoline_ptr)) }; // this will also erase the lifetimes
-            chkerrq!(self.world, ierr)?;
+            unsafe { chkerrq!(self.world, ierr) }?;
 
             Ok(())
         }
@@ -1256,7 +1256,7 @@ pub mod mat_shell {
                 let td_anchor = Box::pin(td);
                 let ierr = unsafe { petsc_raw::MatShellSetContext(self.mat_p,
                     std::mem::transmute(td_anchor.as_ref())) }; // this will also erase the lifetimes
-                chkerrq!(self.world, ierr)?;
+                unsafe { chkerrq!(self.world, ierr) }?;
                 self.shell_trampoline_data = Some(td_anchor);
             }
         
@@ -1327,7 +1327,7 @@ pub mod mat_shell {
         
             let ierr = unsafe { petsc_raw::MatShellSetOperation(self.mat_p, op.into(),
                 std::mem::transmute(mat_shell_operation_trampoline_ptr)) }; // this will also erase the lifetimes
-            chkerrq!(self.world, ierr)?;
+            unsafe { chkerrq!(self.world, ierr) }?;
         
             Ok(())
         }
@@ -1371,7 +1371,7 @@ pub mod mat_shell {
                 let td_anchor = Box::pin(td);
                 let ierr = unsafe { petsc_raw::MatShellSetContext(self.mat_p,
                     std::mem::transmute(td_anchor.as_ref())) }; // this will also erase the lifetimes
-                chkerrq!(self.world, ierr)?;
+                unsafe { chkerrq!(self.world, ierr) }?;
                 self.shell_trampoline_data = Some(td_anchor);
             }
         
@@ -1444,7 +1444,7 @@ pub mod mat_shell {
         
             let ierr = unsafe { petsc_raw::MatShellSetOperation(self.mat_p, op.into(),
                 std::mem::transmute(mat_shell_operation_trampoline_ptr)) }; // this will also erase the lifetimes
-            chkerrq!(self.world, ierr)?;
+            unsafe { chkerrq!(self.world, ierr) }?;
         
             Ok(())
         }
@@ -1540,7 +1540,7 @@ pub mod mat_shell {
                 let td_anchor = Box::pin(td);
                 let ierr = unsafe { petsc_raw::MatShellSetContext(self.mat_p,
                     std::mem::transmute(td_anchor.as_ref())) }; // this will also erase the lifetimes
-                chkerrq!(self.world, ierr)?;
+                unsafe { chkerrq!(self.world, ierr) }?;
                 self.shell_trampoline_data = Some(td_anchor);
             }
         
@@ -1611,7 +1611,7 @@ pub mod mat_shell {
         
             let ierr = unsafe { petsc_raw::MatShellSetOperation(self.mat_p, op.into(),
                 std::mem::transmute(mat_shell_operation_trampoline_ptr)) }; // this will also erase the lifetimes
-            chkerrq!(self.world, ierr)?;
+            unsafe { chkerrq!(self.world, ierr) }?;
         
             Ok(())
         }
@@ -1620,7 +1620,7 @@ pub mod mat_shell {
         pub fn shell_set_vector_type(&mut self, vtype: VectorType) -> Result<()> {
             let type_name_cs = ::std::ffi::CString::new(vtype.to_string()).expect("`CString::new` failed");
             let ierr = unsafe { petsc_raw::MatShellSetVecType(self.mat_p, type_name_cs.as_ptr()) };
-            chkerrq!(self.world, ierr)
+            unsafe { chkerrq!(self.world, ierr) }
         }
 
         /// Allows user to set the duplicate operation for a shell matrix.
@@ -1709,12 +1709,12 @@ pub mod mat_shell {
                 let td_anchor = Box::pin(td);
                 let ierr = unsafe { petsc_raw::MatShellSetContext(self.mat_p,
                     std::mem::transmute(td_anchor.as_ref())) }; // this will also erase the lifetimes
-                chkerrq!(self.world, ierr)?;
+                unsafe { chkerrq!(self.world, ierr) }?;
                 self.shell_trampoline_data = Some(td_anchor);
             }
         
             let ierr = unsafe { petsc_raw::MatShellSetOperation(self.mat_p, MatOperation::MATOP_DUPLICATE, None) };
-            chkerrq!(self.world, ierr)
+            unsafe { chkerrq!(self.world, ierr) }
         }
 
         /// Duplicates a [`MatShell`] using the operation set with [`MatShell::shell_set_operation_duplicate()`].
@@ -1749,7 +1749,7 @@ pub mod mat_shell {
                         if let Some(petsc_log_plb) = plb_ple {
                             let mut petsc_stagelog = MaybeUninit::uninit();
                             let ierr = unsafe { petsc_raw::PetscLogGetStageLog(petsc_stagelog.as_mut_ptr()) };
-                            chkerrq!(self.world, ierr)?;
+                            unsafe { chkerrq!(self.world, ierr) }?;
 
                             let petsc_stagelog = unsafe { &*petsc_stagelog.assume_init() };
                             let stage_info = unsafe { std::slice::from_raw_parts_mut(petsc_stagelog.stageInfo, petsc_stagelog.maxStages as usize) };
@@ -1757,7 +1757,7 @@ pub mod mat_shell {
                                 let event_info = unsafe { std::slice::from_raw_parts_mut((&*stage_info[petsc_stagelog.curStage as usize].eventLog).eventInfo, (&*stage_info[petsc_stagelog.curStage as usize].eventLog).maxEvents as usize) };
                                 if event_info[unsafe { petsc_raw::MAT_Convert } as usize].active.into() {
                                     let ierr = unsafe { petsc_log_plb(petsc_raw::MAT_Convert, 0, self.mat_p as *mut _, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut()) };
-                                    chkerrq!(self.world, ierr)?;
+                                    unsafe { chkerrq!(self.world, ierr) }?;
                                 }
                             }
                         }
@@ -1786,11 +1786,11 @@ pub mod mat_shell {
                     let mut dm_p = MaybeUninit::zeroed();
                     let cstr = CString::new("__PETSc_dm").expect("`CString::new` failed");
                     let ierr = unsafe { petsc_raw::PetscObjectQuery(self.mat_p as *mut _, cstr.as_ptr(), dm_p.as_mut_ptr()) };
-                    chkerrq!(self.world(), ierr)?;
+                    unsafe { chkerrq!(self.world(), ierr) }?;
                     let dm_p_nn = NonNull::new(unsafe { dm_p.assume_init() } );
                     if let Some(dm_p) = dm_p_nn {
                         let ierr = unsafe { petsc_raw::PetscObjectCompose(new_mat_ref as *mut _ as *mut _, cstr.as_ptr(), dm_p.as_ptr()) };
-                        chkerrq!(self.world(), ierr)?;
+                        unsafe { chkerrq!(self.world(), ierr) }?;
                     }
 
                     // Does: PetscLogEventEnd(MAT_Convert,mat,0,0,0);CHKERRQ(ierr);
@@ -2001,7 +2001,7 @@ impl<'a> NullSpace<'a> {
         let ierr = unsafe { petsc_raw::MatNullSpaceCreate(
             world.as_raw(), has_const.into(),
             n, vecs_p.as_ptr(), ns_p.as_mut_ptr()) };
-        chkerrq!(world, ierr)?;
+        unsafe { chkerrq!(world, ierr) }?;
 
         Ok(NullSpace { world: world, ns_p: unsafe { ns_p.assume_init() } })
     }

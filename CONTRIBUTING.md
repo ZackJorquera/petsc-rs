@@ -38,28 +38,6 @@ Most of the script work is in the `petsc-sys` crate. This is to manage bindgen a
 
 Right now, this is all done in the `build.rs` for `petsc-sys`, but I think it would make more sense to move this to the `petsc-rs` side. The main reason this isn't in `petsc-rs` is that it would be a lot harder to get the `#define`s (or rust consts) needed to create the enums without just re-running bindgen a second time. So, for now, this is done in `petsc-sys`. In the end, I don't think this is that big of an issue as I don't see the distinction between the two crates as being that important.
 
-## Notable Issues
-
-### MPI Versions
-
-Currently, we are using the `rsmpi` from its GitHub repo and not from [crates.io](https://crates.io/). This is because the most recent version of `rsmpi` on [crates.io](https://crates.io/), currently [0.5.4](https://crates.io/crates/mpi/0.5.4), is more than 3 years old and is not compatible with newer versions of MPI. It also uses a lot of outdated dependencies that cause problems with the mostly up-to-date dependencies used by `petsc-rs`.
-
-It seems like the [0.6 release](https://github.com/rsmpi/rsmpi/issues/95) isn't that far away, at least in terms of work still needing to be done. The main problem is that I haven't seen any work done on `rsmpi` since march. It seems to be inactive for the time being.
-
-Also, to prevent having multiple versions of bindgen, we use the same version that [`mpi-sys` uses](https://github.com/rsmpi/rsmpi/blob/master/mpi-sys/Cargo.toml#L20), which is not the most recent version of bindgen but doesn't really limit the functionality that much.
-
-If we want to publish the `petsc-rs` crate on [crates.io](https://crates.io/), we will need to remove all of the `git = ""` dependencies, which is only a problem for MPI related crates.
-
-### Complex numbers and the FFI issue
-
-Right now, complex numbers are not available using the `main` branch. You have to use the `complex-scalars` branch. The reason for this is because [using complex numbers is not guaranteed to be safe across the FFI boundary](https://docs.rs/num-complex/0.4.0/num_complex/struct.Complex.html#representation-and-foreign-function-interface-compatibility). For it to be safe, the complex types could only be passed by pointer, which is not the case for PETSc. Note, `bindgen` creates its own complex type, different from the [`num-complex` `Complex` type](https://docs.rs/num-complex/0.4.0/num_complex/struct.Complex.html). However, I assume this still has the same FFI issues. There isn't much documentation on this on the bindgen side, this is [the main `bindgen` thread to read](https://github.com/rust-lang/rust-bindgen/issues/72), also look at [this rust rfc](https://github.com/rust-lang/rfcs/issues/793).
-
-This might not actually be that big of a problem, however. If you try to complex and run using complex numbers you will find that everything should work. This is because according to the C ABI for linux using AMD64 ([Intel MPX Linux AMD64 ABI Section 3.2.3](https://software.intel.com/content/dam/develop/external/us/en/documents/mpx-linux64-abi.pdf)) complex numbers using `float` or `double` are treated as if they were implements in a struct. This would mean that The rust ABI and the C ABI would align in this specific case. On different systems, this might not be the case.
-
-In general, this problem arises because C treats complex numbers as its own type separate from structs. This is not the case for rust, because rust does not have a standard complex number type, it only currently exists by creating a struct to represent its memory layout which would mean it can only have the calling convention of a struct. This means complex numbers can differ in calling convention and still be consistent in-memory layout. From what I can tell, PETSc uses the standard `_Complex` C type so this is could be a problem.
-
-In the same vein, [128-bit floats](https://github.com/rust-lang/rust-bindgen/issues/1549), could also cause problems in the future, but I haven't done any research on that. Although, since rust support for 128-bit floats is very lacking, I don't see this being something that we will add support to for `petsc-rs` any time soon.
-
 ## Design of `petsc-rs`
 
 ### Complex numbers
@@ -93,8 +71,8 @@ Most of these are just things I made as I was making `petsc-rs` so some might be
 There are also a lot of `TODO` comments throughout the repository that I try to keep up to date.
 
 - [ ] should DMDA and other types of DM be their own struct. Then DM can be a trait or something. This would make it safer, i.e. you can't call da method unless you are a DMDA. This same question exists for all PETSc wrapper types. However, I think what we have right now works fine so I'm not supper motivated to try to implement this right now. Also, look at the [`Field` type](https://gitlab.com/petsc/petsc-rs/-/blob/main/src/dm.rs#L119-127).
-- [ ] Do we want wrappers of `DMSNESSetFunction` and `DMKSPSetComputeOperators`. If so it would make sense to move the trampoline data to the DM, i.e. `SNES::set_function` would just call `DM::snes_set_function` and that would deal with the closure.
-- [ ] Add a wrapper for `DMGetCoordinates` (also what does it do) (returns a vector with a different type than PetscScalar, should we use generics on vector, or we could make a new struct CoordVec or something)
+- [ ] Do we want wrappers of `DMSNESSetFunction`, `DMKSPSetComputeOperators`, and the such. If so it would make sense to move the trampoline data to the DM, i.e. `SNES::set_function` would just call `DM::snes_set_function` and that would deal with the closure.
+- [ ] Add a wrapper for `DMGetCoordinates` - returns a vector with a different type than PetscScalar. should we use generics on vector, or we could make a new struct CoordVec or something?
 - [ ] make Mat builder an option for construction I think what we have now works well enough, but you shouldn't be able to use the mat until you call `set_up` so it would make sense to have that be a consuming builder.
   - [ ] make Vector builder an option for construction
 - [ ] add comments to raw bindings (would have to edit the bindgen results) (the PETSc code has comments on all the functions (in `*.c` file), It would be cool if we could grab it) (or just link to the online C API docs). I don't know how to do this or if we even can. I've tried a couple of things but have had no success. In the end, it probably isn't a big deal because the user can always just search the PETSc C API docs.
@@ -120,7 +98,7 @@ There are also a lot of `TODO` comments throughout the repository that I try to 
 - [ ] add `KSP::set_compute_operators_single_mat`, if it would even make a different. Right now we just ignore one of the operators.
 - [ ] create wrapper macro to synchronize method calls, for example, we could do something like `sync! { petsc.world(), println!("hello process: {}", petsc.world().rank()) }` in place of `petsc_println_all!(petsc.world(), "hello process: {}", petsc.world().rank())`. Would this even work?
 - [ ] should rename the `create` methods to be `new` (make things rustier). We would have to change the name of the existing private `new` methods.
-- [ ] make it so panic! aborts nicely (i.e. it calls PetscAbort and MPI_Abort), maybe we have to make a petsc_abort!
+- [ ] make it so panic! aborts nicely (i.e. it calls PetscAbort and MPI_Abort), maybe we have to make a petsc_abort!. Make all uses of panic! use petsc_abort! instead. this includes unwrap, assert_eq, and others probably.
 - [ ] add Quadrature type (https://petsc.org/release/docs/manualpages/FE/PetscQuadrature.html)
   - [ ] do `PetscDTStroudConicalQuadrature`
 - [ ] do `https://petsc.org/release/docs/manualpages/DMPLEX/DMPlexSetClosurePermutationTensor.html`
@@ -134,7 +112,7 @@ There are also a lot of `TODO` comments throughout the repository that I try to 
 - [ ] in all the rust methods that we unwrap petsc_rs::Results, we should instead call PetscAbort or do some type of abort on panic, look into [the `panic_handler` attribute](https://doc.rust-lang.org/reference/runtime.html#the-panic_handler-attribute) which is only in no-std so IDK if that will work
 - [ ] when we take a file path as an input we should probably take an `AsRef<Path>`, for the `PetscBuilder::file` we might want to separate the ':yaml' thing from the file path, at least as far as the caller is concerned.  
 - [ ] in a lot of the doc test examples we use `set_from_options` and other stuff from the options database. This is a problem because the test relies on the options being specific values. We should instead manually set the values. Using the options database in the full examples should be fine though.
-- [ ] Some functions return `Rc`s, but shouldn't. This is if we take it as input as ref. Read `TODO` comment above `SNES::get_residual`.
+- [ ] Some functions return `Rc`s to inner types, but maybe shouldn't.
 - [ ] Should `get_local_vector` take `&mut self`. This is because it does mutate the DM a little, however, it might also be possible to just use some interior mutability construct. Or maybe we store the `localin`/`localout` array in the rust side as a slice and put a RefCell around that. Or maybe it doesn't even have to be around the arrays and could be a different variable that acts as a mutability lock handled all internally, but at this point, it would be useless as it is already safe. Or maybe we just make it take `&mut self` and also return `&self`/`&mut self` you aren't locked out of doing anything because of the lifetime in `BorrowVector`. IDK what to do here, as it seems like it is fine already, but it also doesn't seem fine.
 - [ ] right now we block versions of PETSc that aren't supported, but maybe we should have a feature to disable this so users can use unsupported versions if they actually do work.
 - [ ] I added `build-probe-petsc` because I wanted to get PETSc version/build info in petsc-rs build.rs, but it might also work to make petsc-sys a build dependency for petsc-rs, and then we can just use the consts from that.

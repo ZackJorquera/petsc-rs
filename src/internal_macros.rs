@@ -153,7 +153,8 @@ $(
             $( $param_name $(.$as_raw_fn())?.into() , )*
             $( $tmp_ident.as_mut_ptr() ),*
         )};
-        chkerrq!(self.world(), ierr)?;
+        #[allow(unused_unsafe)]
+        unsafe { chkerrq!(self.world(), ierr) }?;
 
         $($( 
             let _ = self.$member.take();
@@ -185,7 +186,7 @@ $(
                 $arg2,
                 $arg3.map(|o| o.as_ptr()).unwrap_or(::std::ptr::null()) 
             ),+ ) };
-        chkerrq!(self.world(), ierr)
+        unsafe { chkerrq!(self.world(), ierr) }
     }
 )*
     };
@@ -251,14 +252,14 @@ macro_rules! impl_petsc_object_traits {
                     owned_viewer.as_ref().unwrap()
                 };
                 let ierr = unsafe { crate::petsc_raw::$raw_view_func(self.as_raw(), viewer.as_raw()) };
-                chkerrq!(self.world(), ierr)
+                unsafe { chkerrq!(self.world(), ierr) }
             }
         }
 
         impl ::std::ops::Drop for $struct_name<'_, $( $add_lt ),*> {
             fn drop(&mut self) {
                 let ierr = unsafe { crate::petsc_raw::$raw_destroy_func(&mut self.as_raw() as *mut _) };
-                let _ = chkerrq!(self.world(), ierr); // TODO: should I unwrap or what idk?
+                let _ = unsafe { chkerrq!(self.world(), ierr) }; // TODO: should I unwrap or what idk?
             }
         }
     )*
@@ -293,12 +294,11 @@ macro_rules! function_name {
 /// Because [`Petsc::check_error`](crate::Petsc::check_error()) and [`function_name!`] are not exposed to create users
 /// this macro is only intended for internal use.
 ///
-/// Note, this wraps the [`Petsc::check_error()`](crate::Petsc::check_error()) in an unsafe block, but is by no means a safe API.
-// TODO: remove the unsafe block, make the caller use the unsafe block.
+/// Note, this is unsafe to use because [`Petsc::check_error()`](crate::Petsc::check_error()) is unsafe.
 macro_rules! chkerrq {
     ($world:expr, $ierr_code:expr) => ({
         #[allow(unused_unsafe)]
-        unsafe { crate::Petsc::check_error($world, line!() as i32, function_name!(), file!(), $ierr_code) }
+        crate::Petsc::check_error($world, line!() as i32, function_name!(), file!(), $ierr_code)
     });
 }
 

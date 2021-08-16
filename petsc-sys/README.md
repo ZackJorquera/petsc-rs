@@ -22,3 +22,7 @@ PETSc has support for multiple different sizes of scalars and integers. To expos
 # MPI
 
 This crate will not generate any MPI bindings. Instead, it uses the `mpi-sys` crate from [`rsmpi`](https://github.com/rsmpi/rsmpi).
+
+# Documentation
+
+To get documentation for each function, use the [C API function index](https://petsc.org/release/docs/manualpages/singleindex.html) ([this version](https://petsc.org/main/docs/manualpages/singleindex.html) if you are using the main branch). The functions/types all have the same names.

@@ -62,7 +62,7 @@ impl<'a, 'tl, 'bl> PC<'a, 'tl, 'bl> {
     pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut pc_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::PCCreate(world.as_raw(), pc_p.as_mut_ptr()) };
-        chkerrq!(world, ierr)?;
+        unsafe { chkerrq!(world, ierr) }?;
 
         Ok(PC::new(world, unsafe { pc_p.assume_init() }))
     }
@@ -71,7 +71,7 @@ impl<'a, 'tl, 'bl> PC<'a, 'tl, 'bl> {
     pub fn set_type_str(&mut self, pc_type: &str) -> Result<()> {
         let cstring = CString::new(pc_type).expect("`CString::new` failed");
         let ierr = unsafe { petsc_raw::PCSetType(self.pc_p, cstring.as_ptr()) };
-        chkerrq!(self.world, ierr)
+        unsafe { chkerrq!(self.world, ierr) }
     }
 
     /// Builds [`PC`] for a particular preconditioner type
@@ -79,7 +79,7 @@ impl<'a, 'tl, 'bl> PC<'a, 'tl, 'bl> {
     {
         let cstring = petsc_raw::PCTYPE_TABLE[pc_type as usize];
         let ierr = unsafe { petsc_raw::PCSetType(self.pc_p, cstring.as_ptr() as *const _) };
-        chkerrq!(self.world, ierr)
+        unsafe { chkerrq!(self.world, ierr) }
     }
     
     /// Sets the matrix associated with the linear system and a (possibly)
@@ -93,7 +93,7 @@ impl<'a, 'tl, 'bl> PC<'a, 'tl, 'bl> {
         let ierr = unsafe { petsc_raw::PCSetOperators(self.pc_p,
             a_mat.as_ref().map_or(std::ptr::null_mut(), |m| m.mat_p), 
             p_mat.as_ref().map_or(std::ptr::null_mut(), |m| m.mat_p)) };
-        chkerrq!(self.world, ierr)?;
+        unsafe { chkerrq!(self.world, ierr) }?;
 
         // drop everything as it is getting replaced. (note under the hood MatDestroy is called on both of
         // them each time `PCSetOperators` is called).
@@ -124,7 +124,7 @@ impl<'a, 'tl, 'bl> PC<'a, 'tl, 'bl> {
             if self.owned_amat.is_none() {
                 let mut a_mat_p = MaybeUninit::zeroed();
                 let ierr = unsafe { petsc_raw::PCGetOperators(self.pc_p, a_mat_p.as_mut_ptr(), std::ptr::null_mut()) };
-                chkerrq!(self.world, ierr)?;
+                unsafe { chkerrq!(self.world, ierr) }?;
 
                 let mut mat = Mat::new(self.world, unsafe { a_mat_p.assume_init() });
                 // We only call this if amat has not been set which means that PETSc will create a new mat
@@ -143,7 +143,7 @@ impl<'a, 'tl, 'bl> PC<'a, 'tl, 'bl> {
             if self.owned_pmat.is_none() {
                 let mut p_mat_p = MaybeUninit::zeroed();
                 let ierr = unsafe { petsc_raw::PCGetOperators(self.pc_p, std::ptr::null_mut(), p_mat_p.as_mut_ptr()) };
-                chkerrq!(self.world, ierr)?;
+                unsafe { chkerrq!(self.world, ierr) }?;
 
                 let mut mat = Mat::new(self.world, unsafe { p_mat_p.assume_init() });
                 // We only call this if pmat has not been set which means that PETSc will create a new mat
@@ -234,10 +234,10 @@ impl<'a, 'tl, 'bl> PC<'a, 'tl, 'bl> {
 
         let ierr = unsafe { petsc_raw::PCShellSetApply(
             self.pc_p, Some(pc_shell_set_apply_trampoline)) };
-        chkerrq!(self.world, ierr)?;
+        unsafe { chkerrq!(self.world, ierr) }?;
         let ierr = unsafe { petsc_raw::PCShellSetContext(self.pc_p,
             std::mem::transmute(trampoline_data.as_ref())) }; // this will also erase the lifetimes
-        chkerrq!(self.world, ierr)?;
+        unsafe { chkerrq!(self.world, ierr) }?;
         
         self.shell_set_apply_trampoline_data = Some(trampoline_data);
 
@@ -256,7 +256,7 @@ impl<'a, 'tl, 'bl> PC<'a, 'tl, 'bl> {
 
         let ierr = unsafe { petsc_raw::PCFieldSplitSetIS(
             self.pc_p, splitname_cs.map(|cs| cs.as_ptr()).unwrap_or(std::ptr::null()), is.is_p) };
-        chkerrq!(self.world, ierr)
+        unsafe { chkerrq!(self.world, ierr) }
     }
 
     /// Determines whether a PETSc [`PC`] is of a particular type.

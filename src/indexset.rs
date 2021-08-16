@@ -30,7 +30,7 @@ pub struct ISView<'a, 'b> {
 impl Drop for ISView<'_, '_> {
     fn drop(&mut self) {
         let ierr = unsafe { petsc_raw::ISRestoreIndices(self.is.is_p, &mut self.array as *mut _) };
-        let _ = chkerrq!(self.is.world, ierr); // TODO: should I unwrap or what idk?
+        let _ = unsafe { chkerrq!(self.is.world, ierr) }; // TODO: should I unwrap or what idk?
     }
 }
 
@@ -39,7 +39,7 @@ impl<'a> IS<'a> {
     pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut is_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::ISCreate(world.as_raw(), is_p.as_mut_ptr()) };
-        chkerrq!(world, ierr)?;
+        unsafe { chkerrq!(world, ierr) }?;
 
         Ok(IS { world, is_p: unsafe { is_p.assume_init() } })
     }
@@ -60,7 +60,7 @@ impl<'a, 'b> ISView<'a, 'b> {
     fn new(is: &'b IS<'a>) -> Result<Self> {
         let mut array = MaybeUninit::<*const PetscInt>::uninit();
         let ierr = unsafe { petsc_raw::ISGetIndices(is.is_p, array.as_mut_ptr()) };
-        chkerrq!(is.world, ierr)?;
+        unsafe { chkerrq!(is.world, ierr) }?;
 
         // let ndarray = unsafe { 
         //     ArrayView::from_shape_ptr(ndarray::Ix1(is.get_local_size()? as usize), array.assume_init()) };
