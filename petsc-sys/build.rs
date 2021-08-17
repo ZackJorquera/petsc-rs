@@ -214,7 +214,7 @@ fn main() {
 
     let features = ["CARGO_FEATURE_PETSC_REAL_F64",
                     "CARGO_FEATURE_PETSC_REAL_F32",
-                    "CARGO_FEATURE_PETSC_USE_COMPLEX",
+                    "CARGO_FEATURE_PETSC_USE_COMPLEX_UNSAFE",
                     "CARGO_FEATURE_PETSC_INT_I32",
                     "CARGO_FEATURE_PETSC_INT_I64",
                     "CARGO_FEATURE_GENERATE_ENUMS",
@@ -229,7 +229,7 @@ fn main() {
 
     let real_features = features.iter().filter(|a| a.contains("PETSC_REAL_"))
         .copied().collect::<Vec<_>>();
-    let use_complex_feature = features.contains(&"CARGO_FEATURE_PETSC_USE_COMPLEX");
+    let use_complex_feature = features.contains(&"CARGO_FEATURE_PETSC_USE_COMPLEX_UNSAFE");
     let int_features = features.iter().filter(|a| a.contains("PETSC_INT_"))
         .copied().collect::<Vec<_>>();
     let generate_enums_feature = features.contains(&"CARGO_FEATURE_GENERATE_ENUMS");
@@ -394,12 +394,15 @@ fn main() {
 
     if use_complex_feature {
         assert!(petsc_lib.defines_contains("PETSC_USE_COMPLEX"),
-                "PETSc is not compiled to use complex for scalar, but the feature \"petsc-use-complex\" is set.");
+                "PETSc is not compiled to use complex for scalar, but the feature \"petsc-use-complex-unsafe\" is set.");
 
-        panic!("Using complex numbers as PetscScalar is currently not available. Please disable \"petsc-use-complex\".");
+        let warn_msg = "Using complex numbers as PetscScalar is currently unsafe. The FFI ABI with C is \
+            not guaranteed to be compatible. Use at your own risk or disable \"petsc-use-complex-unsafe\".";
+        println!("cargo:warning={}", warn_msg);
+        eprintln!("{}", warn_msg);
     } else {
         assert!(!petsc_lib.defines_contains("PETSC_USE_COMPLEX"),
-                "PETSc is compiled to use complex for scalar, but the feature \"petsc-use-complex\" is no set.");
+                "PETSc is compiled to use complex for scalar, but the feature \"petsc-use-complex-unsafe\" is no set.");
     }
     
     match int_features[0]

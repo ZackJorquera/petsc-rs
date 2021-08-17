@@ -673,18 +673,19 @@ impl<'a, 'tl> DM<'a, 'tl> {
     ///
     /// # Example
     ///
+    /// Note, to support complex numbers we use `c(real)` as a shorthand.
+    /// Read docs for [`PetscScalar`] for more information.
+    ///
     /// ```
     /// # use petsc_rs::prelude::*;
     /// # use mpi::traits::*;
     /// # use ndarray::{Dimension, array, s};
+    /// # fn c(r: PetscReal) -> PetscScalar { PetscScalar::from(r) }
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
-    /// // note, cargo wont run tests with mpi so this will always be run with
+    /// // Note, cargo wont run tests with mpi so this will always be run with
     /// // a single processor, but this example will also work in a multiprocessor
     /// // comm world.
-    ///
-    /// // Note, right now this example only works when `PetscScalar` is `PetscReal`.
-    /// // It will fail to compile if `PetscScalar` is `PetscComplex`.
     /// let (m, n) = (5,2);
     /// 
     /// let mut dm = DM::da_create_2d(petsc.world(), DMBoundaryType::DM_BOUNDARY_NONE,
@@ -701,7 +702,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// // Note, this follows the global PETSc ordering (not the global natural ordering).
     /// global.assemble_with((0..gs)
     ///         .filter(|i| osr.contains(i))
-    ///         .map(|i| (i, i as PetscReal)),
+    ///         .map(|i| (i, c(i as PetscReal))),
     ///     InsertMode::INSERT_VALUES)?;
     /// # let viewer = Viewer::create_ascii_stdout(petsc.world())?;
     /// # global.view_with(Some(&viewer))?;
@@ -731,23 +732,24 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// // major order. This allows us to use `.as_slice()`. Note, this does not
     /// // change or copy the underling data.
     /// assert_eq!(g_view.view().reversed_axes().as_slice().unwrap(),
-    ///     &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0][osr_usize.clone()]);
+    ///     &[c(0.0), c(1.0), c(2.0), c(3.0), c(4.0), c(5.0), c(6.0),
+    ///         c(7.0), c(8.0), c(9.0)][osr_usize.clone()]);
     ///
     /// // Ignoring the layout, the array functionally looks like the following.
     /// if petsc.world().size() == 1 {
-    ///     let rhs_array = array![[0.0, 5.0], 
-    ///                            [1.0, 6.0], 
-    ///                            [2.0, 7.0],
-    ///                            [3.0, 8.0],
-    ///                            [4.0, 9.0]];
+    ///     let rhs_array = array![[c(0.0), c(5.0)], 
+    ///                            [c(1.0), c(6.0)], 
+    ///                            [c(2.0), c(7.0)],
+    ///                            [c(3.0), c(8.0)],
+    ///                            [c(4.0), c(9.0)]];
     ///     assert_eq!(g_view.slice(s![.., ..]).dim(), rhs_array.dim());
     ///     assert_eq!(g_view.slice(s![.., ..]), rhs_array);
     /// } else if petsc.world().size() == 2 {
-    ///     let rhs_array = array![[0.0, 3.0],  // |
-    ///                            [1.0, 4.0],  // | Process 1
-    ///                            [2.0, 5.0],  // |
-    ///                            [6.0, 8.0],  // }
-    ///                            [7.0, 9.0]]; // } Process 2
+    ///     let rhs_array = array![[c(0.0), c(3.0)],  // |
+    ///                            [c(1.0), c(4.0)],  // | Process 1
+    ///                            [c(2.0), c(5.0)],  // |
+    ///                            [c(6.0), c(8.0)],  // }
+    ///                            [c(7.0), c(9.0)]]; // } Process 2
     ///     assert_eq!(g_view.slice(s![.., ..]).dim(),
     ///         rhs_array.slice(s![xs..(xs+xm), ys..(ys+ym)]).dim());
     ///     assert_eq!(g_view.slice(s![.., ..]), rhs_array.slice(s![xs..(xs+xm), ys..(ys+ym)]));
@@ -765,14 +767,12 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// # use petsc_rs::prelude::*;
     /// # use mpi::traits::*;
     /// # use ndarray::{Dimension, array, s};
+    /// # fn c(r: PetscReal) -> PetscScalar { PetscScalar::from(r) }
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
-    /// // note, cargo wont run tests with mpi so this will always be run with
+    /// // Note, cargo wont run tests with mpi so this will always be run with
     /// // a single processor, but this example will also work in two processor
     /// // comm world.
-    ///
-    /// // Note, right now this example only works when `PetscScalar` is `PetscReal`.
-    /// // It will fail to compile if `PetscScalar` is `PetscComplex`.
     /// let (m, n) = (5,2);
     /// 
     /// let mut dm = DM::da_create_2d(petsc.world(), DMBoundaryType::DM_BOUNDARY_NONE,
@@ -788,7 +788,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// // Note, this follows the global PETSc ordering (not the global natural ordering).
     /// global.assemble_with((0..gs)
     ///         .filter(|i| osr.contains(i))
-    ///         .map(|i| (i, i as PetscReal)),
+    ///         .map(|i| (i, c(i as PetscReal))),
     ///     InsertMode::INSERT_VALUES)?;
     /// # let viewer = Viewer::create_ascii_stdout(petsc.world())?;
     /// # global.view_with(Some(&viewer))?;
@@ -881,17 +881,19 @@ impl<'a, 'tl> DM<'a, 'tl> {
     ///
     /// # Example
     ///
+    /// Note, to support complex numbers we use `c(real)` as a shorthand.
+    /// Read docs for [`PetscScalar`](crate::PetscScalar) for more information.
+    ///
     /// ```
     /// # use petsc_rs::prelude::*;
     /// # use mpi::traits::*;
     /// # use ndarray::{Dimension, array, s};
+    /// # fn c(r: PetscReal) -> PetscScalar { PetscScalar::from(r) }
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
     /// // Note, cargo wont run tests with mpi so this will always be run with
     /// // a single processor, but this example will also work in a multiprocessor
     /// // comm world.
-    ///
-    /// // Note, right now this example only works when `PetscScalar` is `PetscReal`.
     /// let (m, n) = (5,2);
     /// 
     /// let mut dm = DM::da_create_2d(petsc.world(), DMBoundaryType::DM_BOUNDARY_NONE,
@@ -902,7 +904,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     ///
     /// let mut global = dm.create_global_vector()?;
     ///
-    /// global.set_all(0.0)?;
+    /// global.set_all(c(0.0))?;
     /// 
     /// let (xs, ys, _zs, xm, ym, _zm) = dm.da_get_corners()?;
     /// let (gxs, gys, _zs, gxm, gym, _gzm) = dm.da_get_ghost_corners()?;
@@ -924,13 +926,13 @@ impl<'a, 'tl> DM<'a, 'tl> {
     ///         let s = pat.slice(); 
     ///         ((s[0]+gxs as usize, s[1]+gys as usize), v) 
     ///     })
-    ///     .for_each(|((i,j), v)| *v = (i*2+j) as PetscReal);
+    ///     .for_each(|((i,j), v)| *v = c((i*2+j) as PetscReal));
     ///
-    /// let rhs_array = array![[0.0, 1.0], 
-    ///                        [2.0, 3.0], 
-    ///                        [4.0, 5.0],
-    ///                        [6.0, 7.0],
-    ///                        [8.0, 9.0]];
+    /// let rhs_array = array![[c(0.0), c(1.0)], 
+    ///                        [c(2.0), c(3.0)], 
+    ///                        [c(4.0), c(5.0)],
+    ///                        [c(6.0), c(7.0)],
+    ///                        [c(8.0), c(9.0)]];
     /// assert_eq!(g_view.slice(s![.., ..]).dim(),
     ///     rhs_array.slice(s![gxs..(gxs+gxm), gys..(gys+gym)]).dim());
     /// assert_eq!(g_view.slice(s![.., ..]), rhs_array.slice(s![gxs..(gxs+gxm), gys..(gys+gym)]));
@@ -1528,24 +1530,24 @@ impl<'a, 'tl> DM<'a, 'tl> {
             user_f1: closure_anchor1, user_f2: closure_anchor2 });
 
         unsafe extern "C" fn bc_func_trampoline(dim: PetscInt, time: PetscReal, x: *const PetscReal,
-            nc: PetscInt, bcval: *mut PetscScalar, ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
+            nc: PetscInt, bcval: *mut petsc_raw::PetscScalar, ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
         {
             let trampoline_data: Pin<&mut DMBoundaryFuncTrampolineData> = std::mem::transmute(ctx);
 
             let x_slice = slice::from_raw_parts(x, dim as usize);
-            let bcval_slice = slice::from_raw_parts_mut(bcval, nc as usize);
+            let bcval_slice = slice::from_raw_parts_mut(bcval as *mut _, nc as usize);
             
             (trampoline_data.get_mut().user_f1)(dim, time, x_slice, nc, bcval_slice)
                 .map_or_else(|err| err.kind as i32, |_| 0)
         }
 
         unsafe extern "C" fn bc_func_t_trampoline(dim: PetscInt, time: PetscReal, x: *const PetscReal,
-            nc: PetscInt, bcval: *mut PetscScalar, ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
+            nc: PetscInt, bcval: *mut petsc_raw::PetscScalar, ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
         {
             let trampoline_data: Pin<&mut DMBoundaryFuncTrampolineData> = std::mem::transmute(ctx);
 
             let x_slice = slice::from_raw_parts(x, dim as usize);
-            let bcval_slice = slice::from_raw_parts_mut(bcval, nc as usize);
+            let bcval_slice = slice::from_raw_parts_mut(bcval as *mut _, nc as usize);
             
             (trampoline_data.get_mut().user_f2.as_mut().unwrap())(dim, time, x_slice, nc, bcval_slice)
                 .map_or_else(|err| err.kind as i32, |_| 0)
@@ -1557,12 +1559,12 @@ impl<'a, 'tl> DM<'a, 'tl> {
         // we have them, we can them manipulate them how we see fit.
         let bc_func_essential_trampoline_fn_ptr: ::std::option::Option<
             unsafe extern "C" fn(arg1: PetscInt, arg2: PetscReal, arg3: *const PetscReal, arg4: PetscInt,
-                arg5: *mut PetscScalar, arg6: *mut ::std::os::raw::c_void, ) -> petsc_raw::PetscErrorCode, >
+                arg5: *mut petsc_raw::PetscScalar, arg6: *mut ::std::os::raw::c_void, ) -> petsc_raw::PetscErrorCode, >
             = Some(bc_func_trampoline);
 
         let mut bc_func_t_essential_trampoline_fn_ptr: ::std::option::Option<
             unsafe extern "C" fn(arg1: PetscInt, arg2: PetscReal, arg3: *const PetscReal, arg4: PetscInt,
-                arg5: *mut PetscScalar, arg6: *mut ::std::os::raw::c_void, ) -> petsc_raw::PetscErrorCode, >
+                arg5: *mut petsc_raw::PetscScalar, arg6: *mut ::std::os::raw::c_void, ) -> petsc_raw::PetscErrorCode, >
             = Some(bc_func_t_trampoline);
 
         if !bc_user_func_t_is_some {
@@ -2143,16 +2145,24 @@ impl<'a, 'tl> DM<'a, 'tl> {
     ///
     /// # Example
     ///
+    /// Note, to support complex numbers we use `c(real)` as a shorthand.
+    /// Read docs for [`PetscScalar`](crate::PetscScalar) for more information.
+    ///
     /// ```
     /// # use petsc_rs::prelude::*;
     /// # use mpi::traits::*;
     /// # use std::slice;
     /// # use ndarray::{Dimension, array, s};
+    /// # fn c(r: PetscReal) -> PetscScalar { PetscScalar::from(r) }
+    /// # #[cfg(feature = "petsc-use-complex-unsafe")]
+    /// # fn slice_abs_diff_eq(s1: &[PetscScalar], s2: &[PetscScalar], tol: PetscReal) -> bool {
+    /// # s1.len() == s2.len() && s1.iter().zip(s2).all(|(a,b)| (a-b).norm() < tol) }
+    /// # #[cfg(not(feature = "petsc-use-complex-unsafe"))]
+    /// # fn slice_abs_diff_eq(s1: &[PetscScalar], s2: &[PetscScalar], tol: PetscReal) -> bool {
+    /// # s1.len() == s2.len() && s1.iter().zip(s2).all(|(a,b)| (a-b).abs() < tol) }
     /// # fn main() -> petsc_rs::Result<()> {
     /// # let petsc = Petsc::init_no_args()?;
-    /// // Note: this example will only work in a uniprocessor comm world. Also, right
-    /// // now this example only works when `PetscScalar` is `PetscReal`. It will fail
-    /// // to compile if `PetscScalar` is `PetscComplex`.
+    /// // Note: this example will only work in a uniprocessor comm world.
     /// let simplex = true;
     /// let mut dm = DM::plex_create_box_mesh(petsc.world(), 2, simplex, (2,2,0), None, (6.0,6.0,0.0), None, true)?;
     /// dm.set_name("Mesh")?;
@@ -2196,12 +2206,12 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// // Thus we need to define `funcs` outside of the `project_function_local` function call.
     /// let funcs: [Box<dyn FnMut(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> petsc_rs::Result<()>>; 2]
     ///     = [Box::new(|dim, time, x, nc, u| {
-    ///         u[0] = x[0]*x[0] + x[1]*x[1];
+    ///         u[0] = c(x[0]*x[0] + x[1]*x[1]);
     ///         # println!("fe1: dim: {}, time: {}, x: {:?}, nc: {}, u: {:?}", dim, time, x, nc, u);
     ///         Ok(())
     ///     }),
     ///     Box::new(|dim, time, x, nc, u| {
-    ///         u[0] = x[0]*x[0] - x[1]*x[1];
+    ///         u[0] = c(x[0]*x[0] - x[1]*x[1]);
     ///         # println!("fe2: dim: {}, time: {}, x: {:?}, nc: {}, u: {:?}", dim, time, x, nc, u);
     ///         Ok(())
     ///     })];
@@ -2209,9 +2219,9 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// # petsc_println_sync!(petsc.world(), "[Process {}] {:.5}", petsc.world().rank(), *local.view()?)?;
     ///
     /// # // TODO: give explanation on whys the points are used and when
-    /// assert!(local.view()?.slice(s![..]).abs_diff_eq(
-    ///     &array![2.0, 0.0, 17.0, -15.0, 8.0, 0.0, 29.0, 21.0,
-    ///         17.0, 15.0, 50.0, 0.0, 32.0, 0.0, 29.0, -21.0], 1e-15));
+    /// assert!(slice_abs_diff_eq(local.view()?.as_slice().unwrap(),
+    ///     &[c(2.0), c(0.0), c(17.0), c(-15.0), c(8.0), c(0.0), c(29.0), c(21.0),
+    ///         c(17.0), c(15.0), c(50.0), c(0.0), c(32.0), c(0.0), c(29.0), c(-21.0)], 10e-15));
     /// # Ok(())
     /// # }
     /// ```
@@ -2242,12 +2252,12 @@ impl<'a, 'tl> DM<'a, 'tl> {
         }
 
         unsafe extern "C" fn dm_project_function_local_trampoline(dim: PetscInt, time: PetscReal, x: *const PetscReal,
-            nf: PetscInt, u: *mut PetscScalar, ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
+            nf: PetscInt, u: *mut petsc_raw::PetscScalar, ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
         {
             let trampoline_data: Pin<&mut DMProjectFunctionTrampolineData> = std::mem::transmute(ctx);
 
             let x_slice = slice::from_raw_parts(x, dim as usize);
-            let u_slice = slice::from_raw_parts_mut(u, nf as usize);
+            let u_slice = slice::from_raw_parts_mut(u as *mut _, nf as usize);
             
             (trampoline_data.get_mut().user_f)(dim, time, x_slice, nf, u_slice)
                 .map_or_else(|err| err.kind as i32, |_| 0)
@@ -2259,7 +2269,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         // then manipulate them how we see fit.
         let mut trampoline_funcs: Vec<::std::option::Option<
             unsafe extern "C" fn(arg1: PetscInt, arg2: PetscReal, arg3: *const PetscReal, arg4: PetscInt,
-                arg5: *mut PetscScalar, arg6: *mut ::std::os::raw::c_void,) -> petsc_raw::PetscErrorCode, >>
+                arg5: *mut petsc_raw::PetscScalar, arg6: *mut ::std::os::raw::c_void,) -> petsc_raw::PetscErrorCode, >>
             = vec![Some(dm_project_function_local_trampoline); nf];
         let mut trampoline_data_refs = trampoline_datas.iter().map(|td| unsafe { std::mem::transmute(td.as_ref()) }).collect::<Vec<_>>();
 
@@ -2308,7 +2318,10 @@ impl<'a, 'tl> DM<'a, 'tl> {
                 "No fields have been set.")?;
         }
 
-        let mut fn_ptrs = user_funcs.into_iter().collect::<Vec<_>>();
+        let mut fn_ptrs = user_funcs.into_iter().collect::<Vec<Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>>>();
 
         if fn_ptrs.len() != nf {
             seterrq!(self.world, PetscErrorKind::PETSC_ERR_USER_INPUT,
@@ -2325,7 +2338,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         };
 
         let ierr = unsafe { petsc_raw::DMProjectFieldLocal(
-            self.dm_p, time, localu.vec_p, fn_ptrs.as_mut_ptr(),
+            self.dm_p, time, localu.vec_p, fn_ptrs.as_mut_ptr() as *mut _,
             mode, localx.vec_p) };
         unsafe { chkerrq!(self.world, ierr) }?;
 
@@ -2355,7 +2368,10 @@ impl<'a, 'tl> DM<'a, 'tl> {
                 "No fields have been set.")?;
         }
 
-        let mut fn_ptrs = user_funcs.into_iter().collect::<Vec<_>>();
+        let mut fn_ptrs = user_funcs.into_iter().collect::<Vec<Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>>>();
 
         if fn_ptrs.len() != nf {
             seterrq!(self.world, PetscErrorKind::PETSC_ERR_USER_INPUT,
@@ -2372,7 +2388,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         };
 
         let ierr = unsafe { petsc_raw::DMProjectField(
-            self.dm_p, time, u.vec_p, fn_ptrs.as_mut_ptr(),
+            self.dm_p, time, u.vec_p, fn_ptrs.as_mut_ptr() as *mut _,
             mode, x.vec_p) };
         unsafe { chkerrq!(self.world, ierr) }?;
 
@@ -2417,12 +2433,12 @@ impl<'a, 'tl> DM<'a, 'tl> {
         }
 
         unsafe extern "C" fn dm_compute_ls_diff_trampoline(dim: PetscInt, time: PetscReal, x: *const PetscReal,
-            nf: PetscInt, u: *mut PetscScalar, ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
+            nf: PetscInt, u: *mut petsc_raw::PetscScalar, ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
         {
             let trampoline_data: Pin<&mut DMProjectFunctionTrampolineData> = std::mem::transmute(ctx);
 
             let x_slice = slice::from_raw_parts(x, dim as usize);
-            let u_slice = slice::from_raw_parts_mut(u, nf as usize);
+            let u_slice = slice::from_raw_parts_mut(u as *mut _, nf as usize);
             
             (trampoline_data.get_mut().user_f)(dim, time, x_slice, nf, u_slice)
                 .map_or_else(|err| err.kind as i32, |_| 0)
@@ -2434,7 +2450,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         // then manipulate them how we see fit.
         let mut trampoline_funcs: Vec<::std::option::Option<
             unsafe extern "C" fn(arg1: PetscInt, arg2: PetscReal, arg3: *const PetscReal, arg4: PetscInt,
-                arg5: *mut PetscScalar, arg6: *mut ::std::os::raw::c_void,) -> petsc_raw::PetscErrorCode, >>
+                arg5: *mut petsc_raw::PetscScalar, arg6: *mut ::std::os::raw::c_void,) -> petsc_raw::PetscErrorCode, >>
             = vec![Some(dm_compute_ls_diff_trampoline); nf];
         let mut trampoline_data_refs = trampoline_datas.iter().map(|td| unsafe { std::mem::transmute(td.as_ref()) }).collect::<Vec<_>>();
 
@@ -2460,21 +2476,24 @@ impl<'a, 'tl> DM<'a, 'tl> {
         vals: impl Into<Option<&'vll [PetscInt]>>, func: unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
             *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
             *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
-            PetscReal, *const PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)) -> Result<PetscReal>
+            PetscReal, *const PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)) -> Result<PetscScalar>
     {
         let mut integral = MaybeUninit::uninit();
 
-        let fn_ptr = Some(func);
+        let fn_ptr: Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            PetscReal, *const PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)> = Some(func);
         let vals: Option<&[PetscInt]> = vals.into();
 
         let ierr = unsafe { petsc_raw::DMPlexComputeBdIntegral(
             self.dm_p, x.vec_p, label.into().as_raw(), 
             vals.as_ref().map_or(petsc_raw::PETSC_DETERMINE, |&vl| vl.len() as PetscInt),
             vals.as_ref().map_or(std::ptr::null(), |&vl| vl.as_ptr()),
-            fn_ptr, integral.as_mut_ptr(), std::ptr::null_mut()) };
+            std::mem::transmute(fn_ptr), integral.as_mut_ptr(), std::ptr::null_mut()) };
         unsafe { chkerrq!(self.world, ierr) }?;
 
-        Ok(unsafe { integral.assume_init() })
+        Ok(unsafe { integral.assume_init() }.into())
     }
 
     /// Gets the DM that prescribes coordinate layout and scatters between global and local coordinates.
@@ -2927,12 +2946,12 @@ impl<'a, 'tl> DS<'a, 'tl> {
         let _ = self.exact_soln_trampoline_data.take();
 
         unsafe extern "C" fn ds_exact_solution_trampoline(dim: PetscInt, time: PetscReal, x: *const PetscReal,
-            nc: PetscInt, u: *mut PetscScalar, ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
+            nc: PetscInt, u: *mut petsc_raw::PetscScalar, ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
         {
             let trampoline_data: Pin<&mut DSExactSolutionTrampolineData> = std::mem::transmute(ctx);
 
             let x_slice = slice::from_raw_parts(x, dim as usize);
-            let u_slice = slice::from_raw_parts_mut(u, nc as usize);
+            let u_slice = slice::from_raw_parts_mut(u as *mut _, nc as usize);
             
             (trampoline_data.get_mut().user_f)(dim, time, x_slice, nc, u_slice)
                 .map_or_else(|err| err.kind as i32, |_| 0)

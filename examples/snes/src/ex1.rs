@@ -6,6 +6,8 @@
 //! $ cargo build --bin snes-ex1
 //! $ mpiexec -n 1 target/debug/snes-ex1
 //! ```
+//!
+//! To build for complex you can use the flag `--features petsc-use-complex-unsafe`
 
 static HELP_MSG: &str = "Newton's method for a two-variable system, sequential.\n\n";
 
@@ -120,11 +122,6 @@ fn main() -> petsc_rs::Result<()> {
         to employ an initial guess of zero, the user should explicitly set
         this vector to zero by calling VecSet().
     */
-    // Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
-    // float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
-    // call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
-    // but if `PetscScalar` is complex it will construct a complex value with the imaginary part being
-    // set to `0`.
     if !hard_flg {
         x.set_all(PetscScalar::from(0.5))?;
     } else {

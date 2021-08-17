@@ -2,6 +2,8 @@
 //! Concepts: SNES^Using a parallel unstructured mesh (DMPLEX)
 //! Processors: n
 //!
+//! This example only works using PETSc `v3.15-dev.0`.
+//!
 //! To run:
 //! ```text
 //! $ cargo build --bin snes-ex12
@@ -206,7 +208,7 @@ fn petsc_ds_set_residual(ds: &mut DS, f0: unsafe extern "C" fn(PetscInt, PetscIn
     *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
     PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)) -> petsc_rs::Result<()>
 {
-    let ierr = unsafe { petsc_sys::PetscDSSetResidual(ds.as_raw(), 0, Some(f0), Some(f1)) };
+    let ierr = unsafe { petsc_sys::PetscDSSetResidual(ds.as_raw(), 0, std::mem::transmute(Some(f0)), std::mem::transmute(Some(f1))) };
     if ierr == 0 {
         Ok(())
     } else {
@@ -234,7 +236,7 @@ fn petsc_ds_set_jacobian(ds: &mut DS, g3: unsafe extern "C" fn(PetscInt, PetscIn
     *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
     PetscReal, PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)) -> petsc_rs::Result<()>
 {
-    let ierr = unsafe { petsc_sys::PetscDSSetJacobian(ds.as_raw(), 0, 0, None, None, None, Some(g3)) };
+    let ierr = unsafe { petsc_sys::PetscDSSetJacobian(ds.as_raw(), 0, 0, None, None, None, std::mem::transmute(Some(g3))) };
     if ierr == 0 {
         Ok(())
     } else {
@@ -639,10 +641,10 @@ fn main() -> petsc_rs::Result<()> {
         {
             snes.compute_jacobian(&u, A2_ref, None)?;
             let mut b = u.clone();
-            r.set_all(0.0)?;
+            r.set_all(PetscScalar::from(0.0))?;
             snes.compute_function(&r, &mut b)?;
             A2_ref.mult(&u, &mut r)?;
-            r.axpy(1.0, &b)?;
+            r.axpy(PetscScalar::from(1.0), &b)?;
             petsc_println!(petsc.world(), "Au - b = Au + F(0)")?;
             r.chop(1.0e-10)?;
             if !opt.quiet { r.view_with(None)?; }
@@ -666,7 +668,7 @@ fn main() -> petsc_rs::Result<()> {
                 let ksp = snes.get_ksp_or_create()?;
                 ksp.set_operators(a_mat, j_mat)?;
                 ksp.solve(&b, &mut r)?;
-                r.axpy(-1.0, &u)?;
+                r.axpy(PetscScalar::from(-1.0), &u)?;
                 let res = r.norm(NormType::NORM_2)?;
                 petsc_println!(petsc.world(), "KSP Error: {}", res)?;
             }
@@ -688,9 +690,14 @@ fn main() -> petsc_rs::Result<()> {
         let l = dm.get_label("marker")?;
 
         let bd_int = dm.plex_compute_bd_integral_raw(&u, l.as_ref(), slice::from_ref(&1), bd_integral_2d)?;
-        petsc_println!(petsc.world(), "Solution boundary integral: {:.4}", bd_int.abs())?;
-        if (bd_int.abs() - exact).abs() > PetscReal::EPSILON.sqrt() {
-            Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_PLIB, format!("Invalid boundary integral {} != {}", bd_int.abs(), exact))?;
+        #[cfg(feature = "petsc-use-complex-unsafe")]
+        let bd_int_real_abs = bd_int.norm();
+        #[cfg(not(feature = "petsc-use-complex-unsafe"))]
+        let bd_int_real_abs = bd_int.abs();
+        petsc_println!(petsc.world(), "Solution boundary integral: {:.4}", bd_int)?;
+        if (bd_int_real_abs - exact).abs() > PetscReal::EPSILON.sqrt() {
+            Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_PLIB,
+                format!("Invalid boundary integral {} != {}", bd_int_real_abs, exact))?;
         }
     }
 
@@ -701,13 +708,13 @@ const PETSC_PI: PetscReal = std::f64::consts::PI as PetscReal;
 
 fn zero(_dim: PetscInt, _time: PetscReal, _x: &[PetscReal], _nc: PetscInt, u: &mut [PetscScalar]) -> petsc_rs::Result<()>
 {
-    u[0] = 0.0;
+    u[0] = PetscScalar::from(0.0);
     Ok(())
 }
 
 fn ecks(_dim: PetscInt, _time: PetscReal, x: &[PetscReal], _nc: PetscInt, u: &mut [PetscScalar]) -> petsc_rs::Result<()>
 {
-    u[0] = x[0];
+    u[0] = PetscScalar::from(x[0]);
     Ok(())
 }
 
@@ -738,7 +745,7 @@ fn ecks(_dim: PetscInt, _time: PetscReal, x: &[PetscReal], _nc: PetscInt, u: &mu
 */
 fn quadratic_u_2d(_dim: PetscInt, _time: PetscReal, x: &[PetscReal], _nc: PetscInt, u: &mut [PetscScalar]) -> petsc_rs::Result<()>
 {
-    u[0] = x[0]*x[0] + x[1]*x[1];
+    u[0] = PetscScalar::from(x[0]*x[0] + x[1]*x[1]);
     Ok(())
 }
 
@@ -752,7 +759,7 @@ unsafe extern "C" fn quadratic_u_field_2d(_dim: PetscInt, _nf: PetscInt, _nf_aux
 
 fn circle_u_2d(_dim: PetscInt, _time: PetscReal, x: &[PetscReal], _nc: PetscInt, u: &mut [PetscScalar]) -> petsc_rs::Result<()>
 {
-    let alpha   = 500.0;
+    let alpha   = PetscScalar::from(500.0);
     let radius2 = PetscReal::powi(0.15, 2);
     let r2      = (x[0] - 0.5).powi(2) + (x[1] - 0.5).powi(2);
     let xi      = alpha*(radius2 - r2);
@@ -765,7 +772,7 @@ fn cross_u_2d(_dim: PetscInt, _time: PetscReal, x: &[PetscReal], _nc: PetscInt, 
 {
     let alpha = 50.0*4.0;
     let xy    = (x[0]-0.5)*(x[1]-0.5);
-    u[0] = PetscReal::sin(alpha*xy) * if alpha*xy.abs() < 2.0 * PETSC_PI { 1.0 } else { 0.01 };
+    u[0] = PetscScalar::from(PetscReal::sin(alpha*xy) * if alpha*xy.abs() < 2.0 * PETSC_PI { 1.0 } else { 0.01 });
     Ok(())
 }
 
@@ -774,7 +781,7 @@ unsafe extern "C" fn f0_u(_dim: PetscInt, _nf: PetscInt, _nf_aux: PetscInt,
     _a_off: *const PetscInt, _a_off_x: *const PetscInt, _a: *const PetscScalar, _a_t: *const PetscScalar, _a_x: *const PetscScalar,
     _t: PetscReal, _x: *const PetscReal, _nc: PetscInt, _consts: *const PetscScalar, f0: *mut PetscScalar)
 {
-    *f0 = 4.0;
+    *f0 = PetscScalar::from(4.0);
 }
 
 unsafe extern "C" fn f0_circle_u(dim: PetscInt, _nf: PetscInt, _nf_aux: PetscInt,
@@ -785,12 +792,12 @@ unsafe extern "C" fn f0_circle_u(dim: PetscInt, _nf: PetscInt, _nf_aux: PetscInt
     let f0 = slice::from_raw_parts_mut(f0, dim as usize);
     let x = slice::from_raw_parts(x, dim as usize);
 
-    let alpha   = 500.0;
+    let alpha   = PetscScalar::from(500.0);
     let radius2 = PetscReal::powi(0.15, 2);
     let r2      = (x[0] - 0.5).powi(2) + (x[1] - 0.5).powi(2);
     let xi      = alpha*(radius2 - r2);
 
-    f0[0] = (-4.0*alpha - 8.0*alpha.powi(2)*r2*PetscReal::tanh(xi)) * (1.0/PetscReal::cosh(xi)).powi(2);
+    f0[0] = (-4.0*alpha - 8.0*alpha.powi(2)*r2*PetscScalar::tanh(xi)) * (1.0/PetscScalar::cosh(xi)).powi(2);
 }
 
 unsafe extern "C" fn f0_cross_u(dim: PetscInt, _nf: PetscInt, _nf_aux: PetscInt,
@@ -804,7 +811,7 @@ unsafe extern "C" fn f0_cross_u(dim: PetscInt, _nf: PetscInt, _nf_aux: PetscInt,
     let alpha = 50.0*4.0;
     let xy    = (x[0]-0.5)*(x[1]-0.5);
 
-    f0[0] = PetscReal::sin(alpha*xy) * if alpha*xy.abs() < 2.0 * PETSC_PI { 1.0 } else { 0.01 };
+    f0[0] = PetscScalar::from(PetscReal::sin(alpha*xy) * if alpha*xy.abs() < 2.0 * PETSC_PI { 1.0 } else { 0.01 });
 }
 
 unsafe extern "C" fn f0_checkerboard_0_u(dim: PetscInt, _nf: PetscInt, _nf_aux: PetscInt,
@@ -815,7 +822,7 @@ unsafe extern "C" fn f0_checkerboard_0_u(dim: PetscInt, _nf: PetscInt, _nf_aux: 
     let f0 = slice::from_raw_parts_mut(f0, dim as usize);
     let x = slice::from_raw_parts(x, dim as usize);
 
-    f0[0] = -20.0*PetscReal::exp(-((x[0] - 0.5).powi(2) + (x[1] - 0.5).powi(2)));
+    f0[0] = PetscScalar::from(-20.0)*PetscReal::exp(-((x[0] - 0.5).powi(2) + (x[1] - 0.5).powi(2)));
 }
 
 unsafe extern "C" fn f0_bd_u(dim: PetscInt, _nf: PetscInt, _nf_aux: PetscInt,
@@ -827,7 +834,7 @@ unsafe extern "C" fn f0_bd_u(dim: PetscInt, _nf: PetscInt, _nf_aux: PetscInt,
     let x = slice::from_raw_parts(x, dim as usize);
     let n = slice::from_raw_parts(n, dim as usize);
 
-    f0[0] = (0..dim as usize).fold(0.0, |res, d| res + -n[d]*2.0*x[d]);
+    f0[0] = (0..dim as usize).fold(PetscScalar::from(0.0), |res, d| res + -n[d]*2.0*x[d]);
 }
 
 /* gradU[comp*dim+d] = {u_x, u_y} or {u_x, u_y, u_z} */
@@ -851,7 +858,7 @@ unsafe extern "C" fn g3_uu(dim: PetscInt, _nf: PetscInt, _nf_aux: PetscInt,
 {
     let g3 = slice::from_raw_parts_mut(g3, (dim * dim) as usize);
 
-    for d in 0..dim as usize { g3[d*dim as usize+d] = 1.0; }
+    for d in 0..dim as usize { g3[d*dim as usize+d] = PetscScalar::from(1.0); }
 }
 
 /*
@@ -866,7 +873,7 @@ unsafe extern "C" fn g3_uu(dim: PetscInt, _nf: PetscInt, _nf_aux: PetscInt,
 */
 fn xtrig_u_2d(_dim: PetscInt, _time: PetscReal, x: &[PetscReal], _nc: PetscInt, u: &mut [PetscScalar]) -> petsc_rs::Result<()>
 {
-    u[0] = PetscReal::sin(2.0*PETSC_PI*x[0]);
+    u[0] = PetscScalar::sin(PetscScalar::from(2.0)*PETSC_PI*x[0]);
     Ok(())
 }
 
@@ -878,7 +885,7 @@ unsafe extern "C" fn f0_xtrig_u(dim: PetscInt, _nf: PetscInt, _nf_aux: PetscInt,
     let f0 = slice::from_raw_parts_mut(f0, dim as usize);
     let x = slice::from_raw_parts(x, dim as usize);
 
-    f0[0] = -4.0*PETSC_PI.powi(2)*PetscReal::sin(2.0*PETSC_PI*x[0]);
+    f0[0] = PetscScalar::from(-4.0)*PETSC_PI.powi(2)*PetscReal::sin(2.0*PETSC_PI*x[0]);
 }
 
 /*
@@ -893,7 +900,8 @@ unsafe extern "C" fn f0_xtrig_u(dim: PetscInt, _nf: PetscInt, _nf_aux: PetscInt,
 */
 fn xytrig_u_2d(_dim: PetscInt, _time: PetscReal, x: &[PetscReal], _nc: PetscInt, u: &mut [PetscScalar]) -> petsc_rs::Result<()>
 {
-    u[0] = PetscReal::sin(2.0*PETSC_PI*x[0])*PetscReal::sin(2.0*PETSC_PI*x[1]);
+    u[0] = PetscScalar::sin(PetscScalar::from(2.0)*PETSC_PI*x[0])
+        * PetscScalar::sin(PetscScalar::from(2.0)*PETSC_PI*x[1]);
     Ok(())
 }
 
@@ -902,7 +910,7 @@ unsafe extern "C" fn f0_xytrig_u(_dim: PetscInt, _nf: PetscInt, _nf_aux: PetscIn
     _a_off: *const PetscInt, _a_off_x: *const PetscInt, _a: *const PetscScalar, _a_t: *const PetscScalar, _a_x: *const PetscScalar,
     _t: PetscReal, x: *const PetscReal, _nc: PetscInt, _consts: *const PetscScalar, f0: *mut PetscScalar)
 {
-    *f0 = -8.0*PETSC_PI.powi(2)*PetscReal::sin(2.0*PETSC_PI*(*x));
+    *f0 = PetscScalar::from(-8.0)*PETSC_PI.powi(2)*PetscReal::sin(2.0*PETSC_PI*(*x));
 }
 
 /*
@@ -918,7 +926,7 @@ unsafe extern "C" fn f0_xytrig_u(_dim: PetscInt, _nf: PetscInt, _nf_aux: PetscIn
 */
 fn nu_2d(_dim: PetscInt, _time: PetscReal, x: &[PetscReal], _nc: PetscInt, u: &mut [PetscScalar]) -> petsc_rs::Result<()>
 {
-    u[0] = x[0] + x[1];
+    u[0] = PetscScalar::from(x[0] + x[1]);
     Ok(())
 }
 
@@ -949,7 +957,7 @@ unsafe extern "C" fn f0_analytic_u(dim: PetscInt, _nf: PetscInt, _nf_aux: PetscI
     let f0 = slice::from_raw_parts_mut(f0, dim as usize);
     let x = slice::from_raw_parts(x, dim as usize);
 
-    f0[0] = 6.0*(x[0] + x[1]);
+    f0[0] = PetscScalar::from(6.0)*(x[0] + x[1]);
 }
 
 /* gradU[comp*dim+d] = {u_x, u_y} or {u_x, u_y, u_z} */
@@ -987,7 +995,7 @@ unsafe extern "C" fn g3_analytic_uu(dim: PetscInt, _nf: PetscInt, _nf_aux: Petsc
     let g3 = slice::from_raw_parts_mut(g3, (dim * dim) as usize);
     let x = slice::from_raw_parts(x, dim as usize);
 
-    for d in 0..dim as usize { g3[d*dim as usize+d] = x[0] + x[1]; }
+    for d in 0..dim as usize { g3[d*dim as usize+d] = PetscScalar::from(x[0] + x[1]); }
 }
 
 unsafe extern "C" fn g3_field_uu(dim: PetscInt, _nf: PetscInt, _nf_aux: PetscInt,
@@ -1020,7 +1028,7 @@ unsafe extern "C" fn f0_analytic_nonlinear_u(dim: PetscInt, _nf: PetscInt, _nf_a
     let f0 = slice::from_raw_parts_mut(f0, dim as usize);
     let x = slice::from_raw_parts(x, dim as usize);
 
-    f0[0] = 16.0*(x[0]*x[0] + x[1]*x[1]);
+    f0[0] = PetscScalar::from(16.0)*(x[0]*x[0] + x[1]*x[1]);
 }
 
 /* gradU[comp*dim+d] = {u_x, u_y} or {u_x, u_y, u_z} */
@@ -1032,7 +1040,7 @@ unsafe extern "C" fn f1_analytic_nonlinear_u(dim: PetscInt, _nf: PetscInt, _nf_a
     let f1 = slice::from_raw_parts_mut(f1, dim as usize);
     let u_x = slice::from_raw_parts(u_x, dim as usize);
 
-    let nu = (0..dim as usize).fold(0.0, |nu, d| nu + u_x[d]*u_x[d]);
+    let nu = (0..dim as usize).fold(PetscScalar::from(0.0), |nu, d| nu + u_x[d]*u_x[d]);
     for d in 0..dim as usize { f1[d] = 0.5*nu*u_x[d]; }
 }
 
@@ -1052,9 +1060,9 @@ unsafe extern "C" fn g3_analytic_nonlinear_uu(dim: PetscInt, _nf: PetscInt, _nf_
     let g3 = slice::from_raw_parts_mut(g3, (dim * dim) as usize);
     let u_x = slice::from_raw_parts(u_x, dim as usize);
 
-    let nu = (0..dim as usize).fold(0.0, |nu, d| nu + u_x[d]*u_x[d]);
+    let nu = (0..dim as usize).fold(PetscScalar::from(0.0), |nu, d| nu + u_x[d]*u_x[d]);
     for d in 0..dim as usize {
-        g3[d*dim as usize+d] = 0.5*nu;
+        g3[d*dim as usize+d] = PetscScalar::from(0.5)*nu;
         for e in 0..dim as usize {
             g3[d*dim as usize+e] += u_x[d]*u_x[e];
         }
@@ -1086,7 +1094,7 @@ unsafe extern "C" fn g3_analytic_nonlinear_uu(dim: PetscInt, _nf: PetscInt, _nf_
 */
 fn quadratic_u_3d(_dim: PetscInt, _time: PetscReal, x: &[PetscReal], _nc: PetscInt, u: &mut [PetscScalar]) -> petsc_rs::Result<()>
 {
-    u[0] = 2.0*(x[0]*x[0] + x[1]*x[1] + x[2]*x[2])/3.0;
+    u[0] = PetscScalar::from(2.0)*(x[0]*x[0] + x[1]*x[1] + x[2]*x[2])/3.0;
     Ok(())
 }
 

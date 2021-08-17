@@ -30,11 +30,11 @@ From here, you should be able to compile your projects using cargo. However, if 
 
 ### Optional Build Parameters
 
-If you want to use a PETSc with non-standard precisions for floats or integers, or for complex numbers (experimental only) you can include something like the following in your Cargo.toml.
+If you want to use a PETSc with non-standard precisions for floats or integers, or for complex numbers (unsafe) you can include something like the following in your Cargo.toml.
 ```toml
 [dependencies.petsc-rs]
 git = "https://gitlab.com/petsc/petsc-rs/"
-branch = "main"  # for complex numbers use the "complex-scalar" branch
+branch = "main"
 default-features = false  # note, default turns on "petsc-real-f64" and "petsc-int-i32"
 features = ["petsc-real-f32", "petsc-int-i64"]
 ```
@@ -53,9 +53,9 @@ one integer feature set. And it must match the PETSc install.
 Also sets the complex type, `PetscComplex`, to be `Complex<f64>`.
 - **`petsc-real-f32`** — Sets the real type, `PetscReal` to be `f32`.
 Also sets the complex type, `PetscComplex`, to be `Complex<f32>`.
-- **`petsc-use-complex`** *(disabled by default)* *(experimental only)* - Sets the scalar type, `PetscScalar`, to
+- **`petsc-use-complex-unsafe`** *(disabled by default)* *(unsafe)* - Sets the scalar type, `PetscScalar`, to
 be the complex type, `PetscComplex`. If disabled then the scalar type is the real type, `PetscReal`.
-You must be using the `complex-scalar` branch to enable this feature.
+This is unsafe because `petsc-rs` makes no guarantees about following the correct calling convention across the FFI boundary (read gitlab [issue #1](https://gitlab.com/petsc/petsc-rs/-/issues/1) for more information).
 - **`petsc-int-i32`** *(enabled by default)* — Sets the integer type, `PetscInt`, to be `i32`.
 - **`petsc-int-i64`** — Sets the integer type, `PetscInt`, to be `i64`.
 
@@ -119,6 +119,8 @@ To help the user start using PETSc immediately, we begin with a simple uniproces
 //! Norm of error 1.14852e-2, Iters 318
 //! ```
 //!
+//! To build for complex you can use the flag `--features petsc-use-complex-unsafe`
+//!
 //! Note:  The corresponding parallel example is ex23.rs
 
 static HELP_MSG: &str = "Solves a tridiagonal linear system with KSP.\n\n";
@@ -161,11 +163,6 @@ fn main() -> petsc_rs::Result<()> {
     A.set_up()?;
 
     // Assemble matrix:
-    // Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
-    // float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
-    // call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
-    // but if `PetscScalar` is complex it will construct a complex value with the imaginary part being
-    // set to `0`.
     A.assemble_with((0..n).map(|i| (-1..=1).map(move |j| (i,i+j))).flatten()
             // we could also filter out negatives, but `assemble_with` does that for us
             .filter(|&(i, j)| i < n && j < n)
