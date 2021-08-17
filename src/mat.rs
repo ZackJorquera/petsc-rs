@@ -1044,19 +1044,27 @@ pub mod mat_shell {
         ///
         /// # Example
         ///
+        /// Note, to support complex numbers we use `c(real)` as a shorthand.
+        /// Read docs for [`PetscScalar`](crate::PetscScalar) for more information.
+        ///
         /// ```
         /// # use petsc_rs::prelude::*;
         /// # use mpi::traits::*;
         /// # use ndarray::{s, array};
+        /// # fn c(r: PetscReal) -> PetscScalar { PetscScalar::from(r) }
+        /// # #[cfg(feature = "petsc-use-complex-unsafe")]
+        /// # fn slice_abs_diff_eq(s1: &[PetscScalar], s2: &[PetscScalar], tol: PetscReal) -> bool {
+        /// # s1.len() == s2.len() && s1.iter().zip(s2).all(|(a,b)| (a-b).norm() < tol) }
+        /// # #[cfg(not(feature = "petsc-use-complex-unsafe"))]
+        /// # fn slice_abs_diff_eq(s1: &[PetscScalar], s2: &[PetscScalar], tol: PetscReal) -> bool {
+        /// # s1.len() == s2.len() && s1.iter().zip(s2).all(|(a,b)| (a-b).abs() < tol) }
         /// # fn main() -> petsc_rs::Result<()> {
         /// # let petsc = Petsc::init_no_args()?;
-        /// // Note: this example will only work in a uniprocessor comm world. Also, right
-        /// // now this example only works when `PetscScalar` is `PetscReal`. It will fail
-        /// // to compile if `PetscScalar` is `PetscComplex`.
-        /// let mut x = Vector::from_slice(petsc.world(), &[1.2, -0.5])?;
-        /// let mut y = Vector::from_slice(petsc.world(), &[0.0, 0.0])?;
+        /// // Note: this example will only work in a uniprocessor comm world.
+        /// let mut x = Vector::from_slice(petsc.world(), &[c(1.2), c(-0.5)])?;
+        /// let mut y = Vector::from_slice(petsc.world(), &[c(0.0), c( 0.0)])?;
         ///
-        /// let theta = std::f64::consts::PI as PetscReal / 2.0;
+        /// let theta = std::f64::consts::PI as PetscReal / c(2.0);
         /// let mat_data = [PetscScalar::cos(theta), -PetscScalar::sin(theta),
         ///                 PetscScalar::sin(theta),  PetscScalar::cos(theta)];
         /// // we can set the mat_data or access it by ref, here we set it
@@ -1082,9 +1090,11 @@ pub mod mat_shell {
         /// })?;
         ///
         /// mat.mult(&x, &mut y)?;
-        /// assert!(y.view()?.slice(s![..]).abs_diff_eq(&array![0.5, 1.2], 1e-15));
+        /// # // assert!(y.view()?.slice(s![..]).abs_diff_eq(&array![0.5, 1.2], 1e-15));
+        /// assert!(slice_abs_diff_eq(y.view()?.as_slice().unwrap(), &[c(0.5), c(1.2)], 1e-15));
         /// mat.mult_transpose(&y, &mut x)?;
-        /// assert!(x.view()?.slice(s![..]).abs_diff_eq(&array![1.2, -0.5], 1e-15));
+        /// # // assert!(x.view()?.slice(s![..]).abs_diff_eq(&array![1.2, -0.5], 1e-15));
+        /// assert!(slice_abs_diff_eq(x.view()?.as_slice().unwrap(), &[c(1.2), c(-0.5)], 1e-15));
         /// # Ok(())
         /// # }
         /// ```
@@ -1205,18 +1215,26 @@ pub mod mat_shell {
         ///
         /// # Example
         ///
+        /// Note, to support complex numbers we use `c(real)` as a shorthand.
+        /// Read docs for [`PetscScalar`](crate::PetscScalar) for more information.
+        ///
         /// ```
         /// # use petsc_rs::prelude::*;
         /// # use mpi::traits::*;
         /// # use ndarray::{s, array};
+        /// # fn c(r: PetscReal) -> PetscScalar { PetscScalar::from(r) }
+        /// # #[cfg(feature = "petsc-use-complex-unsafe")]
+        /// # fn slice_abs_diff_eq(s1: &[PetscScalar], s2: &[PetscScalar], tol: PetscReal) -> bool {
+        /// # s1.len() == s2.len() && s1.iter().zip(s2).all(|(a,b)| (a-b).norm() < tol) }
+        /// # #[cfg(not(feature = "petsc-use-complex-unsafe"))]
+        /// # fn slice_abs_diff_eq(s1: &[PetscScalar], s2: &[PetscScalar], tol: PetscReal) -> bool {
+        /// # s1.len() == s2.len() && s1.iter().zip(s2).all(|(a,b)| (a-b).abs() < tol) }
         /// # fn main() -> petsc_rs::Result<()> {
         /// # let petsc = Petsc::init_no_args()?;
-        /// // Note: this example will only work in a uniprocessor comm world. Also, right
-        /// // now this example only works when `PetscScalar` is `PetscReal`. It will fail
-        /// // to compile if `PetscScalar` is `PetscComplex`.
-        /// let mut v = Vector::from_slice(petsc.world(), &[0.0, 0.0])?;
+        /// // Note: this example will only work in a uniprocessor comm world.
+        /// let mut v = Vector::from_slice(petsc.world(), &[c(0.0), c(0.0)])?;
         ///
-        /// let theta = std::f64::consts::PI as PetscReal / 2.0;
+        /// let theta = std::f64::consts::PI as PetscReal / c(2.0);
         /// let mat_data = [PetscScalar::cos(theta), -PetscScalar::sin(theta),
         ///                 PetscScalar::sin(theta),  PetscScalar::cos(theta)];
         /// // we can set the mat_data or access it by ref, here we access it by ref
@@ -1231,7 +1249,8 @@ pub mod mat_shell {
         /// })?;
         ///
         /// mat.get_diagonal(&mut v)?;
-        /// assert!(v.view()?.slice(s![..]).abs_diff_eq(&array![0.0, 0.0], 1e-15));
+        /// # // assert!(v.view()?.slice(s![..]).abs_diff_eq(&array![0.0, 0.0], 1e-15));
+        /// assert!(slice_abs_diff_eq(v.view()?.as_slice().unwrap(), &[c(0.0), c(0.0)], 1e-15));
         /// # Ok(())
         /// # }
         /// ```
@@ -1468,19 +1487,27 @@ pub mod mat_shell {
         ///
         /// # Example
         ///
+        /// Note, to support complex numbers we use `c(real)` as a shorthand.
+        /// Read docs for [`PetscScalar`](crate::PetscScalar) for more information.
+        ///
         /// ```
         /// # use petsc_rs::prelude::*;
         /// # use mpi::traits::*;
         /// # use ndarray::{s, array};
+        /// # fn c(r: PetscReal) -> PetscScalar { PetscScalar::from(r) }
+        /// # #[cfg(feature = "petsc-use-complex-unsafe")]
+        /// # fn slice_abs_diff_eq(s1: &[PetscScalar], s2: &[PetscScalar], tol: PetscReal) -> bool {
+        /// # s1.len() == s2.len() && s1.iter().zip(s2).all(|(a,b)| (a-b).norm() < tol) }
+        /// # #[cfg(not(feature = "petsc-use-complex-unsafe"))]
+        /// # fn slice_abs_diff_eq(s1: &[PetscScalar], s2: &[PetscScalar], tol: PetscReal) -> bool {
+        /// # s1.len() == s2.len() && s1.iter().zip(s2).all(|(a,b)| (a-b).abs() < tol) }
         /// # fn main() -> petsc_rs::Result<()> {
         /// # let petsc = Petsc::init_no_args()?;
-        /// // Note: this example will only work in a uniprocessor comm world. Also, right
-        /// // now this example only works when `PetscScalar` is `PetscReal`. It will fail
-        /// // to compile if `PetscScalar` is `PetscComplex`.
-        /// let mut v = Vector::from_slice(petsc.world(), &[0.0, 0.0])?;
-        /// let v_add = Vector::from_slice(petsc.world(), &[1.2, 2.1])?;
+        /// // Note: this example will only work in a uniprocessor comm world.
+        /// let mut v = Vector::from_slice(petsc.world(), &[c(0.0), c(0.0)])?;
+        /// let v_add = Vector::from_slice(petsc.world(), &[c(1.2), c(2.1)])?;
         ///
-        /// let theta = std::f64::consts::PI as PetscReal;
+        /// let theta = c(std::f64::consts::PI as PetscReal);
         /// let mat_data = [PetscScalar::cos(theta), -PetscScalar::sin(theta),
         ///                 PetscScalar::sin(theta),  PetscScalar::cos(theta)];
         /// let mut mat = Mat::create_shell(petsc.world(),2,2,2,2, Box::new(mat_data))?;
@@ -1509,13 +1536,16 @@ pub mod mat_shell {
         /// })?;
         ///
         /// mat.get_diagonal(&mut v)?;
-        /// assert!(v.view()?.slice(s![..]).abs_diff_eq(&array![-1.0, -1.0], 1e-15));
+        /// assert!(slice_abs_diff_eq(v.view()?.as_slice().unwrap(),&[c(-1.0), c(-1.0)], 1e-15));
+        /// # // assert!(v.view()?.slice(s![..]).abs_diff_eq(&array![-1.0, -1.0], 1e-15));
         /// mat.diagonal_set(&v_add, InsertMode::ADD_VALUES)?;
         /// mat.get_diagonal(&mut v)?;
-        /// assert!(v.view()?.slice(s![..]).abs_diff_eq(&array![0.2, 1.1], 1e-15));
+        /// assert!(slice_abs_diff_eq(v.view()?.as_slice().unwrap(),&[c(0.2), c(1.1)], 1e-15));
+        /// # // assert!(v.view()?.slice(s![..]).abs_diff_eq(&array![0.2, 1.1], 1e-15));
         /// mat.diagonal_set(&v_add, InsertMode::INSERT_VALUES)?;
         /// mat.get_diagonal(&mut v)?;
-        /// assert!(v.view()?.slice(s![..]).abs_diff_eq(&array![1.2, 2.1], 1e-15));
+        /// assert!(slice_abs_diff_eq(v.view()?.as_slice().unwrap(),&[c(1.2), c(2.1)], 1e-15));
+        /// # // assert!(v.view()?.slice(s![..]).abs_diff_eq(&array![1.2, 2.1], 1e-15));
         /// # Ok(())
         /// # }
         /// ```
@@ -1629,11 +1659,21 @@ pub mod mat_shell {
         ///
         /// # Example
         ///
+        /// Note, to support complex numbers we use `c(real)` as a shorthand.
+        /// Read docs for [`PetscScalar`](crate::PetscScalar) for more information.
+        ///
         /// ```
         /// # use petsc_rs::prelude::*;
         /// # use petsc_rs::mat::MatShell;
         /// # use mpi::traits::*;
         /// # use ndarray::{s, array};
+        /// # fn c(r: PetscReal) -> PetscScalar { PetscScalar::from(r) }
+        /// # #[cfg(feature = "petsc-use-complex-unsafe")]
+        /// # fn slice_abs_diff_eq(s1: &[PetscScalar], s2: &[PetscScalar], tol: PetscReal) -> bool {
+        /// # s1.len() == s2.len() && s1.iter().zip(s2).all(|(a,b)| (a-b).norm() < tol) }
+        /// # #[cfg(not(feature = "petsc-use-complex-unsafe"))]
+        /// # fn slice_abs_diff_eq(s1: &[PetscScalar], s2: &[PetscScalar], tol: PetscReal) -> bool {
+        /// # s1.len() == s2.len() && s1.iter().zip(s2).all(|(a,b)| (a-b).abs() < tol) }
         /// fn my_mat_duplicate<'a, 'tl>(mat: &MatShell<'a, 'tl, [PetscScalar; 4]>, _op: MatDuplicateOption)
         ///     -> petsc_rs::Result<MatShell<'a, 'tl, [PetscScalar; 4]>>
         /// {
@@ -1659,13 +1699,11 @@ pub mod mat_shell {
         ///
         /// # fn main() -> petsc_rs::Result<()> {
         /// # let petsc = Petsc::init_no_args()?;
-        /// // Note: this example will only work in a uniprocessor comm world. Also, right
-        /// // now this example only works when `PetscScalar` is `PetscReal`. It will fail
-        /// // to compile if `PetscScalar` is `PetscComplex`.
-        /// let mut x = Vector::from_slice(petsc.world(), &[1.2, -0.5])?;
-        /// let mut y = Vector::from_slice(petsc.world(), &[0.0, 0.0])?;
+        /// // Note: this example will only work in a uniprocessor comm world.
+        /// let mut x = Vector::from_slice(petsc.world(), &[c(1.2), c(-0.5)])?;
+        /// let mut y = Vector::from_slice(petsc.world(), &[c(0.0), c( 0.0)])?;
         ///
-        /// let theta = std::f64::consts::PI as PetscReal / 2.0;
+        /// let theta = std::f64::consts::PI as PetscReal / c(2.0);
         /// let mat_data = [PetscScalar::cos(theta), -PetscScalar::sin(theta),
         ///                 PetscScalar::sin(theta),  PetscScalar::cos(theta)];
         /// let mut mat = Mat::create_shell(petsc.world(),2,2,2,2, Box::new(mat_data))?;
@@ -1677,15 +1715,18 @@ pub mod mat_shell {
         /// mat.shell_set_operation_duplicate(my_mat_duplicate)?;
         ///
         /// mat.mult(&x, &mut y)?;
-        /// assert!(y.view()?.slice(s![..]).abs_diff_eq(&array![0.5, 1.2], 1e-15));
+        /// # // assert!(y.view()?.slice(s![..]).abs_diff_eq(&array![0.5, 1.2], 1e-15));
+        /// assert!(slice_abs_diff_eq(y.view()?.as_slice().unwrap(), &[c(0.5), c(1.2)], 1e-15));
         ///
         /// let new_mat = mat.clone(); // calls `mat.duplicate`
         /// new_mat.mult(&y, &mut x)?;
-        /// assert!(x.view()?.slice(s![..]).abs_diff_eq(&array![-1.2, 0.5], 1e-15));
+        /// # // assert!(x.view()?.slice(s![..]).abs_diff_eq(&array![-1.2, 0.5], 1e-15));
+        /// assert!(slice_abs_diff_eq(x.view()?.as_slice().unwrap(), &[c(-1.2), c(0.5)], 1e-15));
         ///
         /// let new_new_mat = new_mat.clone(); // calls `mat.duplicate`
         /// new_mat.mult(&x, &mut y)?;
-        /// assert!(y.view()?.slice(s![..]).abs_diff_eq(&array![-0.5, -1.2], 1e-15));
+        /// # // assert!(y.view()?.slice(s![..]).abs_diff_eq(&array![-0.5, -1.2], 1e-15));
+        /// assert!(slice_abs_diff_eq(y.view()?.as_slice().unwrap(), &[c(-0.5), c(-1.2)], 1e-15));
         /// # Ok(())
         /// # }
         /// ```

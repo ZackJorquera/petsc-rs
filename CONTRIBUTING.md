@@ -42,7 +42,7 @@ Right now, this is all done in the `build.rs` for `petsc-sys`, but I think it wo
 
 ### Complex numbers
 
-While complex numbers are not supported on the main branch, I still did a lot of work to support complex numbers. The main thing is that `petsc-rs` uses the [`num-complex` `Complex` type](https://docs.rs/num-complex/0.4.0/num_complex/struct.Complex.html), but `petsc-sys` uses the complex type that bindgen creates. To convert between the two I implemented `Into` and `From` that uses a `mem::transmute` under the hood. Or, if you have a pointer to a complex number the conversion can be a simple pointer cast.
+While complex numbers are unsafe, I've still did a lot of work to support complex numbers as safely as possible. The main thing is that `petsc-rs` uses the [`num-complex` `Complex` type](https://docs.rs/num-complex/0.4.0/num_complex/struct.Complex.html), but `petsc-sys` uses the complex type that bindgen creates. To convert between the two I implemented `Into` and `From` that uses a `mem::transmute` under the hood. Or, if you have a pointer to a complex number the conversion can be a simple pointer cast.
 
 ### lifetimes and struct references
 
@@ -86,7 +86,7 @@ There are also a lot of `TODO` comments throughout the repository that I try to 
 - [ ] add better MatStencil type for petsc-rs (maybe add a bunch of types that all implement `Into<MatStencil>` or a bunch of `new_Xd` functions )
 - [ ] add wrapper for `MatNullSpaceSetFunction`
 - [ ] it would be cool to make a macro that functions sort of like stuctopt for the PetscOpt trait
-- [ ] work on complex numbers
+- [ ] work on complex numbers more. The api, while ok, still has problems. An annoying thing is the fact that complex numbers have no `abs()` method and real numbers have no `norm()` method. This make supporting both real and complex a pain. We have to use a `#[cfg(feature = "petsc-use-complex-unsafe")]` (look at snes-ex3 for an example of this).
 - [ ] it would make sense to move a lot of the high-level functionality to the rust side (for of like we did for da_vec_view)
   - [ ] we could do this for viewers
   - [ ] Also add GUI viewer, look how OpenCV rust bindings do it

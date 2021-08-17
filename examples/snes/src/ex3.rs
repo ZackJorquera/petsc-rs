@@ -8,6 +8,8 @@
 //! $ mpiexec -n 1 target/debug/snes-ex3
 //! $ mpiexec -n 2 target/debug/snes-ex3
 //! ```
+//!
+//! To build for complex you can use the flag `--features petsc-use-complex-unsafe`
 
 static HELP_MSG: &str = "Newton methods to solve u'' + u^{2} = f in parallel.\n\n";
 
@@ -174,8 +176,19 @@ fn main() -> petsc_rs::Result<()> {
                 let mut xa = da.da_vec_view_mut(x)?;
                 let (_xs, _, _, _xm, _, _) = da.da_get_corners()?;
 
+                #[cfg(feature = "petsc-use-complex-unsafe")]
                 xa_last.indexed_iter().map(|(pat, _)|  pat[0])
-                    .for_each(|i| { 
+                    .for_each(|i| {
+                        let rdiff = if xa[i].norm() == 0.0 { 2.0*check_tol }
+                            else { ((xa[i] - xa_last[i])/xa[i]).norm() };
+                        if rdiff > check_tol {
+                            xa[i] = 0.5*(xa[i] + xa_last[i]);
+                            *x_mod = true;
+                        }
+                    });
+                #[cfg(not(feature = "petsc-use-complex-unsafe"))]
+                xa_last.indexed_iter().map(|(pat, _)|  pat[0])
+                    .for_each(|i| {
                         let rdiff = if xa[i].abs() == 0.0 { 2.0*check_tol }
                             else { ((xa[i] - xa_last[i])/xa[i]).abs() };
                         if rdiff > check_tol {

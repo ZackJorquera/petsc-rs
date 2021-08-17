@@ -13,6 +13,8 @@
 //! $ mpiexec -n 5 target/debug/ksp-ex2 -m 80 -n 70
 //! Norm of error 2.28509e-3, Iters 83
 //! ```
+//!
+//! To build for complex you can use the flag `--features petsc-use-complex-unsafe`
 
 static HELP_MSG: &str = "Solves a linear system in parallel with KSP.
 Input parameters include:\n\n";
@@ -98,11 +100,6 @@ fn main() -> petsc_rs::Result<()> {
 
         Note MatAssemblyBegin(), MatAssemblyEnd() are automatically call by `assemble_with()`.
     */
-    // Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
-    // float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
-    // call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
-    // but if `PetscScalar` is complex it will construct a complex value with the imaginary part being
-    // set to `0`.
     A.assemble_with(mat_ownership_range.map(|ii| {
             let mut data_vec = vec![];
             let i = ii/n;

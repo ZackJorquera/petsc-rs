@@ -647,7 +647,7 @@ impl<'a> Clone for Vector<'a> {
 
 impl Drop for VectorViewMut<'_, '_> {
     fn drop(&mut self) {
-        let ierr = unsafe { petsc_raw::VecRestoreArray(self.vec.vec_p, &mut self.array as *mut _) };
+        let ierr = unsafe { petsc_raw::VecRestoreArray(self.vec.vec_p, &mut self.array as *mut _ as *mut _) };
         let _ = unsafe { chkerrq!(self.vec.world, ierr) }; // TODO: should I unwrap or what idk?
     }
 }

@@ -17,6 +17,8 @@
 //! Norm of error 1.14852e-2, Iters 318
 //! ```
 //!
+//! To build for complex you can use the flag `--features petsc-use-complex-unsafe`
+//!
 //! Note:  The corresponding parallel example is ex23.rs
 
 static HELP_MSG: &str = "Solves a tridiagonal linear system with KSP.\n\n";
@@ -59,11 +61,6 @@ fn main() -> petsc_rs::Result<()> {
     A.set_up()?;
 
     // Assemble matrix:
-    // Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
-    // float literals (i.e. `1.5`) when a function takes a `PetscScalar` wrap in in a `from`
-    // call. E.x. `PetscScalar::from(1.5)`. This will do nothing if `PetscScalar` in a real number,
-    // but if `PetscScalar` is complex it will construct a complex value with the imaginary part being
-    // set to `0`.
     A.assemble_with((0..n).map(|i| (-1..=1).map(move |j| (i,i+j))).flatten()
             // we could also filter out negatives, but `assemble_with` does that for us
             .filter(|&(i, j)| i < n && j < n)

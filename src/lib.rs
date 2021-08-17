@@ -52,9 +52,11 @@
 //! Also sets the complex type, [`PetscComplex`], to be `Complex<f64>`.
 //! - **`petsc-real-f32`** — Sets the real type, [`PetscReal`] to be `f32`.
 //! Also sets the complex type, [`PetscComplex`], to be `Complex<f32>`.
-//! - **`petsc-use-complex`** *(disabled by default)* *(experimental only)* - Sets the scalar type, [`PetscScalar`], to
+//! - **`petsc-use-complex-unsafe`** *(disabled by default)* *(unsafe)* - Sets the scalar type, [`PetscScalar`], to
 //! be the complex type, [`PetscComplex`]. If disabled then the scalar type is the real type, [`PetscReal`].
-//! You must be using the `complex-scalar` branch to enable this feature.
+//! This is unsafe because `petsc-rs` makes no guarantees about following the correct calling convention
+//! across the FFI boundary (read gitlab [issue #1](https://gitlab.com/petsc/petsc-rs/-/issues/1) for
+//! more information).
 //! - **`petsc-int-i32`** *(enabled by default)* — Sets the integer type, [`PetscInt`], to be `i32`.
 //! - **`petsc-int-i64`** — Sets the integer type, [`PetscInt`], to be `i64`.
 //!
@@ -63,7 +65,7 @@
 //! ```toml
 //! [dependencies.petsc-rs]
 //! git = "https://gitlab.com/petsc/petsc-rs/"
-//! branch = "main"  # for complex numbers use the "complex-scalar" branch
+//! branch = "main"
 //! default-features = false  # note, default turns on "petsc-real-f64" and "petsc-int-i32"
 //! features = ["petsc-real-f32", "petsc-int-i64"]
 //! ```
@@ -129,7 +131,6 @@ pub mod prelude {
         PetscInt,
         PetscScalar,
         PetscReal,
-        PetscComplex,
         PetscAsRaw,
         PetscAsRawMut,
         PetscObject,
@@ -153,10 +154,16 @@ pub mod prelude {
         NormType,
         PetscOpt,
     };
+    #[cfg(feature = "petsc-use-complex-unsafe")]
+    pub use crate::PetscComplex;
 }
 
-#[cfg(feature = "petsc-use-complex")]
+#[cfg(feature = "petsc-use-complex-unsafe")]
 use num_complex::Complex;
+/// Documentation complex type, not used.
+#[cfg(all(doc, not(feature = "petsc-use-complex-unsafe")))]
+#[doc(hidden)]
+pub type Complex<T> = petsc_sys::__BindgenComplex<T>;
 
 /// Prints to standard out with a new line, only from the first processor in the communicator.
 ///
@@ -1260,11 +1267,10 @@ where
 }
 
 /// PETSc type that represents a complex number with precision matching that of PetscReal.
-#[cfg(any(feature = "petsc-use-complex", feature = "petsc-sys/petsc-use-complex"))]
+///
+/// You must use the `petsc-use-complex-unsafe` feature to use this type.
+#[cfg(any(doc, feature = "petsc-use-complex-unsafe", feature = "petsc-sys/petsc-use-complex-unsafe"))]
 pub type PetscComplex = Complex<PetscReal>;
-/// PETSc type that represents a complex number with precision matching that of PetscReal.
-#[cfg(not(any(feature = "petsc-use-complex", feature = "petsc-sys/petsc-use-complex")))]
-pub type PetscComplex = petsc_sys::PetscComplex;
 
 /// PETSc scalar type.
 ///
@@ -1285,7 +1291,14 @@ pub type PetscComplex = petsc_sys::PetscComplex;
 /// // This will always work
 /// let a = PetscScalar::from(1.5);
 /// ```
-#[cfg(not(any(feature = "petsc-use-complex", feature = "petsc-sys/petsc-use-complex")))]
+///
+/// Note, in many examples you might see something like `c(1.5)`. This is just shorthand, used
+/// by the documentation, for the above code (it is not a public method). It is defined as the
+/// the following:
+/// ```ignore
+/// fn c(r: PetscReal) -> PetscScalar { PetscScalar::from(r) }
+/// ```
+#[cfg(not(any(feature = "petsc-use-complex-unsafe", feature = "petsc-sys/petsc-use-complex-unsafe")))]
 pub type PetscScalar = PetscReal;
 
 /// PETSc scalar type.
@@ -1307,7 +1320,14 @@ pub type PetscScalar = PetscReal;
 /// // This will always work
 /// let a = PetscScalar::from(1.5);
 /// ```
-#[cfg(any(feature = "petsc-use-complex", feature = "petsc-sys/petsc-use-complex"))]
+///
+/// Note, in many examples you might see something like `c(1.5)`. This is just shorthand, used
+/// by the documentation, for the above code (it is not a public method). It is defined as the
+/// the following:
+/// ```ignore
+/// fn c(r: PetscReal) -> PetscScalar { PetscScalar::from(r) }
+/// ```
+#[cfg(any(feature = "petsc-use-complex-unsafe", feature = "petsc-sys/petsc-use-complex-unsafe"))]
 pub type PetscScalar = Complex<PetscReal>;
 
 #[cfg(doctest)]

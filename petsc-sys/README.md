@@ -13,7 +13,7 @@ PETSc has support for multiple different sizes of scalars and integers. To expos
 
 - **`petsc-real-f64`** *(enabled by default)* — Sets the real type, `PetscReal`, to be `f64`. Also sets the complex type, `PetscComplex`, to be `Complex<f64>`.
 - **`petsc-real-f32`** — Sets the real type, `PetscReal` to be `f32`. Also sets the complex type, `PetscComplex`, to be `Complex<f32>`.
-- **`petsc-use-complex`** *(disabled by default)* *(experimental only)* - Sets the scalar type, `PetscScalar`, to be the complex type, `PetscComplex`. If disabled then the scalar type is the real type, `PetscReal`. You must be using the `complex-scalar` branch to enable this feature.
+- **`petsc-use-complex-unsafe`** *(disabled by default)* *(unsafe)* - Sets the scalar type, `PetscScalar`, to be the complex type, `PetscComplex`. If disabled then the scalar type is the real type, `PetscReal`. This is unsafe because `petsc-rs` makes no guarantees about following the correct calling convention across the FFI boundary (read gitlab [issue #1](https://gitlab.com/petsc/petsc-rs/-/issues/1) for more information).
 - **`petsc-int-i32`** *(enabled by default)* — Sets the integer type, `PetscInt`, to be `i32`.
 - **`petsc-int-i64`** — Sets the integer type, `PetscInt`, to be `i64`.
 - **`generate-enums`** — Tells `petsc-sys` to generate enums from `#define`s in the headers. This is done for the error enum, `PetscErrorCodeEnum`, and many type enums like `MatTypeEnum` and `DMTypeEnum`. This feature is used by `petsc-rs`, but if you are just using the `petsc-sys` raw bindings then this feature is most likely not needed as all the `#define`s are already ported as `pub const`s from bindgen.
