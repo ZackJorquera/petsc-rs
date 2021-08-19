@@ -25,7 +25,7 @@ use mpi::topology::UserCommunicator;
 use mpi::traits::*;
 
 /// [`PC`] Type
-pub type PCType = crate::petsc_raw::PCTypeEnum;
+pub use crate::petsc_raw::PCTypeEnum as PCType;
 
 /// Abstract PETSc object that manages all preconditioners including direct solvers such as PCLU
 pub struct PC<'a, 'tl, 'bl> {

@@ -84,15 +84,32 @@ pub struct NullSpace<'a> {
     pub(crate) ns_p: *mut petsc_raw::_p_MatNullSpace,
 }
 
+/// Indicates if the matrix is now to be used, or if you plan to continue to add or insert values to it.
 pub use petsc_raw::MatAssemblyType;
+/// Options that may be set for a matrix and its behavior or storage .
 pub use petsc_raw::MatOption;
+/// Indicates if a duplicated sparse matrix should have its numerical
+/// values copied over or just its nonzero structure.
 pub use petsc_raw::MatDuplicateOption;
+/// Data structure for storing information about a single row or column of a matrix as indexed
+/// on an associated grid.
+///
+/// These are arguments to [`Mat::set_values_stencil()`] and [`Mat::assemble_with_stencil()`].
+///
+/// The `i`,`j`, and `k` represent the logical coordinates over the entire grid
+/// (for 2 and 1 dimensional problems the `k` and `j` entries are ignored). The `c`
+/// represents the the degrees of freedom at each grid point (the dof argument
+/// to DMDASetDOF()). If dof is 1 then this entry is ignored.
 pub use petsc_raw::MatStencil;
+/// Type of Mat operation.
 pub use petsc_raw::MatOperation;
+/// Indicates if matrices obtained from a previous call to `MatCreateSubMatrices()`,
+/// `MatCreateSubMatrix()`, `MatConvert()` or several other functions are to be
+/// reused to store the new matrix values. 
 use petsc_raw::MatReuse;
 
 /// [`Mat`] Type
-pub type MatType = crate::petsc_raw::MatTypeEnum;
+pub use crate::petsc_raw::MatTypeEnum as MatType;
 
 impl<'a, 'tl> Mat<'a, 'tl> {
     /// Same as `Mat { ... }` but sets all optional params to `None`

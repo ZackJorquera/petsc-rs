@@ -9,7 +9,7 @@ use mpi::topology::UserCommunicator;
 use mpi::traits::*;
 
 /// [`IS`] Type
-pub type ISType = crate::petsc_raw::ISTypeEnum;
+pub use crate::petsc_raw::ISTypeEnum as ISType;
 
 /// Abstract PETSc object that allows indexing. 
 pub struct IS<'a> {

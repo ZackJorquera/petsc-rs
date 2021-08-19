@@ -29,7 +29,7 @@ use mpi::topology::UserCommunicator;
 use mpi::traits::*;
 
 /// [`KSP`] Type
-pub type KSPType = crate::petsc_raw::KSPTypeEnum;
+pub use crate::petsc_raw::KSPTypeEnum as KSPType;
 
 /// Abstract PETSc object that manages all Krylov methods. This is the object that manages the linear
 /// solves in PETSc (even those such as direct solvers that do no use Krylov accelerators).

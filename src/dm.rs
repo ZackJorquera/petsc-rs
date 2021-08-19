@@ -243,22 +243,22 @@ pub struct BorrowDM<'a, 'tl, 'bv> {
 /// Describes the choice for fill of ghost cells on physical domain boundaries.
 ///
 /// <https://petsc.org/release/docs/manualpages/DM/DMBoundaryType.html>
-pub type DMBoundaryType = crate::petsc_raw::DMBoundaryType;
+pub use crate::petsc_raw::DMBoundaryType;
 /// Determines if the stencil extends only along the coordinate directions, or also to the northeast, northwest etc.
-pub type DMDAStencilType = crate::petsc_raw::DMDAStencilType;
+pub use crate::petsc_raw::DMDAStencilType;
 /// [`DM`] Type
-pub type DMType = crate::petsc_raw::DMTypeEnum;
+pub use crate::petsc_raw::DMTypeEnum as DMType;
 /// Indicates what type of boundary condition is to be imposed
 ///
 /// <https://petsc.org/release/docs/manualpages/DM/DMBoundaryConditionType.html>
-pub type DMBoundaryConditionType = crate::petsc_raw::DMBoundaryConditionType;
+pub use crate::petsc_raw::DMBoundaryConditionType;
 
 /// [`DMField`] Type
-pub type DMFieldType = crate::petsc_raw::DMFieldTypeEnum;
+pub use crate::petsc_raw::DMFieldTypeEnum as DMFieldType;
 /// [`FEDisc`] Type
-pub type FEDiscType = crate::petsc_raw::PetscFETypeEnum;
+pub use crate::petsc_raw::PetscFETypeEnum as FEDiscType;
 /// [`FVDisc`] Type
-pub type FVDiscType = crate::petsc_raw::PetscFVTypeEnum;
+pub use crate::petsc_raw::PetscFVTypeEnum as FVDiscType;
 
 enum DMBoundaryTrampolineData<'tl> {
     BCFunc(Pin<Box<DMBoundaryFuncTrampolineData<'tl>>>),

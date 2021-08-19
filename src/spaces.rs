@@ -15,9 +15,9 @@ use mpi::topology::UserCommunicator;
 use mpi::traits::*;
 
 /// [`Space`] type
-pub type SpaceType = petsc_raw::PetscSpaceTypeEnum;
+pub use petsc_raw::PetscSpaceTypeEnum as SpaceType;
 /// [`DualSpace`] type
-pub type DualSpaceType = petsc_raw::PetscDualSpaceTypeEnum;
+pub use petsc_raw::PetscDualSpaceTypeEnum as DualSpaceType;
 
 /// Abstract PETSc object that encapsulates a function space.
 pub struct Space<'a> {

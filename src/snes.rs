@@ -32,7 +32,7 @@ use mpi::traits::*;
 
 
 /// [`SNES`] Type
-pub type SNESType = crate::petsc_raw::SNESTypeEnum;
+pub use crate::petsc_raw::SNESTypeEnum as SNESType;
 
 /// Abstract PETSc object that manages all nonlinear solves
 pub struct SNES<'a, 'tl, 'bl> {
@@ -110,6 +110,9 @@ struct SNESLineSearchPreCheckTrampolineData<'a, 'tl> {
     user_f: Box<dyn FnMut(&LineSearch<'a>, &SNES<'a, 'tl, '_>, &Vector<'a>, &mut Vector<'a>, &mut bool) -> Result<()> + 'tl>,
 }
 
+/// Reason a [`SNES`] method was said to have converged or diverged.
+///
+/// Also read: <https://petsc.org/release/docs/manualpages/SNES/SNESConvergedReason.html>
 pub use petsc_raw::SNESConvergedReason;
 
 impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {

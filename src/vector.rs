@@ -22,7 +22,7 @@ use mpi::traits::*;
 use ndarray::{ArrayView, ArrayViewMut};
 
 /// [`Vector`] Type
-pub type VectorType = crate::petsc_raw::VecTypeEnum;
+pub use crate::petsc_raw::VecTypeEnum as VectorType;
 
 /// Abstract PETSc vector object
 pub struct Vector<'a> {
@@ -81,6 +81,7 @@ impl Drop for BorrowVector<'_, '_> {
     }
 }
 
+/// Options for controlling a [`Vector`]'s behavior
 pub use petsc_raw::VecOption;
 
 impl<'a> Vector<'a> {
@@ -776,7 +777,7 @@ impl<'a> Vector<'a> {
             If you with to force using the transpose you should use [`dot_t`](Vector::dot_t)."];
         VecTDot, pub dot_t, input &Vector, y.as_raw, output PetscScalar, res, #[doc = "Computes an indefinite vector dot product.\n\n\
             That is, as opposed to [`dot`](Vector::dot), this routine does NOT use the complex conjugate."];
-        VecSetOption, pub set_option, input VecOption, option, input bool, flg, #[doc = "Sets an option for controling a vector's behavior."];
+        VecSetOption, pub set_option, input VecOption, option, input bool, flg, #[doc = "Sets an option for controlling a [`Vector`]'s behavior."];
         VecChop, pub chop, input PetscReal, tol, takes mut, #[doc = "Set all values in the vector with an absolute value less than the tolerance to zero"];
     }
 }

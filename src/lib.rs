@@ -70,9 +70,9 @@
 //! features = ["petsc-real-f32", "petsc-int-i64"]
 //! ```
 //!
-//! ## Using `petsc-sys`
+//! ## Using [`petsc-sys`](petsc_sys)
 //! 
-//! If you wish to use raw bindings from `petsc-sys` in the same crate that you are using `petsc-rs`
+//! If you wish to use raw bindings from [`petsc-sys`](petsc_sys) in the same crate that you are using `petsc-rs`
 //! you can import the `petsc-sys` crate with the following line in your `Cargo.toml`. An example of
 //! using both `petsc-rs` and `petsc-sys` can be found in
 //! [`examples/snes/src/ex12.rs`](https://gitlab.com/petsc/petsc-rs/-/blob/main/examples/snes/src/ex12.rs).
@@ -86,9 +86,9 @@
 //! its flags to `petsc-sys`. To avoid conflicts you should use `default-features = false` when importing
 //! `petsc-sys` so that you don't accidentally enable any additional flags.
 //! 
-//! ## Using `mpi`
+//! ## Using [`mpi`]
 //! 
-//! If you want to use `mpi` in your project, you MUST use `rsmpi v0.6` or above. Currently, this isn't
+//! If you want to use [`mpi`] in your project, you MUST use `rsmpi v0.6` or above. Currently, this isn't
 //! available on [crates.io](https://crates.io/) so you will have to get it from the GitHub repo. You
 //! can do that by adding the following to your `Cargo.toml`.
 //! 
@@ -124,7 +124,13 @@ pub(crate) mod petsc_raw {
     pub use petsc_sys::*;
 }
 
-pub use petsc_raw::{PetscInt, PetscReal};
+/// PETSc type that represents an integer.
+///
+/// Its size can be either 32-bit (default) or 64-bit.
+pub use petsc_raw::PetscInt;
+/// PETSc type that represents a real number version of [`PetscScalar`].
+pub use petsc_raw::PetscReal;
+/// Determines what type of norm to compute 
 pub use petsc_raw::NormType;
 
 use mpi::{self, traits::*};
@@ -152,6 +158,7 @@ use viewer::Viewer;
 
 pub mod prelude {
     //! Commonly used items.
+    #[doc(no_inline)]
     pub use crate::{
         Petsc,
         PetscErrorKind,
@@ -349,9 +356,10 @@ impl Display for PetscError {
 }
 
 /// A list specifying types of PETSc errors.
-pub type PetscErrorType = petsc_raw::PetscErrorType;
+pub use petsc_raw::PetscErrorType as PetscErrorType;
 /// A list specifying kinds of PETSc errors.
-pub type PetscErrorKind = petsc_raw::PetscErrorCodeEnum;
+pub use petsc_raw::PetscErrorCodeEnum as PetscErrorKind;
+/// Whether entries are inserted or added into vectors or matrices 
 pub use petsc_raw::InsertMode;
 
 /// Helper struct which allows you to call [`PetscInitialize`] with optional parameters.
@@ -1324,7 +1332,8 @@ pub type PetscComplex = Complex<PetscReal>;
 /// Note, in many examples you might see something like `c(1.5)`. This is just shorthand, used
 /// by the documentation, for the above code (it is not a public method). It is defined as the
 /// the following:
-/// ```ignore
+/// ```
+/// # use petsc_rs::prelude::*;
 /// fn c(r: PetscReal) -> PetscScalar { PetscScalar::from(r) }
 /// ```
 #[cfg(not(any(feature = "petsc-use-complex-unsafe", feature = "petsc-sys/petsc-use-complex-unsafe")))]
@@ -1353,7 +1362,8 @@ pub type PetscScalar = PetscReal;
 /// Note, in many examples you might see something like `c(1.5)`. This is just shorthand, used
 /// by the documentation, for the above code (it is not a public method). It is defined as the
 /// the following:
-/// ```ignore
+/// ```
+/// # use petsc_rs::prelude::*;
 /// fn c(r: PetscReal) -> PetscScalar { PetscScalar::from(r) }
 /// ```
 #[cfg(any(feature = "petsc-use-complex-unsafe", feature = "petsc-sys/petsc-use-complex-unsafe"))]

@@ -13,10 +13,11 @@ use crate::{
 use mpi::topology::UserCommunicator;
 use mpi::traits::*;
 
+/// Way a [`Viewer`] presents the object.
 pub use petsc_sys::PetscViewerFormat;
 
 /// [`Viewer`] Type
-pub type ViewerType = crate::petsc_raw::ViewerTypeEnum;
+pub use crate::petsc_raw::ViewerTypeEnum as ViewerType;
 
 /// Abstract collection of PetscViewers. It is just an expandable array of viewers.
 // TODO: right now this is a very basic wrapper of the view functionality, I feel like

@@ -94,7 +94,6 @@ There are also a lot of `TODO` comments throughout the repository that I try to 
 - [ ] make LineSearch API better (in general and for set_post/pre_check) (Note, the `changed` bools needing to be the same for all processes so it might make sense to do a mpi all reduce) Maybe look into ndarray::CowArray to determine if the user edited the array.
 - [ ] make DMDA use const generic to store the dimensions - this is in the same vein as having DMDA be its own struct type
 - [ ] make set_sizes take an enum that contains both local and global so you can't give two Nones and get an error - IDK if this is that important, I kind of like the current API.
-- [ ] maybe make re-exports from petsc_raw use typedefs if we change the name e.g., `pub type PetscErrorKind = petsc_raw::PetscErrorCodeEnum` not `pub use petsc_raw::PetscErrorCodeEnum as PetscErrorKind`. However, this does cause problems for enums, we lose the variants in the docs.
 - [ ] create wrapper macro to synchronize method calls, for example, we could do something like `sync! { petsc.world(), println!("hello process: {}", petsc.world().rank()) }` in place of `petsc_println_all!(petsc.world(), "hello process: {}", petsc.world().rank())`. Would this even work?
 - [ ] should we rename the `create` methods to be `new` (make things rustier). We would have to change the name of the existing private `new` methods to something else though.
 - [x] make it so `panic!` aborts nicely (i.e. it calls PetscAbort and MPI_Abort), maybe we have to make a petsc_abort!.
