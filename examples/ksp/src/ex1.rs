@@ -23,8 +23,8 @@
 
 static HELP_MSG: &str = "Solves a tridiagonal linear system with KSP.\n\n";
 
-use petsc_rs::prelude::*;
 use mpi::traits::*;
+use petsc_rs::prelude::*;
 
 fn main() -> petsc_rs::Result<()> {
     let petsc = Petsc::builder()
@@ -33,11 +33,16 @@ fn main() -> petsc_rs::Result<()> {
         .init()?;
 
     let n = petsc.options_try_get_int("-n")?.unwrap_or(10);
-    let show_solution = petsc.options_try_get_bool("-show_solution")?.unwrap_or(false);
+    let show_solution = petsc
+        .options_try_get_bool("-show_solution")?
+        .unwrap_or(false);
 
     if petsc.world().size() != 1 {
-        Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE,
-            "This is a uniprocessor example only!")?;
+        Petsc::set_error(
+            petsc.world(),
+            PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE,
+            "This is a uniprocessor example only!",
+        )?;
     }
 
     // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -61,12 +66,22 @@ fn main() -> petsc_rs::Result<()> {
     A.set_up()?;
 
     // Assemble matrix:
-    A.assemble_with((0..n).map(|i| (-1..=1).map(move |j| (i,i+j))).flatten()
+    A.assemble_with(
+        (0..n)
+            .map(|i| (-1..=1).map(move |j| (i, i + j)))
+            .flatten()
             // we could also filter out negatives, but `assemble_with` does that for us
             .filter(|&(i, j)| i < n && j < n)
-            .map(|(i,j)| if i == j { (i, j, PetscScalar::from(2.0)) }
-                         else { (i, j, PetscScalar::from(-1.0)) }),
-        InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
+            .map(|(i, j)| {
+                if i == j {
+                    (i, j, PetscScalar::from(2.0))
+                } else {
+                    (i, j, PetscScalar::from(-1.0))
+                }
+            }),
+        InsertMode::INSERT_VALUES,
+        MatAssemblyType::MAT_FINAL_ASSEMBLY,
+    )?;
 
     // Set exact solution; then compute right-hand-side vector.
     u.set_all(PetscScalar::from(1.0))?;
@@ -121,7 +136,12 @@ fn main() -> petsc_rs::Result<()> {
     x.axpy(PetscScalar::from(-1.0), &u)?;
     let x_norm = x.norm(NormType::NORM_2)?;
     let iters = ksp.get_iteration_number()?;
-    petsc_println!(petsc.world(), "Norm of error {:.5e}, Iters {}", x_norm, iters)?;
+    petsc_println!(
+        petsc.world(),
+        "Norm of error {:.5e}, Iters {}",
+        x_norm,
+        iters
+    )?;
 
     // All PETSc objects are automatically destroyed when they are no longer needed.
     // PetscFinalize() is also automatically called.

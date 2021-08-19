@@ -1,32 +1,23 @@
-//! The scalable linear equations solvers (KSP) component provides an easy-to-use interface to the 
+//! The scalable linear equations solvers (KSP) component provides an easy-to-use interface to the
 //! combination of a Krylov subspace iterative method and a preconditioner (in the [KSP](crate::ksp) and [PC](crate::pc)
-//! components, respectively) or a sequential direct solver. 
-//! 
-//! KSP users can set various Krylov subspace options at runtime via the options database 
+//! components, respectively) or a sequential direct solver.
+//!
+//! KSP users can set various Krylov subspace options at runtime via the options database
 //! (e.g., -ksp_type cg ). KSP users can also set KSP options directly in application by directly calling
 //! the KSP routines listed below (e.g., [`KSP::set_type()`]). KSP components can be used directly to
 //! create and destroy solvers; this is not needed for users but is intended for library developers.
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/KSP/index.html>
 
-use std::ffi::CString;
-use std::mem::MaybeUninit;
-use std::rc::Rc;
 use crate::{
-    petsc_raw,
-    Result,
-    PetscAsRaw,
-    PetscObject,
-    PetscObjectPrivate,
-    PetscReal,
-    PetscInt,
-    vector::{Vector, },
-    mat::{Mat, },
-    pc::{PC, },
-    dm::{DM, },
+    dm::DM, mat::Mat, pc::PC, petsc_raw, vector::Vector, PetscAsRaw, PetscInt, PetscObject,
+    PetscObjectPrivate, PetscReal, Result,
 };
 use mpi::topology::UserCommunicator;
 use mpi::traits::*;
+use std::ffi::CString;
+use std::mem::MaybeUninit;
+use std::rc::Rc;
 
 /// [`KSP`] Type
 pub type KSPType = crate::petsc_raw::KSPTypeEnum;
@@ -35,10 +26,10 @@ pub type KSPType = crate::petsc_raw::KSPTypeEnum;
 /// solves in PETSc (even those such as direct solvers that do no use Krylov accelerators).
 pub struct KSP<'a, 'tl, 'bl> {
     world: &'a UserCommunicator,
-    pub(crate) ksp_p: *mut petsc_raw::_p_KSP, // I could use KSP which is the same thing, but i think using a pointer is more clear
+    pub(crate) ksp_p: *mut petsc_raw::_p_KSP, /* I could use KSP which is the same thing, but i think using a pointer is more clear */
 
     // As far as Petsc is concerned we own a reference to the PC as it is reference counted under the hood.
-    // But it should be fine to keep it here as an owned reference because we can control access and the 
+    // But it should be fine to keep it here as an owned reference because we can control access and the
     // default `KSPDestroy` accounts for references.
     pub(crate) pc: Option<PC<'a, 'tl, 'bl>>,
 
@@ -48,7 +39,12 @@ pub struct KSP<'a, 'tl, 'bl> {
 impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
     /// Same as `KSP { ... }` but sets all optional params to `None`
     pub(crate) fn new(world: &'a UserCommunicator, ksp_p: *mut petsc_raw::_p_KSP) -> Self {
-        KSP { world, ksp_p, pc: None, dm: None, }
+        KSP {
+            world,
+            ksp_p,
+            pc: None,
+            dm: None,
+        }
     }
 
     /// Same as [`Petsc::ksp_create()`](crate::Petsc::ksp_create).
@@ -79,7 +75,11 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
     /// `ksp.get_pc_or_create().set_operators()`.
     ///
     /// Passing a `None` for `a_mat` or `p_mat` removes the matrix that is currently used.
-    pub fn set_operators(&mut self, a_mat: impl Into<Option<&'bl Mat<'a, 'tl>>>, p_mat: impl Into<Option<&'bl Mat<'a, 'tl>>>) -> Result<()> {
+    pub fn set_operators(
+        &mut self,
+        a_mat: impl Into<Option<&'bl Mat<'a, 'tl>>>,
+        p_mat: impl Into<Option<&'bl Mat<'a, 'tl>>>,
+    ) -> Result<()> {
         self.get_pc_or_create()?.set_operators(a_mat, p_mat)?;
         // This is done in the C API `KSPSetOperators` function.
         if unsafe { &mut *self.ksp_p }.setupstage == petsc_raw::KSPSetUpStage::KSP_SETUP_NEWRHS {
@@ -88,7 +88,7 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
         }
         Ok(())
     }
-    
+
     /// Returns a [`Option`] of a reference to the [`PC`] context set.
     ///
     /// If you want PETSc to set the [`PC`] you must call [`KSP::set_pc()`]
@@ -102,8 +102,7 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
 
     /// Returns a mutable reference to the [`PC`] context set with [`KSP::set_pc()`],
     /// or creates a default one if no [`PC`] has been set.
-    pub fn get_pc_or_create<'b>(&'b mut self) -> Result<&'b mut PC<'a, 'tl, 'bl>>
-    {
+    pub fn get_pc_or_create<'b>(&'b mut self) -> Result<&'b mut PC<'a, 'tl, 'bl>> {
         if self.pc.is_some() {
             Ok(self.pc.as_mut().unwrap())
         } else {
@@ -112,7 +111,9 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
             unsafe { chkerrq!(self.world, ierr) }?;
 
             self.pc = Some(PC::new(self.world, unsafe { pc_p.assume_init() }));
-            unsafe { self.pc.as_mut().unwrap().reference()?; }
+            unsafe {
+                self.pc.as_mut().unwrap().reference()?;
+            }
 
             Ok(self.pc.as_mut().unwrap())
         }
@@ -132,8 +133,7 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
 
     /// Returns a mutable reference to the [DM](DM) that may be used by some [preconditioners](crate::pc),
     /// or creates a default one if no [`DM`] has been set.
-    pub fn get_dm_or_create<'b>(&'b mut self) -> Result<&'b mut DM<'a, 'tl>>
-    {
+    pub fn get_dm_or_create<'b>(&'b mut self) -> Result<&'b mut DM<'a, 'tl>> {
         if self.dm.is_some() {
             Ok(self.dm.as_mut().unwrap())
         } else {
@@ -142,37 +142,57 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
             unsafe { chkerrq!(self.world, ierr) }?;
 
             self.dm = Some(DM::new(self.world, unsafe { dm_p.assume_init() }));
-            unsafe { self.dm.as_mut().unwrap().reference()?; }
+            unsafe {
+                self.dm.as_mut().unwrap().reference()?;
+            }
 
             Ok(self.dm.as_mut().unwrap())
         }
     }
 
-
-    /// Sets the relative, absolute, divergence, and maximum iteration tolerances 
+    /// Sets the relative, absolute, divergence, and maximum iteration tolerances
     /// used by the default KSP convergence testers.
     ///
     /// Set the inputs to be `None` If you wish to use the default value of any of the tolerances.
     ///
     /// Parameters.
-    /// 
+    ///
     /// * `rtol` - The relative convergence tolerance, relative decrease in the (possibly preconditioned) residual norm
     /// * `atol` - The absolute convergence tolerance absolute size of the (possibly preconditioned) residual norm
     /// * `dtol` - the divergence tolerance, amount (possibly preconditioned) residual norm can increase before KSPConvergedDefault() concludes that the method is diverging
     /// * `max_iters` - Maximum number of iterations to use
-    pub fn set_tolerances(&mut self, rtol: impl Into<Option<PetscReal>>, atol: impl Into<Option<PetscReal>>, 
-            dtol: impl Into<Option<PetscReal>>, max_iters: impl Into<Option<PetscInt>>) -> Result<()>
-    {
-        let ierr = unsafe { petsc_raw::KSPSetTolerances(
-            self.ksp_p, rtol.into().unwrap_or(petsc_raw::PETSC_DEFAULT_REAL), atol.into().unwrap_or(petsc_raw::PETSC_DEFAULT_REAL),
-            dtol.into().unwrap_or(petsc_raw::PETSC_DEFAULT_REAL), max_iters.into().unwrap_or(petsc_raw::PETSC_DEFAULT_INTEGER)) };
+    pub fn set_tolerances(
+        &mut self,
+        rtol: impl Into<Option<PetscReal>>,
+        atol: impl Into<Option<PetscReal>>,
+        dtol: impl Into<Option<PetscReal>>,
+        max_iters: impl Into<Option<PetscInt>>,
+    ) -> Result<()> {
+        let ierr = unsafe {
+            petsc_raw::KSPSetTolerances(
+                self.ksp_p,
+                rtol.into().unwrap_or(petsc_raw::PETSC_DEFAULT_REAL),
+                atol.into().unwrap_or(petsc_raw::PETSC_DEFAULT_REAL),
+                dtol.into().unwrap_or(petsc_raw::PETSC_DEFAULT_REAL),
+                max_iters.into().unwrap_or(petsc_raw::PETSC_DEFAULT_INTEGER),
+            )
+        };
         unsafe { chkerrq!(self.world, ierr) }
     }
 
     /// Solves linear system.
-    pub fn solve<'vl, 'val: 'vl>(&mut self, b: impl Into<Option<&'vl Vector<'val>>>, x: &mut Vector) -> Result<()>
-    {
-        let ierr = unsafe { petsc_raw::KSPSolve(self.ksp_p, b.into().map_or(std::ptr::null_mut(), |v| v.vec_p), x.vec_p) };
+    pub fn solve<'vl, 'val: 'vl>(
+        &mut self,
+        b: impl Into<Option<&'vl Vector<'val>>>,
+        x: &mut Vector,
+    ) -> Result<()> {
+        let ierr = unsafe {
+            petsc_raw::KSPSolve(
+                self.ksp_p,
+                b.into().map_or(std::ptr::null_mut(), |v| v.vec_p),
+                x.vec_p,
+            )
+        };
         unsafe { chkerrq!(self.world, ierr) }
     }
 
@@ -198,12 +218,12 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
     /// [`let dm = ksp.try_get_dm().unwrap();`](KSP::try_get_dm()).
     pub fn set_compute_operators<F>(&mut self, user_f: F) -> Result<()>
     where
-        F: FnMut(&KSP<'a, '_, '_>, &mut Mat<'a, '_>, &mut Mat<'a, '_>) -> Result<()> + 'tl
+        F: FnMut(&KSP<'a, '_, '_>, &mut Mat<'a, '_>, &mut Mat<'a, '_>) -> Result<()> + 'tl,
     {
-        let ierr = unsafe { petsc_raw::KSPSetComputeOperators(
-            self.ksp_p, None, std::ptr::null_mut()) };
+        let ierr =
+            unsafe { petsc_raw::KSPSetComputeOperators(self.ksp_p, None, std::ptr::null_mut()) };
         unsafe { chkerrq!(self.world, ierr) }?;
-        
+
         self.get_dm_or_create()?.ksp_set_compute_operators(user_f)
     }
 
@@ -224,12 +244,11 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
     /// [`let dm = ksp.try_get_dm().unwrap();`](KSP::try_get_dm()).
     pub fn set_compute_rhs<F>(&mut self, user_f: F) -> Result<()>
     where
-        F: FnMut(&KSP<'a, '_, '_>, &mut Vector<'a>) -> Result<()> + 'tl
+        F: FnMut(&KSP<'a, '_, '_>, &mut Vector<'a>) -> Result<()> + 'tl,
     {
-        let ierr = unsafe { petsc_raw::KSPSetComputeRHS(
-            self.ksp_p, None, std::ptr::null_mut()) };
+        let ierr = unsafe { petsc_raw::KSPSetComputeRHS(self.ksp_p, None, std::ptr::null_mut()) };
         unsafe { chkerrq!(self.world, ierr) }?;
-        
+
         self.get_dm_or_create()?.ksp_set_compute_rhs(user_f)
     }
 
@@ -240,8 +259,13 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
         let ierr = unsafe { petsc_raw::KSPGetRhs(self.ksp_p, vec_p.as_mut_ptr()) };
         unsafe { chkerrq!(self.world, ierr) }?;
 
-        let mut vec = Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } };
-        unsafe { vec.reference()?; }
+        let mut vec = Vector {
+            world: self.world,
+            vec_p: unsafe { vec_p.assume_init() },
+        };
+        unsafe {
+            vec.reference()?;
+        }
         let rhs = Rc::new(vec);
 
         Ok(rhs)
@@ -255,7 +279,9 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
     /// If the operators have NOT been set with [`KSP`](KSP::set_operators())/[`PC::set_operators()`]
     /// then the operators are created in the PC and returned to the user. In this case, two DIFFERENT
     /// operators will be returned.
-    pub fn get_operators_or_create<'rl>(&'rl mut self) -> Result<(&'rl Mat<'a, 'tl>, &'rl Mat<'a, 'tl>)> {
+    pub fn get_operators_or_create<'rl>(
+        &'rl mut self,
+    ) -> Result<(&'rl Mat<'a, 'tl>, &'rl Mat<'a, 'tl>)> {
         self.get_pc_or_create()?.get_operators_or_create()
     }
 
@@ -270,7 +296,9 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
     ///
     /// Note, if you used [`KSP::set_compute_operators()`] to set the operators, you must use
     /// [`KSP::get_operators_or_create()`] to create the operators from the method.
-    pub fn try_get_operators<'rl>(&'rl self) -> Result<(Option<&'rl Mat<'a, 'tl>>, Option<&'rl Mat<'a, 'tl>>)> {
+    pub fn try_get_operators<'rl>(
+        &'rl self,
+    ) -> Result<(Option<&'rl Mat<'a, 'tl>>, Option<&'rl Mat<'a, 'tl>>)> {
         if let Some(pc) = self.try_get_pc() {
             pc.try_get_operators()
         } else {
@@ -295,7 +323,7 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
             [`KSP::set_dm_active(false)`](KSP::set_dm_active()) to instead use the matrix you've provided with [`KSP::set_operators()`]."];
         KSPSetPC, pub set_pc, input PC<'a, 'tl, 'bl>, pc .as_raw consume .pc, takes mut, #[doc = "Sets the [preconditioner](crate::pc)([`PC`]) to be used to calculate the application of the preconditioner on a vector.\n\n\
             If you change the PC by calling set again, then the original will be dropped."];
-        KSPSetDMActive, pub set_dm_active, input bool, flg, takes mut, #[doc = "Indicates that the [`DM`] should be used to generate the linear system matrix and right hand side."]; 
+        KSPSetDMActive, pub set_dm_active, input bool, flg, takes mut, #[doc = "Indicates that the [`DM`] should be used to generate the linear system matrix and right hand side."];
     }
 }
 

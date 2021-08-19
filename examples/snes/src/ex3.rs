@@ -28,14 +28,23 @@ struct Opt {
 impl PetscOpt for Opt {
     fn from_petsc_opt_builder(pob: &mut PetscOptBuilder) -> petsc_rs::Result<Self> {
         let n = pob.options_int("-n", "", "snes-ex3", 5)?;
-        let test_jacobian_domain_error = pob.options_bool("-test_jacobian_domain_error", "", "snes-ex3", false)?;
+        let test_jacobian_domain_error =
+            pob.options_bool("-test_jacobian_domain_error", "", "snes-ex3", false)?;
         let view_initial = pob.options_bool("-view_initial", "", "snes-ex3", false)?;
         let user_precond = pob.options_bool("-user_precond", "", "snes-ex3", false)?;
-        let post_check_iterates = pob.options_bool("-post_check_iterates", "", "snes-ex3", false)?;
+        let post_check_iterates =
+            pob.options_bool("-post_check_iterates", "", "snes-ex3", false)?;
         let pre_check_iterates = pob.options_bool("-pre_check_iterates", "", "snes-ex3", false)?;
         let check_tol = pob.options_real("-check_tol", "", "snes-ex3", 1.0)?;
-        Ok(Opt { n, test_jacobian_domain_error, view_initial, user_precond, post_check_iterates,
-            pre_check_iterates, check_tol })
+        Ok(Opt {
+            n,
+            test_jacobian_domain_error,
+            view_initial,
+            user_precond,
+            post_check_iterates,
+            pre_check_iterates,
+            check_tol,
+        })
     }
 }
 
@@ -44,13 +53,27 @@ fn main() -> petsc_rs::Result<()> {
         .args(std::env::args())
         .help_msg(HELP_MSG)
         .init()?;
-    
-    let Opt { n, test_jacobian_domain_error, view_initial, user_precond, post_check_iterates,
-            pre_check_iterates, check_tol } = petsc.options_get()?;
 
-    let h = 1.0/(PetscScalar::from(n as PetscReal) - 1.0);
+    let Opt {
+        n,
+        test_jacobian_domain_error,
+        view_initial,
+        user_precond,
+        post_check_iterates,
+        pre_check_iterates,
+        check_tol,
+    } = petsc.options_get()?;
 
-    let mut da = DM::da_create_1d(petsc.world(), DMBoundaryType::DM_BOUNDARY_NONE, n, 1, 1, None)?;
+    let h = 1.0 / (PetscScalar::from(n as PetscReal) - 1.0);
+
+    let mut da = DM::da_create_1d(
+        petsc.world(),
+        DMBoundaryType::DM_BOUNDARY_NONE,
+        n,
+        1,
+        1,
+        None,
+    )?;
     da.set_from_options()?;
     da.set_up()?;
 
@@ -68,10 +91,10 @@ fn main() -> petsc_rs::Result<()> {
         let mut ff = da.da_vec_view_mut(&mut f)?;
         let mut uu = da.da_vec_view_mut(&mut u)?;
 
-        let _ = (0..xm).fold(h*xs as PetscReal, |xp,i| {
-            ff[i as usize] = 6.0*xp + (xp+1.0e-12).powi(6);
-            uu[i as usize] = xp*xp*xp;
-            xp+h
+        let _ = (0..xm).fold(h * xs as PetscReal, |xp, i| {
+            ff[i as usize] = 6.0 * xp + (xp + 1.0e-12).powi(6);
+            uu[i as usize] = xp * xp * xp;
+            xp + h
         });
     }
 
@@ -97,23 +120,27 @@ fn main() -> petsc_rs::Result<()> {
         let (_, m, _, _, _, _, _, _, _, _, _, _, _) = da.da_get_info()?;
         let (xs, _, _, _xm, _, _) = da.da_get_corners()?;
         let (gxs, _, _, _gxm, _, _) = da.da_get_ghost_corners()?;
-        let ghost_point_offset = xs-gxs;
+        let ghost_point_offset = xs - gxs;
 
-        let d = 1.0/(h*h);
+        let d = 1.0 / (h * h);
 
         let x_view = da.da_vec_view(&x_local)?;
         let mut y_view = da.da_vec_view_mut(y)?;
         let f_view = da.da_vec_view(&f)?;
 
-        y_view.indexed_iter_mut().map(|(pat, v)| (pat[0], v) )
+        y_view
+            .indexed_iter_mut()
+            .map(|(pat, v)| (pat[0], v))
             .for_each(|(i, v)| {
-                let ii = i+ghost_point_offset as usize;
+                let ii = i + ghost_point_offset as usize;
                 if i + xs as usize == 0 {
                     *v = x_view[ii];
-                } else if i + xs as usize == (m-1) as usize {
+                } else if i + xs as usize == (m - 1) as usize {
                     *v = x_view[ii] - 1.0;
                 } else {
-                    *v = d * (x_view[ii-1] - 2.0 * x_view[ii] + x_view[ii+1]) + x_view[ii] * x_view[ii] - f_view[i];
+                    *v = d * (x_view[ii - 1] - 2.0 * x_view[ii] + x_view[ii + 1])
+                        + x_view[ii] * x_view[ii]
+                        - f_view[i];
                 }
             });
 
@@ -126,22 +153,28 @@ fn main() -> petsc_rs::Result<()> {
         let (_, m, _, _, _, _, _, _, _, _, _, _, _) = da.da_get_info()?;
         let (xs, _, _, xm, _, _) = da.da_get_corners()?;
 
-        let d = 1.0/(h*h);
+        let d = 1.0 / (h * h);
 
-        jac.assemble_with((xs..xs+xm).map(|i| {
-                if i == 0 { 
-                    vec![ (i, i, PetscScalar::from(1.0)) ]
-                } else if i == m-1 {
-                    vec![ (i, i, PetscScalar::from(1.0)) ]
-                } else {
-                    vec![(i,i-1,d),
-                         (i,i,-2.0*d+2.0*xx[(i-xs) as usize]),
-                         (i,i+1,d)]
-                }
-            }).flatten(),
-        InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
+        jac.assemble_with(
+            (xs..xs + xm)
+                .map(|i| {
+                    if i == 0 {
+                        vec![(i, i, PetscScalar::from(1.0))]
+                    } else if i == m - 1 {
+                        vec![(i, i, PetscScalar::from(1.0))]
+                    } else {
+                        vec![
+                            (i, i - 1, d),
+                            (i, i, -2.0 * d + 2.0 * xx[(i - xs) as usize]),
+                            (i, i + 1, d),
+                        ]
+                    }
+                })
+                .flatten(),
+            InsertMode::INSERT_VALUES,
+            MatAssemblyType::MAT_FINAL_ASSEMBLY,
+        )?;
 
-        
         if test_jacobian_domain_error {
             Err(DomainErr)
         } else {
@@ -153,63 +186,81 @@ fn main() -> petsc_rs::Result<()> {
         let pc = snes.get_ksp_or_create()?.get_pc_or_create()?;
         pc.set_type(PCType::PCSHELL)?;
         // Identity preconditioner:
-        pc.shell_set_apply(|_pc, xin, xout| xout.copy_data_from(xin) )?;
+        pc.shell_set_apply(|_pc, xin, xout| xout.copy_data_from(xin))?;
     }
 
     snes.monitor_set(|snes, its, fnorm| {
-        petsc_println!(petsc.world(), "iter: {}, SNES function norm: {:.5e}", its, fnorm)?;
+        petsc_println!(
+            petsc.world(),
+            "iter: {}, SNES function norm: {:.5e}",
+            its,
+            fnorm
+        )?;
         let x = snes.get_solution()?;
         x.view_with(None)?;
         Ok(())
     })?;
-    
+
     snes.set_from_options()?;
 
-    
     if post_check_iterates {
         petsc_println!(petsc.world(), "Activating post step checking routine")?;
-        snes.linesearch_set_post_check(|_ls, snes, _x_cur, _y, x, _y_mod, x_mod| { 
+        snes.linesearch_set_post_check(|_ls, snes, _x_cur, _y, x, _y_mod, x_mod| {
             let it = snes.get_iteration_number()?;
             if it > 0 {
-                petsc_println!(petsc.world(), "Checking candidate step at iteration {} with tolerance {}", it, check_tol)?;
+                petsc_println!(
+                    petsc.world(),
+                    "Checking candidate step at iteration {} with tolerance {}",
+                    it,
+                    check_tol
+                )?;
                 let xa_last = da.da_vec_view(&last_step)?;
                 let mut xa = da.da_vec_view_mut(x)?;
                 let (_xs, _, _, _xm, _, _) = da.da_get_corners()?;
 
                 #[cfg(feature = "petsc-use-complex-unsafe")]
-                xa_last.indexed_iter().map(|(pat, _)|  pat[0])
-                    .for_each(|i| {
-                        let rdiff = if xa[i].norm() == 0.0 { 2.0*check_tol }
-                            else { ((xa[i] - xa_last[i])/xa[i]).norm() };
-                        if rdiff > check_tol {
-                            xa[i] = 0.5*(xa[i] + xa_last[i]);
-                            *x_mod = true;
-                        }
-                    });
+                xa_last.indexed_iter().map(|(pat, _)| pat[0]).for_each(|i| {
+                    let rdiff = if xa[i].norm() == 0.0 {
+                        2.0 * check_tol
+                    } else {
+                        ((xa[i] - xa_last[i]) / xa[i]).norm()
+                    };
+                    if rdiff > check_tol {
+                        xa[i] = 0.5 * (xa[i] + xa_last[i]);
+                        *x_mod = true;
+                    }
+                });
                 #[cfg(not(feature = "petsc-use-complex-unsafe"))]
-                xa_last.indexed_iter().map(|(pat, _)|  pat[0])
-                    .for_each(|i| {
-                        let rdiff = if xa[i].abs() == 0.0 { 2.0*check_tol }
-                            else { ((xa[i] - xa_last[i])/xa[i]).abs() };
-                        if rdiff > check_tol {
-                            xa[i] = 0.5*(xa[i] + xa_last[i]);
-                            *x_mod = true;
-                        }
-                    });
+                xa_last.indexed_iter().map(|(pat, _)| pat[0]).for_each(|i| {
+                    let rdiff = if xa[i].abs() == 0.0 {
+                        2.0 * check_tol
+                    } else {
+                        ((xa[i] - xa_last[i]) / xa[i]).abs()
+                    };
+                    if rdiff > check_tol {
+                        xa[i] = 0.5 * (xa[i] + xa_last[i]);
+                        *x_mod = true;
+                    }
+                });
             }
             last_step.copy_data_from(&x)
         })?;
     }
     if pre_check_iterates {
         petsc_println!(petsc.world(), "Activating pre step checking routine")?;
-        snes.linesearch_set_pre_check(|_ls, _snes, _x, _y, _y_mod| {
-            Ok(())
-        })?;
+        snes.linesearch_set_pre_check(|_ls, _snes, _x, _y, _y_mod| Ok(()))?;
     }
 
     let tols = snes.get_tolerances()?;
-    petsc_println!(petsc.world(), "atol={:.5e}, rtol={:.5e}, stol={:.5e}, maxit={}, maxf={}",
-        tols.0, tols.1, tols.2, tols.3, tols.4)?;
+    petsc_println!(
+        petsc.world(),
+        "atol={:.5e}, rtol={:.5e}, stol={:.5e}, maxit={}, maxf={}",
+        tols.0,
+        tols.1,
+        tols.2,
+        tols.3,
+        tols.4
+    )?;
 
     x.set_all(PetscScalar::from(0.5))?;
 
@@ -219,8 +270,13 @@ fn main() -> petsc_rs::Result<()> {
 
     x.axpy(PetscScalar::from(-1.0), &u)?;
     let norm = x.norm(NormType::NORM_2)?;
-    
-    petsc_println!(petsc.world(), "Norm of error {:.5e} Iterations {}", norm, it_num)?;
+
+    petsc_println!(
+        petsc.world(),
+        "Norm of error {:.5e} Iterations {}",
+        norm,
+        it_num
+    )?;
     if test_jacobian_domain_error {
         let snes_type = snes.get_type_str()?;
         petsc_println!(petsc.world(), "SNES type: {}", snes_type)?;

@@ -2,17 +2,10 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/SPACE/index.html>
 
-use std::{ffi::CString, mem::MaybeUninit};
-use crate::{
-    petsc_raw,
-    Result,
-    PetscAsRaw,
-    PetscObject,
-    PetscInt,
-    dm::{DM, },
-};
+use crate::{dm::DM, petsc_raw, PetscAsRaw, PetscInt, PetscObject, Result};
 use mpi::topology::UserCommunicator;
 use mpi::traits::*;
+use std::{ffi::CString, mem::MaybeUninit};
 
 /// [`Space`] type
 pub type SpaceType = petsc_raw::PetscSpaceTypeEnum;
@@ -25,25 +18,27 @@ pub struct Space<'a> {
     pub(crate) s_p: *mut petsc_raw::_p_PetscSpace,
 }
 
-/// PETSc object that manages the dual space to a linear space, e.g. the space of evaluation functionals at the vertices of a triangle 
+/// PETSc object that manages the dual space to a linear space, e.g. the space of evaluation functionals at the vertices of a triangle
 pub struct DualSpace<'a, 'tl> {
     pub(crate) world: &'a UserCommunicator,
     pub(crate) ds_p: *mut petsc_raw::_p_PetscDualSpace,
 
-    dm: Option<DM<'a, 'tl>>
+    dm: Option<DM<'a, 'tl>>,
 }
 
 impl<'a> Space<'a> {
     /// Creates an empty [`Space`] object.
     ///
-    /// The type can then be set with [`Space::set_type()`]. 
+    /// The type can then be set with [`Space::set_type()`].
     pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut s_p = MaybeUninit::uninit();
-        let ierr = unsafe { petsc_raw::PetscSpaceCreate(
-            world.as_raw(), s_p.as_mut_ptr()) };
+        let ierr = unsafe { petsc_raw::PetscSpaceCreate(world.as_raw(), s_p.as_mut_ptr()) };
         unsafe { chkerrq!(world, ierr) }?;
 
-        Ok(Space { world, s_p: unsafe { s_p.assume_init() } })
+        Ok(Space {
+            world,
+            s_p: unsafe { s_p.assume_init() },
+        })
     }
 
     /// Builds a particular [`Space`] (given as `&str`).
@@ -55,9 +50,10 @@ impl<'a> Space<'a> {
 
     /// Builds a particular [`Space`].
     pub fn set_type(&mut self, space_type: SpaceType) -> Result<()> {
-        // This could be use the macro probably 
+        // This could be use the macro probably
         let option_str = petsc_raw::PETSCSPACETYPE_TABLE[space_type as usize];
-        let ierr = unsafe { petsc_raw::PetscSpaceSetType(self.s_p, option_str.as_ptr() as *const _) };
+        let ierr =
+            unsafe { petsc_raw::PetscSpaceSetType(self.s_p, option_str.as_ptr() as *const _) };
         unsafe { chkerrq!(self.world, ierr) }
     }
 
@@ -74,12 +70,18 @@ impl<'a> Space<'a> {
     /// * `max_degree` - The degree of the largest polynomial space containing the space.
     ///
     /// One of `degree` or `max_degree` can be `None` to have PETSc determine what it should be.
-    pub fn set_degree(&mut self, degree: impl Into<Option<PetscInt>>, max_degree: impl Into<Option<PetscInt>>) -> Result<()> {
-        let ierr = unsafe { petsc_raw::PetscSpaceSetDegree(
-            self.as_raw(),
-            degree.into().unwrap_or(petsc_raw::PETSC_DETERMINE),
-            max_degree.into().unwrap_or(petsc_raw::PETSC_DETERMINE) 
-        ) };
+    pub fn set_degree(
+        &mut self,
+        degree: impl Into<Option<PetscInt>>,
+        max_degree: impl Into<Option<PetscInt>>,
+    ) -> Result<()> {
+        let ierr = unsafe {
+            petsc_raw::PetscSpaceSetDegree(
+                self.as_raw(),
+                degree.into().unwrap_or(petsc_raw::PETSC_DETERMINE),
+                max_degree.into().unwrap_or(petsc_raw::PETSC_DETERMINE),
+            )
+        };
         unsafe { chkerrq!(self.world, ierr) }
     }
 }
@@ -87,14 +89,17 @@ impl<'a> Space<'a> {
 impl<'a, 'tl> DualSpace<'a, 'tl> {
     /// Creates an empty [`DualSpace`] object.
     ///
-    /// The type can then be set with [`DualSpace::set_type()`]. 
+    /// The type can then be set with [`DualSpace::set_type()`].
     pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut ds_p = MaybeUninit::uninit();
-        let ierr = unsafe { petsc_raw::PetscDualSpaceCreate(
-            world.as_raw(), ds_p.as_mut_ptr()) };
+        let ierr = unsafe { petsc_raw::PetscDualSpaceCreate(world.as_raw(), ds_p.as_mut_ptr()) };
         unsafe { chkerrq!(world, ierr) }?;
 
-        Ok(DualSpace { world, ds_p: unsafe { ds_p.assume_init() }, dm: None })
+        Ok(DualSpace {
+            world,
+            ds_p: unsafe { ds_p.assume_init() },
+            dm: None,
+        })
     }
 
     /// Builds a particular [`DualSpace`] (given as `&str`).
@@ -106,17 +111,24 @@ impl<'a, 'tl> DualSpace<'a, 'tl> {
 
     /// Builds a particular [`DualSpace`].
     pub fn set_type(&mut self, ds_type: DualSpaceType) -> Result<()> {
-        // This could be use the macro probably 
+        // This could be use the macro probably
         let option_str = petsc_raw::PETSCDUALSPACETYPE_TABLE[ds_type as usize];
-        let ierr = unsafe { petsc_raw::PetscDualSpaceSetType(self.ds_p, option_str.as_ptr() as *const _) };
+        let ierr =
+            unsafe { petsc_raw::PetscDualSpaceSetType(self.ds_p, option_str.as_ptr() as *const _) };
         unsafe { chkerrq!(self.world, ierr) }
     }
 
-    /// Create a DMPLEX with the appropriate FEM reference cell 
+    /// Create a DMPLEX with the appropriate FEM reference cell
     pub fn create_reference_cell(&self, dim: PetscInt, simplex: bool) -> Result<DM> {
         let mut dm_p = MaybeUninit::uninit();
-        let ierr = unsafe { petsc_raw::PetscDualSpaceCreateReferenceCell(self.ds_p,
-            dim, simplex.into(), dm_p.as_mut_ptr()) };
+        let ierr = unsafe {
+            petsc_raw::PetscDualSpaceCreateReferenceCell(
+                self.ds_p,
+                dim,
+                simplex.into(),
+                dm_p.as_mut_ptr(),
+            )
+        };
         unsafe { chkerrq!(self.world, ierr) }?;
 
         Ok(DM::new(self.world, unsafe { dm_p.assume_init() }))

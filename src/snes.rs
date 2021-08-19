@@ -1,6 +1,6 @@
 //! The Scalable Nonlinear Equations Solvers (SNES) component provides an easy-to-use interface to
 //! Newton-type, quasi-Newton, full approximation scheme (FAS) multigrid, and other methods for solving
-//! systems of nonlinear equations. 
+//! systems of nonlinear equations.
 //!
 //! SNES users can set various algorithmic options at runtime via the
 //! options database (e.g., specifying a trust region method via -snes_type newtontr ). SNES internally
@@ -11,25 +11,15 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/SNES/index.html>
 
-use std:: pin::Pin;
-use std::mem::{MaybeUninit, ManuallyDrop};
-use std::ffi::CStr;
 use crate::{
-    petsc_raw,
-    Result,
-    PetscAsRaw,
-    PetscObject,
-    PetscObjectPrivate,
-    PetscReal,
-    PetscInt,
-    vector::{Vector, },
-    mat::{Mat, },
-    ksp::{KSP, },
-    dm::{DM, },
+    dm::DM, ksp::KSP, mat::Mat, petsc_raw, vector::Vector, PetscAsRaw, PetscInt, PetscObject,
+    PetscObjectPrivate, PetscReal, Result,
 };
 use mpi::topology::UserCommunicator;
 use mpi::traits::*;
-
+use std::ffi::CStr;
+use std::mem::{ManuallyDrop, MaybeUninit};
+use std::pin::Pin;
 
 /// [`SNES`] Type
 pub type SNESType = crate::petsc_raw::SNESTypeEnum;
@@ -48,10 +38,12 @@ pub struct SNES<'a, 'tl, 'bl> {
     jacobian_a_mat: Option<&'bl mut Mat<'a, 'tl>>,
     jacobian_p_mat: Option<&'bl mut Mat<'a, 'tl>>,
 
-    monitor_tramoline_data: Option<Pin<Box<SNESMonitorTrampolineData<'a,'tl>>>>,
-    
-    linecheck_post_check_trampoline_data: Option<Pin<Box<SNESLineSearchPostCheckTrampolineData<'a, 'tl>>>>,
-    linecheck_pre_check_trampoline_data: Option<Pin<Box<SNESLineSearchPreCheckTrampolineData<'a, 'tl>>>>,
+    monitor_tramoline_data: Option<Pin<Box<SNESMonitorTrampolineData<'a, 'tl>>>>,
+
+    linecheck_post_check_trampoline_data:
+        Option<Pin<Box<SNESLineSearchPostCheckTrampolineData<'a, 'tl>>>>,
+    linecheck_pre_check_trampoline_data:
+        Option<Pin<Box<SNESLineSearchPreCheckTrampolineData<'a, 'tl>>>>,
 }
 
 // TODO: the linesearch api needs work (i don't really like it). Regardless, the C api of it is not safe
@@ -62,8 +54,8 @@ pub struct SNES<'a, 'tl, 'bl> {
 // as SNES be called through the SNES (Note: under the hood `SNESLineSearchGetSNES` might still be used as
 // this layout is just to enforced ownership and stuff). This is the method im using
 // 2. we make linesearch be above the SNES. This has a lot of problem and i dont think it make sense for PETSc
-/// Abstract PETSc object that manages line-search operations 
-pub struct LineSearch <'a> {
+/// Abstract PETSc object that manages line-search operations
+pub struct LineSearch<'a> {
     world: &'a UserCommunicator,
     ls_p: *mut petsc_sys::_p_LineSearch,
 }
@@ -78,7 +70,7 @@ pub struct LineSearch <'a> {
 pub enum DomainOrPetscError {
     /// Used to indicate that there was a domain error.
     ///
-    /// This will not create a `PetscError` internally unless you specify that there should be an 
+    /// This will not create a `PetscError` internally unless you specify that there should be an
     /// error if not converged (i.e. with [`SNES::set_error_if_not_converged()`]).
     DomainErr,
     /// Normal PetscError.
@@ -86,7 +78,7 @@ pub enum DomainOrPetscError {
     /// You should not need to create this variant as [`DomainOrPetscError`]
     /// implements [`From<PetscError>`](From), so it works nicely with the try operator, `?`,
     /// on [`Err(PetscError)`](crate::PetscError).
-    PetscErr(crate::PetscError)
+    PetscErr(crate::PetscError),
 }
 
 impl From<crate::PetscError> for DomainOrPetscError {
@@ -102,12 +94,32 @@ struct SNESMonitorTrampolineData<'a, 'tl> {
 
 struct SNESLineSearchPostCheckTrampolineData<'a, 'tl> {
     world: &'a UserCommunicator,
-    user_f: Box<dyn FnMut(&LineSearch<'a>, &SNES<'a, 'tl, '_>, &Vector<'a>, &mut Vector<'a>, &mut Vector<'a>, &mut bool, &mut bool) -> Result<()> + 'tl>,
+    user_f: Box<
+        dyn FnMut(
+                &LineSearch<'a>,
+                &SNES<'a, 'tl, '_>,
+                &Vector<'a>,
+                &mut Vector<'a>,
+                &mut Vector<'a>,
+                &mut bool,
+                &mut bool,
+            ) -> Result<()>
+            + 'tl,
+    >,
 }
 
 struct SNESLineSearchPreCheckTrampolineData<'a, 'tl> {
     world: &'a UserCommunicator,
-    user_f: Box<dyn FnMut(&LineSearch<'a>, &SNES<'a, 'tl, '_>, &Vector<'a>, &mut Vector<'a>, &mut bool) -> Result<()> + 'tl>,
+    user_f: Box<
+        dyn FnMut(
+                &LineSearch<'a>,
+                &SNES<'a, 'tl, '_>,
+                &Vector<'a>,
+                &mut Vector<'a>,
+                &mut bool,
+            ) -> Result<()>
+            + 'tl,
+    >,
 }
 
 pub use petsc_raw::SNESConvergedReason;
@@ -115,12 +127,20 @@ pub use petsc_raw::SNESConvergedReason;
 impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     /// Same as `SNES { ... }` but sets all optional params to `None`
     pub(crate) fn new(world: &'a UserCommunicator, snes_p: *mut petsc_raw::_p_SNES) -> Self {
-        SNES {  world, snes_p, ksp: None, monitor_tramoline_data: None,
-                linesearch: None, dm: None,
-                linecheck_post_check_trampoline_data: None,
-                linecheck_pre_check_trampoline_data: None,
-                residual_vec: None, jacobian_a_mat: None,
-                jacobian_p_mat: None, residual_vec_owned: None, }
+        SNES {
+            world,
+            snes_p,
+            ksp: None,
+            monitor_tramoline_data: None,
+            linesearch: None,
+            dm: None,
+            linecheck_post_check_trampoline_data: None,
+            linecheck_pre_check_trampoline_data: None,
+            residual_vec: None,
+            jacobian_a_mat: None,
+            jacobian_p_mat: None,
+            residual_vec_owned: None,
+        }
     }
 
     /// Creates a nonlinear solver context.
@@ -135,9 +155,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     /// Sets a [`KSP`](KSP) context for the SNES object to use.
     ///
     /// if you change the ksp by calling set again, then the original will be dropped.
-    pub fn set_ksp(&mut self, ksp: KSP<'a, 'tl, 'bl>) -> Result<()>
-    {
-        
+    pub fn set_ksp(&mut self, ksp: KSP<'a, 'tl, 'bl>) -> Result<()> {
         let ierr = unsafe { petsc_raw::SNESSetKSP(self.snes_p, ksp.ksp_p) };
         unsafe { chkerrq!(self.world, ierr) }?;
 
@@ -161,19 +179,18 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     /// Returns a mutable reference to the [`KSP`](KSP) context, or create a default [`KSP`](KSP)
     /// if one has not been set.
     pub fn get_ksp_or_create(&mut self) -> Result<&mut KSP<'a, 'tl, 'bl>> {
-        if let Some(ref mut ksp) = self.ksp
-        {
+        if let Some(ref mut ksp) = self.ksp {
             Ok(ksp)
-        }
-        else
-        {
+        } else {
             let mut ksp_p = MaybeUninit::uninit();
             let ierr = unsafe { petsc_raw::SNESGetKSP(self.snes_p, ksp_p.as_mut_ptr()) };
             unsafe { chkerrq!(self.world, ierr) }?;
 
             // It is now ok to drop this because we incremented the C reference counter
             self.ksp = Some(KSP::new(self.world, unsafe { ksp_p.assume_init() }));
-            unsafe { self.ksp.as_mut().unwrap().reference()?; }
+            unsafe {
+                self.ksp.as_mut().unwrap().reference()?;
+            }
 
             Ok(self.ksp.as_mut().unwrap())
         }
@@ -228,7 +245,9 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     ///     // Nonlinear transformation
     ///     f_view[0] = x_view[0];
     ///     for i in 1..(n as usize - 1) {
-    ///         f_view[i] = d*(x_view[i-1] - 2.0*x_view[i] + x_view[i+1]) + x_view[i]*x_view[i] - g_view[i];
+    ///         f_view[i] = d * (x_view[i - 1] - 2.0 * x_view[i] + x_view[i + 1])
+    ///             + x_view[i] * x_view[i]
+    ///             - g_view[i];
     ///     }
     ///     f_view[n as usize - 1] = x_view[n as usize - 1] - 1.0;
     ///
@@ -239,16 +258,29 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn set_function<F>(&mut self, input_vec: impl Into<Option<&'bl mut Vector<'a>>>, user_f: F) -> Result<()>
+    pub fn set_function<F>(
+        &mut self,
+        input_vec: impl Into<Option<&'bl mut Vector<'a>>>,
+        user_f: F,
+    ) -> Result<()>
     where
-        F: FnMut(&SNES<'a, '_, '_>, &Vector<'a>, &mut Vector<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl
+        F: FnMut(
+                &SNES<'a, '_, '_>,
+                &Vector<'a>,
+                &mut Vector<'a>,
+            ) -> std::result::Result<(), DomainOrPetscError>
+            + 'tl,
     {
         self.residual_vec = input_vec.into();
 
-        let input_vec_p = self.residual_vec.as_deref().map_or(std::ptr::null_mut(), |v| v.vec_p);
+        let input_vec_p = self
+            .residual_vec
+            .as_deref()
+            .map_or(std::ptr::null_mut(), |v| v.vec_p);
 
-        let ierr = unsafe { petsc_raw::SNESSetFunction(
-            self.snes_p, input_vec_p, None, std::ptr::null_mut()) };
+        let ierr = unsafe {
+            petsc_raw::SNESSetFunction(self.snes_p, input_vec_p, None, std::ptr::null_mut())
+        };
         unsafe { chkerrq!(self.world, ierr) }?;
 
         self.get_dm_or_create()?.snes_set_function(user_f)
@@ -296,15 +328,28 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     ///
     /// let mut snes = petsc.snes_create()?;
     ///
-    /// snes.set_jacobian_single_mat(&mut J,|_snes, x: &Vector, ap_mat: &mut Mat| {
+    /// snes.set_jacobian_single_mat(&mut J, |_snes, x: &Vector, ap_mat: &mut Mat| {
     ///     let x_view = x.view()?;
     ///
     ///     let d = (PetscScalar::from(n as PetscReal) - 1.0).powi(2);
     ///
-    ///     ap_mat.assemble_with((0..n).map(|i| if i == 0 || i == n-1{ vec![(i,i,PetscScalar::from(1.0))] }
-    ///                                         else { vec![(i,i-1,d), (i,i,-2.0*d+2.0*x_view[i as usize]), (i,i+1,d)] })
-    ///             .flatten(), 
-    ///         InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
+    ///     ap_mat.assemble_with(
+    ///         (0..n)
+    ///             .map(|i| {
+    ///                 if i == 0 || i == n - 1 {
+    ///                     vec![(i, i, PetscScalar::from(1.0))]
+    ///                 } else {
+    ///                     vec![
+    ///                         (i, i - 1, d),
+    ///                         (i, i, -2.0 * d + 2.0 * x_view[i as usize]),
+    ///                         (i, i + 1, d),
+    ///                     ]
+    ///                 }
+    ///             })
+    ///             .flatten(),
+    ///         InsertMode::INSERT_VALUES,
+    ///         MatAssemblyType::MAT_FINAL_ASSEMBLY,
+    ///     )?;
     ///
     ///     Ok(())
     /// })?;
@@ -314,19 +359,29 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     /// # }
     /// ```
     // pub fn set_jacobian_single_mat<F>(&mut self, ap_mat: Mat<'a, 'tl>, user_f: F) -> Result<()>
-    pub fn set_jacobian_single_mat<F>(&mut self, ap_mat: &'bl mut Mat<'a, 'tl>, user_f: F) -> Result<()>
+    pub fn set_jacobian_single_mat<F>(
+        &mut self,
+        ap_mat: &'bl mut Mat<'a, 'tl>,
+        user_f: F,
+    ) -> Result<()>
     where
-        F: FnMut(&SNES<'a, '_, '_>, &Vector<'a>, &mut Mat<'a, '_>) -> std::result::Result<(), DomainOrPetscError> + 'tl,
+        F: FnMut(
+                &SNES<'a, '_, '_>,
+                &Vector<'a>,
+                &mut Mat<'a, '_>,
+            ) -> std::result::Result<(), DomainOrPetscError>
+            + 'tl,
     {
         self.jacobian_a_mat = Some(ap_mat);
         let ap_mat_p = self.jacobian_a_mat.as_deref().unwrap().mat_p;
 
-        let ierr = unsafe { petsc_raw::SNESSetJacobian(
-            self.snes_p, ap_mat_p, ap_mat_p, None, 
-            std::ptr::null_mut()) };
+        let ierr = unsafe {
+            petsc_raw::SNESSetJacobian(self.snes_p, ap_mat_p, ap_mat_p, None, std::ptr::null_mut())
+        };
         unsafe { chkerrq!(self.world, ierr) }?;
 
-        self.get_dm_or_create()?.snes_set_jacobian_single_mat(user_f)
+        self.get_dm_or_create()?
+            .snes_set_jacobian_single_mat(user_f)
     }
 
     /// Sets the function to compute Jacobian as well as the location to store the matrix.
@@ -375,43 +430,84 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     ///
     /// let mut snes = petsc.snes_create()?;
     ///
-    /// snes.set_jacobian(&mut J, &mut P,|_snes, x: &Vector, a_mat: &mut Mat, p_mat: &mut Mat| {
-    ///     let x_view = x.view()?;
+    /// snes.set_jacobian(
+    ///     &mut J,
+    ///     &mut P,
+    ///     |_snes, x: &Vector, a_mat: &mut Mat, p_mat: &mut Mat| {
+    ///         let x_view = x.view()?;
     ///
-    ///     let d = (PetscScalar::from(n as PetscReal) - 1.0).powi(2);
+    ///         let d = (PetscScalar::from(n as PetscReal) - 1.0).powi(2);
     ///
-    ///     a_mat.assemble_with((0..n).map(|i| if i == 0 || i == n-1{ vec![(i,i,PetscScalar::from(1.0))] }
-    ///                                         else { vec![(i,i-1,d), (i,i,-2.0*d+2.0*x_view[i as usize]), (i,i+1,d)] })
-    ///             .flatten(), 
-    ///         InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
+    ///         a_mat.assemble_with(
+    ///             (0..n)
+    ///                 .map(|i| {
+    ///                     if i == 0 || i == n - 1 {
+    ///                         vec![(i, i, PetscScalar::from(1.0))]
+    ///                     } else {
+    ///                         vec![
+    ///                             (i, i - 1, d),
+    ///                             (i, i, -2.0 * d + 2.0 * x_view[i as usize]),
+    ///                             (i, i + 1, d),
+    ///                         ]
+    ///                     }
+    ///                 })
+    ///                 .flatten(),
+    ///             InsertMode::INSERT_VALUES,
+    ///             MatAssemblyType::MAT_FINAL_ASSEMBLY,
+    ///         )?;
     ///
-    ///     // Just set them to be the same matrix for the sake of this example
-    ///     p_mat.assemble_with((0..n).map(|i| if i == 0 || i == n-1{ vec![(i,i,PetscScalar::from(1.0))] }
-    ///                                         else { vec![(i,i-1,d), (i,i,-2.0*d+2.0*x_view[i as usize]), (i,i+1,d)] })
-    ///             .flatten(), 
-    ///         InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
+    ///         // Just set them to be the same matrix for the sake of this example
+    ///         p_mat.assemble_with(
+    ///             (0..n)
+    ///                 .map(|i| {
+    ///                     if i == 0 || i == n - 1 {
+    ///                         vec![(i, i, PetscScalar::from(1.0))]
+    ///                     } else {
+    ///                         vec![
+    ///                             (i, i - 1, d),
+    ///                             (i, i, -2.0 * d + 2.0 * x_view[i as usize]),
+    ///                             (i, i + 1, d),
+    ///                         ]
+    ///                     }
+    ///                 })
+    ///                 .flatten(),
+    ///             InsertMode::INSERT_VALUES,
+    ///             MatAssemblyType::MAT_FINAL_ASSEMBLY,
+    ///         )?;
     ///
-    ///     Ok(())
-    /// })?;
+    ///         Ok(())
+    ///     },
+    /// )?;
     ///
     /// // We would then set the function and call solve on the snes context
     /// # Ok(())
     /// # }
     /// ```
-    pub fn set_jacobian<F>(&mut self, a_mat: &'bl mut Mat<'a, 'tl>, p_mat: &'bl mut Mat<'a, 'tl>, user_f: F) -> Result<()>
+    pub fn set_jacobian<F>(
+        &mut self,
+        a_mat: &'bl mut Mat<'a, 'tl>,
+        p_mat: &'bl mut Mat<'a, 'tl>,
+        user_f: F,
+    ) -> Result<()>
     where
-        F: FnMut(&SNES<'a, '_, '_>, &Vector<'a>, &mut Mat<'a, '_>, &mut Mat<'a, '_>) -> std::result::Result<(), DomainOrPetscError> + 'tl
+        F: FnMut(
+                &SNES<'a, '_, '_>,
+                &Vector<'a>,
+                &mut Mat<'a, '_>,
+                &mut Mat<'a, '_>,
+            ) -> std::result::Result<(), DomainOrPetscError>
+            + 'tl,
     {
         self.jacobian_a_mat = Some(a_mat);
         self.jacobian_p_mat = Some(p_mat);
         let a_mat_p = self.jacobian_a_mat.as_deref().unwrap().mat_p;
         let p_mat_p = self.jacobian_p_mat.as_deref().unwrap().mat_p;
 
-        let ierr = unsafe { petsc_raw::SNESSetJacobian(
-            self.snes_p, a_mat_p, p_mat_p, None,
-            std::ptr::null_mut()) };
+        let ierr = unsafe {
+            petsc_raw::SNESSetJacobian(self.snes_p, a_mat_p, p_mat_p, None, std::ptr::null_mut())
+        };
         unsafe { chkerrq!(self.world, ierr) }?;
-        
+
         self.get_dm_or_create()?.snes_set_jacobian(user_f)
     }
 
@@ -419,7 +515,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     /// solver to display the iteration's progress.
     ///
     /// Several different monitoring routines may be set by calling [`SNES::monitor_set()`]
-    /// multiple times; all will be called in the order in which they were set. 
+    /// multiple times; all will be called in the order in which they were set.
     ///
     /// # Parameters
     ///
@@ -429,43 +525,52 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     ///     * `norm - 2-norm function value (may be estimated)
     pub fn monitor_set<F>(&mut self, user_f: F) -> Result<()>
     where
-        F: FnMut(&SNES<'a, 'tl, '_>, PetscInt, PetscReal) -> Result<()> + 'tl
+        F: FnMut(&SNES<'a, 'tl, '_>, PetscInt, PetscReal) -> Result<()> + 'tl,
     {
         let closure_anchor = Box::new(user_f);
 
-        let trampoline_data = Box::pin(SNESMonitorTrampolineData { 
-            world: self.world, user_f: closure_anchor });
+        let trampoline_data = Box::pin(SNESMonitorTrampolineData {
+            world: self.world,
+            user_f: closure_anchor,
+        });
         let _ = self.monitor_tramoline_data.take();
 
-        unsafe extern "C" fn snes_monitor_trampoline(snes_p: *mut petsc_raw::_p_SNES,
-            it: PetscInt, norm: PetscReal, ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
-        {
+        unsafe extern "C" fn snes_monitor_trampoline(
+            snes_p: *mut petsc_raw::_p_SNES,
+            it: PetscInt,
+            norm: PetscReal,
+            ctx: *mut ::std::os::raw::c_void,
+        ) -> petsc_raw::PetscErrorCode {
             // SAFETY: read `snes_function_trampoline` safety
             let trampoline_data: Pin<&mut SNESMonitorTrampolineData> = std::mem::transmute(ctx);
 
-            // We don't want to drop anything, we are just using this to turn pointers 
+            // We don't want to drop anything, we are just using this to turn pointers
             // of the underlining types (i.e. *mut petsc_raw::_p_SNES) into references.
             // SAFETY: even though snes is mut and thus we can set optional parameters, we don't
             // as we dont expose the mut to the user closure, we only use it with `set_jacobian_domain_error`
             let snes = ManuallyDrop::new(SNES::new(trampoline_data.world, snes_p));
-            
+
             (trampoline_data.get_mut().user_f)(&snes, it, norm)
                 .map_or_else(|err| err.kind as i32, |_| 0)
         }
 
-        let ierr = unsafe { petsc_raw::SNESMonitorSet(
-            self.snes_p, Some(snes_monitor_trampoline), 
-            std::mem::transmute(trampoline_data.as_ref()), 
-            None) }; // We dont need to tell C the drop function because rust will take care of it for us.
+        let ierr = unsafe {
+            petsc_raw::SNESMonitorSet(
+                self.snes_p,
+                Some(snes_monitor_trampoline),
+                std::mem::transmute(trampoline_data.as_ref()),
+                None,
+            )
+        }; // We dont need to tell C the drop function because rust will take care of it for us.
         unsafe { chkerrq!(self.world, ierr) }?;
-        
+
         self.monitor_tramoline_data = Some(trampoline_data);
 
         Ok(())
     }
 
     /// Returns an immutable reference to the line search context set with `SNESSetLineSearch()`
-    /// or creates a default line search instance associated with the SNES and returns it. 
+    /// or creates a default line search instance associated with the SNES and returns it.
     pub fn get_linesearch(&mut self) -> Result<&LineSearch<'a>> {
         if self.linesearch.is_some() {
             Ok(self.linesearch.as_ref().unwrap())
@@ -474,15 +579,20 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
             let ierr = unsafe { petsc_raw::SNESGetLineSearch(self.snes_p, ls_p.as_mut_ptr()) };
             unsafe { chkerrq!(self.world, ierr) }?;
 
-            self.linesearch = Some(LineSearch { world: self.world, ls_p: unsafe { ls_p.assume_init() } });
-            unsafe { self.linesearch.as_mut().unwrap().reference()?; }
+            self.linesearch = Some(LineSearch {
+                world: self.world,
+                ls_p: unsafe { ls_p.assume_init() },
+            });
+            unsafe {
+                self.linesearch.as_mut().unwrap().reference()?;
+            }
 
             Ok(self.linesearch.as_ref().unwrap())
         }
     }
 
     /// Returns a mutable reference to the line search context set with `SNESSetLineSearch()`
-    /// or creates a default line search instance associated with the SNES and returns it. 
+    /// or creates a default line search instance associated with the SNES and returns it.
     pub fn get_linesearch_mut(&mut self) -> Result<&mut LineSearch<'a>> {
         if self.linesearch.is_some() {
             Ok(self.linesearch.as_mut().unwrap())
@@ -491,8 +601,13 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
             let ierr = unsafe { petsc_raw::SNESGetLineSearch(self.snes_p, ls_p.as_mut_ptr()) };
             unsafe { chkerrq!(self.world, ierr) }?;
 
-            self.linesearch = Some(LineSearch { world: self.world, ls_p: unsafe { ls_p.assume_init() } });
-            unsafe { self.linesearch.as_mut().unwrap().reference()?; }
+            self.linesearch = Some(LineSearch {
+                world: self.world,
+                ls_p: unsafe { ls_p.assume_init() },
+            });
+            unsafe {
+                self.linesearch.as_mut().unwrap().reference()?;
+            }
 
             Ok(self.linesearch.as_mut().unwrap())
         }
@@ -504,13 +619,13 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     /// Sets a user function that is called after the line search has been applied to determine the step
     /// direction and length. Allows the user to change or override the decision of the line search routine.
     ///
-    /// # Parameters 
+    /// # Parameters
     ///
     /// * `user_f` - function evaluation routine
-    ///     * `ls` - The linesearch context 
-    ///     * `snes` - The snes context 
+    ///     * `ls` - The linesearch context
+    ///     * `snes` - The snes context
     ///     * `x` - The last step
-    ///     * `y` - The step direction 
+    ///     * `y` - The step direction
     ///     * `w` - The updated solution, `w = x + lambda*y` for some lambda.
     ///     * `changed_y` - Indicator if the direction `y` has been changed.
     ///     * `changed_w` - Indicator if the new candidate solution `w` has been changed.
@@ -521,7 +636,16 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     /// [`let dm = snes.try_get_dm().unwrap();`](SNES::try_get_dm()).
     pub fn linesearch_set_post_check<F>(&mut self, user_f: F) -> Result<()>
     where
-        F: FnMut(&LineSearch<'a>, &SNES<'a, 'tl, '_>, &Vector<'a>, &mut Vector<'a>, &mut Vector<'a>, &mut bool, &mut bool) -> Result<()> + 'tl
+        F: FnMut(
+                &LineSearch<'a>,
+                &SNES<'a, 'tl, '_>,
+                &Vector<'a>,
+                &mut Vector<'a>,
+                &mut Vector<'a>,
+                &mut bool,
+                &mut bool,
+            ) -> Result<()>
+            + 'tl,
     {
         if self.linesearch.is_none() {
             // This just sets the linesearch
@@ -530,40 +654,76 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
 
         let closure_anchor = Box::new(user_f);
 
-        let trampoline_data = Box::pin(SNESLineSearchPostCheckTrampolineData { 
-            world: self.world, user_f: closure_anchor });
+        let trampoline_data = Box::pin(SNESLineSearchPostCheckTrampolineData {
+            world: self.world,
+            user_f: closure_anchor,
+        });
         let _ = self.linecheck_post_check_trampoline_data.take();
 
-        unsafe extern "C" fn snes_linesearch_set_post_check_trampoline(ls_p: *mut petsc_raw::_p_LineSearch,
-            x_p: *mut petsc_raw::_p_Vec, y_p: *mut petsc_raw::_p_Vec, w_p: *mut petsc_raw::_p_Vec,
-            changed_y_p: *mut petsc_raw::PetscBool, changed_w_p: *mut petsc_raw::PetscBool,
-            ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
-        {
+        unsafe extern "C" fn snes_linesearch_set_post_check_trampoline(
+            ls_p: *mut petsc_raw::_p_LineSearch,
+            x_p: *mut petsc_raw::_p_Vec,
+            y_p: *mut petsc_raw::_p_Vec,
+            w_p: *mut petsc_raw::_p_Vec,
+            changed_y_p: *mut petsc_raw::PetscBool,
+            changed_w_p: *mut petsc_raw::PetscBool,
+            ctx: *mut ::std::os::raw::c_void,
+        ) -> petsc_raw::PetscErrorCode {
             // SAFETY: read `snes_function_trampoline` safety
-            let trampoline_data: Pin<&mut SNESLineSearchPostCheckTrampolineData> = std::mem::transmute(ctx);
+            let trampoline_data: Pin<&mut SNESLineSearchPostCheckTrampolineData> =
+                std::mem::transmute(ctx);
 
-            let ls = ManuallyDrop::new(LineSearch { world: trampoline_data.world, ls_p });
+            let ls = ManuallyDrop::new(LineSearch {
+                world: trampoline_data.world,
+                ls_p,
+            });
             let mut snes_p = MaybeUninit::uninit();
             let ierr = petsc_raw::SNESLineSearchGetSNES(ls_p, snes_p.as_mut_ptr());
-            if ierr != 0 { let _ = chkerrq!(trampoline_data.world, ierr); return ierr; }
-            let mut snes = ManuallyDrop::new(SNES::new(trampoline_data.world, snes_p.assume_init()));
+            if ierr != 0 {
+                let _ = chkerrq!(trampoline_data.world, ierr);
+                return ierr;
+            }
+            let mut snes =
+                ManuallyDrop::new(SNES::new(trampoline_data.world, snes_p.assume_init()));
 
             let mut dm_p = MaybeUninit::uninit();
             let ierr = petsc_raw::SNESGetDM(snes_p.assume_init(), dm_p.as_mut_ptr());
-            if ierr != 0 { let _ = chkerrq!(trampoline_data.world, ierr); return ierr; }
+            if ierr != 0 {
+                let _ = chkerrq!(trampoline_data.world, ierr);
+                return ierr;
+            }
             let mut dm = DM::new(trampoline_data.world, dm_p.assume_init());
             let ierr = DM::set_inner_values_for_readonly(&mut dm);
-            if ierr != 0 { return ierr; }
+            if ierr != 0 {
+                return ierr;
+            }
             snes.dm = Some(dm); // Note, because snes is not dropped, snes.dm wont be either
-            
-            let x_vec = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: x_p });
-            let mut y_vec = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: y_p });
-            let mut w_vec = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: w_p });
+
+            let x_vec = ManuallyDrop::new(Vector {
+                world: trampoline_data.world,
+                vec_p: x_p,
+            });
+            let mut y_vec = ManuallyDrop::new(Vector {
+                world: trampoline_data.world,
+                vec_p: y_p,
+            });
+            let mut w_vec = ManuallyDrop::new(Vector {
+                world: trampoline_data.world,
+                vec_p: w_p,
+            });
             let mut changed_y = false;
             let mut changed_w = false;
-            
-            let res = (trampoline_data.get_mut().user_f)(&ls, &snes, &x_vec, &mut y_vec, &mut w_vec, &mut changed_y, &mut changed_w)
-                .map_or_else(|err| err.kind as i32, |_| 0);
+
+            let res = (trampoline_data.get_mut().user_f)(
+                &ls,
+                &snes,
+                &x_vec,
+                &mut y_vec,
+                &mut w_vec,
+                &mut changed_y,
+                &mut changed_w,
+            )
+            .map_or_else(|err| err.kind as i32, |_| 0);
 
             *changed_y_p = changed_y.into();
             *changed_w_p = changed_w.into();
@@ -571,11 +731,15 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
             res
         }
 
-        let ierr = unsafe { petsc_raw::SNESLineSearchSetPostCheck(
-            self.linesearch.as_ref().unwrap().ls_p, Some(snes_linesearch_set_post_check_trampoline), 
-            std::mem::transmute(trampoline_data.as_ref())) };
+        let ierr = unsafe {
+            petsc_raw::SNESLineSearchSetPostCheck(
+                self.linesearch.as_ref().unwrap().ls_p,
+                Some(snes_linesearch_set_post_check_trampoline),
+                std::mem::transmute(trampoline_data.as_ref()),
+            )
+        };
         unsafe { chkerrq!(self.world, ierr) }?;
-        
+
         self.linecheck_post_check_trampoline_data = Some(trampoline_data);
 
         Ok(())
@@ -585,11 +749,11 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     /// before the line search routine has been applied. Allows the user to adjust the result of
     /// (usually a linear solve) that determined the search direction.
     ///
-    /// # Parameters 
+    /// # Parameters
     ///
     /// * `user_f` - function evaluation routine
-    ///     * `ls` - The linesearch context 
-    ///     * `snes` - The snes context 
+    ///     * `ls` - The linesearch context
+    ///     * `snes` - The snes context
     ///     * `x` - The last step
     ///     * `y` - The step direction
     ///     * `changed_y` - Indicator if the direction `y` has been changed.
@@ -600,7 +764,14 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     /// [`let dm = snes.try_get_dm().unwrap();`](SNES::try_get_dm()).
     pub fn linesearch_set_pre_check<F>(&mut self, user_f: F) -> Result<()>
     where
-        F: FnMut(&LineSearch<'a>, &SNES<'a, 'tl, '_>, &Vector<'a>, &mut Vector<'a>, &mut bool) -> Result<()> + 'tl
+        F: FnMut(
+                &LineSearch<'a>,
+                &SNES<'a, 'tl, '_>,
+                &Vector<'a>,
+                &mut Vector<'a>,
+                &mut bool,
+            ) -> Result<()>
+            + 'tl,
     {
         if self.linesearch.is_none() {
             // This just sets the linesearch if it isn't already
@@ -609,49 +780,77 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
 
         let closure_anchor = Box::new(user_f);
 
-        let trampoline_data = Box::pin(SNESLineSearchPreCheckTrampolineData { 
-            world: self.world, user_f: closure_anchor });
+        let trampoline_data = Box::pin(SNESLineSearchPreCheckTrampolineData {
+            world: self.world,
+            user_f: closure_anchor,
+        });
         let _ = self.linecheck_pre_check_trampoline_data.take();
 
-        unsafe extern "C" fn snes_linesearch_set_pre_check_trampoline(ls_p: *mut petsc_raw::_p_LineSearch,
-            x_p: *mut petsc_raw::_p_Vec, y_p: *mut petsc_raw::_p_Vec,
+        unsafe extern "C" fn snes_linesearch_set_pre_check_trampoline(
+            ls_p: *mut petsc_raw::_p_LineSearch,
+            x_p: *mut petsc_raw::_p_Vec,
+            y_p: *mut petsc_raw::_p_Vec,
             changed_y_p: *mut petsc_raw::PetscBool,
-            ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
-        {
+            ctx: *mut ::std::os::raw::c_void,
+        ) -> petsc_raw::PetscErrorCode {
             // SAFETY: read `snes_function_trampoline` safety
-            let trampoline_data: Pin<&mut SNESLineSearchPreCheckTrampolineData> = std::mem::transmute(ctx);
+            let trampoline_data: Pin<&mut SNESLineSearchPreCheckTrampolineData> =
+                std::mem::transmute(ctx);
 
-            let ls = ManuallyDrop::new(LineSearch { world: trampoline_data.world, ls_p });
+            let ls = ManuallyDrop::new(LineSearch {
+                world: trampoline_data.world,
+                ls_p,
+            });
             let mut snes_p = MaybeUninit::uninit();
             let ierr = petsc_raw::SNESLineSearchGetSNES(ls_p, snes_p.as_mut_ptr());
-            if ierr != 0 { let _ = chkerrq!(trampoline_data.world, ierr); return ierr; }
-            let mut snes = ManuallyDrop::new(SNES::new(trampoline_data.world, snes_p.assume_init()));
+            if ierr != 0 {
+                let _ = chkerrq!(trampoline_data.world, ierr);
+                return ierr;
+            }
+            let mut snes =
+                ManuallyDrop::new(SNES::new(trampoline_data.world, snes_p.assume_init()));
 
             let mut dm_p = MaybeUninit::uninit();
             let ierr = petsc_raw::SNESGetDM(snes_p.assume_init(), dm_p.as_mut_ptr());
-            if ierr != 0 { let _ = chkerrq!(trampoline_data.world, ierr); return ierr; }
+            if ierr != 0 {
+                let _ = chkerrq!(trampoline_data.world, ierr);
+                return ierr;
+            }
             let mut dm = DM::new(trampoline_data.world, dm_p.assume_init());
             let ierr = DM::set_inner_values_for_readonly(&mut dm);
-            if ierr != 0 { return ierr; }
+            if ierr != 0 {
+                return ierr;
+            }
             snes.dm = Some(dm); // Note, because snes is not dropped, snes.dm wont be either
-            
-            let x_vec = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: x_p });
-            let mut y_vec = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: y_p });
+
+            let x_vec = ManuallyDrop::new(Vector {
+                world: trampoline_data.world,
+                vec_p: x_p,
+            });
+            let mut y_vec = ManuallyDrop::new(Vector {
+                world: trampoline_data.world,
+                vec_p: y_p,
+            });
             let mut changed_y = false;
-            
-            let res = (trampoline_data.get_mut().user_f)(&ls, &snes, &x_vec, &mut y_vec, &mut changed_y)
-                .map_or_else(|err| err.kind as i32, |_| 0);
+
+            let res =
+                (trampoline_data.get_mut().user_f)(&ls, &snes, &x_vec, &mut y_vec, &mut changed_y)
+                    .map_or_else(|err| err.kind as i32, |_| 0);
 
             *changed_y_p = changed_y.into();
 
             res
         }
 
-        let ierr = unsafe { petsc_raw::SNESLineSearchSetPreCheck(
-            self.linesearch.as_ref().unwrap().ls_p, Some(snes_linesearch_set_pre_check_trampoline), 
-            std::mem::transmute(trampoline_data.as_ref())) };
+        let ierr = unsafe {
+            petsc_raw::SNESLineSearchSetPreCheck(
+                self.linesearch.as_ref().unwrap().ls_p,
+                Some(snes_linesearch_set_pre_check_trampoline),
+                std::mem::transmute(trampoline_data.as_ref()),
+            )
+        };
         unsafe { chkerrq!(self.world, ierr) }?;
-        
+
         self.linecheck_pre_check_trampoline_data = Some(trampoline_data);
 
         Ok(())
@@ -668,17 +867,27 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     /// to calling [`SNES::solve()`]. In particular, to employ an initial guess of zero, the user should
     /// explicitly set this vector to zero by calling [`Vector::set_all()`].
     // TODO: should this take mut self
-    pub fn solve<'vl, 'val: 'vl>(&mut self, b: impl Into<Option<&'vl Vector<'val>>>, x: &mut Vector) -> Result<()> {
-        let ierr = unsafe { petsc_raw::SNESSolve(self.snes_p, b.into().map_or(std::ptr::null_mut(), |v| v.vec_p), x.vec_p) };
+    pub fn solve<'vl, 'val: 'vl>(
+        &mut self,
+        b: impl Into<Option<&'vl Vector<'val>>>,
+        x: &mut Vector,
+    ) -> Result<()> {
+        let ierr = unsafe {
+            petsc_raw::SNESSolve(
+                self.snes_p,
+                b.into().map_or(std::ptr::null_mut(), |v| v.vec_p),
+                x.vec_p,
+            )
+        };
         unsafe { chkerrq!(self.world, ierr) }
     }
 
-    /// Gets the [`SNES`] method type and name (as a [`String`]). 
+    /// Gets the [`SNES`] method type and name (as a [`String`]).
     pub fn get_type_str(&self) -> Result<String> {
         let mut s_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::SNESGetType(self.snes_p, s_p.as_mut_ptr()) };
         unsafe { chkerrq!(self.world, ierr) }?;
-        
+
         let c_str: &CStr = unsafe { CStr::from_ptr(s_p.assume_init()) };
         let str_slice: &str = c_str.to_str().unwrap();
         Ok(str_slice.to_owned())
@@ -690,16 +899,18 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
         let ierr = unsafe { petsc_raw::SNESGetSolution(self.snes_p, vec_p.as_mut_ptr()) };
         unsafe { chkerrq!(self.world, ierr) }?;
 
-        let vec = ManuallyDrop::new(Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } });
+        let vec = ManuallyDrop::new(Vector {
+            world: self.world,
+            vec_p: unsafe { vec_p.assume_init() },
+        });
         let bvec = crate::vector::BorrowVector::new(vec, None);
 
         Ok(bvec)
     }
-    
+
     /// Sets the [DM](DM) that may be used by some nonlinear solvers or their underlying
     /// [preconditioners](crate::pc).
     pub fn set_dm(&mut self, dm: DM<'a, 'tl>) -> Result<()> {
-        
         let ierr = unsafe { petsc_raw::SNESSetDM(self.snes_p, dm.dm_p) };
         unsafe { chkerrq!(self.world, ierr) }?;
 
@@ -731,7 +942,9 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
             unsafe { chkerrq!(self.world, ierr) }?;
 
             self.dm = Some(DM::new(self.world, unsafe { dm_p.assume_init() }));
-            unsafe { self.dm.as_mut().unwrap().reference()?; }
+            unsafe {
+                self.dm.as_mut().unwrap().reference()?;
+            }
 
             Ok(self.dm.as_ref().unwrap())
         }
@@ -747,7 +960,9 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
             unsafe { chkerrq!(self.world, ierr) }?;
 
             self.dm = Some(DM::new(self.world, unsafe { dm_p.assume_init() }));
-            unsafe { self.dm.as_mut().unwrap().reference()?; }
+            unsafe {
+                self.dm.as_mut().unwrap().reference()?;
+            }
 
             Ok(self.dm.as_mut().unwrap())
         }
@@ -756,8 +971,14 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     /// Use DMPlex's internal FEM routines to compute SNES boundary values, residual, and Jacobian.
     pub fn use_dm_plex_local_fem(&mut self) -> Result<()> {
         let dm = self.get_dm_or_create()?;
-        let ierr = unsafe { petsc_raw::DMPlexSetSNESLocalFEM(dm.dm_p,
-            std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut()) };
+        let ierr = unsafe {
+            petsc_raw::DMPlexSetSNESLocalFEM(
+                dm.dm_p,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
         unsafe { chkerrq!(self.world, ierr) }
     }
 
@@ -767,8 +988,14 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     /// This is the vector `r` set with [`SNES::set_function()`].
     pub fn get_residual_or_create(&mut self) -> Result<&mut Vector<'a>> {
         let mut vec_p = MaybeUninit::uninit();
-        let ierr = unsafe { petsc_raw::SNESGetFunction(self.snes_p, vec_p.as_mut_ptr(),
-            std::ptr::null_mut(), std::ptr::null_mut()) };
+        let ierr = unsafe {
+            petsc_raw::SNESGetFunction(
+                self.snes_p,
+                vec_p.as_mut_ptr(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
         unsafe { chkerrq!(self.world, ierr) }?;
         let vec_p = unsafe { vec_p.assume_init() };
 
@@ -778,8 +1005,13 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
             }
         }
         let _ = self.residual_vec.take();
-        let mut vec = Vector { world: self.world, vec_p };
-        unsafe { vec.reference()?; }
+        let mut vec = Vector {
+            world: self.world,
+            vec_p,
+        };
+        unsafe {
+            vec.reference()?;
+        }
         self.residual_vec_owned = Some(vec);
 
         Ok(self.residual_vec_owned.as_mut().unwrap())
@@ -792,7 +1024,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     pub fn try_get_residual(&self) -> Option<&Vector<'a>> {
         if self.residual_vec.is_some() {
             self.residual_vec.as_deref()
-        } else { 
+        } else {
             self.residual_vec_owned.as_ref()
         }
     }
@@ -811,9 +1043,20 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     ///
     /// Note, this method is typically used within nonlinear solvers implementations,
     /// so users would not generally call this routine themselves.
-    pub fn compute_jacobian<'ml, 'mal: 'ml, 'mtl: 'ml>(&mut self, x: &Vector, a_mat: &mut Mat, p_mat: impl Into<Option<&'ml mut Mat<'mal, 'mtl>>>) -> Result<()> {
-        let ierr = unsafe { petsc_raw::SNESComputeJacobian(self.snes_p, x.vec_p, a_mat.mat_p,
-            p_mat.into().map_or(a_mat.mat_p, |p| p.mat_p)) };
+    pub fn compute_jacobian<'ml, 'mal: 'ml, 'mtl: 'ml>(
+        &mut self,
+        x: &Vector,
+        a_mat: &mut Mat,
+        p_mat: impl Into<Option<&'ml mut Mat<'mal, 'mtl>>>,
+    ) -> Result<()> {
+        let ierr = unsafe {
+            petsc_raw::SNESComputeJacobian(
+                self.snes_p,
+                x.vec_p,
+                a_mat.mat_p,
+                p_mat.into().map_or(a_mat.mat_p, |p| p.mat_p),
+            )
+        };
         unsafe { chkerrq!(self.world, ierr) }
     }
 

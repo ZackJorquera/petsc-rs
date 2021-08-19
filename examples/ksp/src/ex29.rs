@@ -22,14 +22,17 @@
 
 static HELP_MSG: &str = "Solves 2D inhomogeneous Laplacian using multigrid.\n\n";
 
-use petsc_rs::prelude::*;
 use mpi::traits::*;
 use ndarray::prelude::*;
+use petsc_rs::prelude::*;
 
 use std::fmt;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
-enum BCType { DIRICHLET, NEUMANN }
+enum BCType {
+    DIRICHLET,
+    NEUMANN,
+}
 
 impl std::str::FromStr for BCType {
     type Err = std::io::Error;
@@ -52,7 +55,9 @@ impl fmt::Display for BCType {
 }
 
 impl Default for BCType {
-    fn default() -> Self { BCType::DIRICHLET }
+    fn default() -> Self {
+        BCType::DIRICHLET
+    }
 }
 
 struct Opt {
@@ -78,7 +83,13 @@ impl PetscOpt for Opt {
         let bc_type = pob.options_from_string("-bc_type", "", "ksp-ex29", BCType::DIRICHLET)?;
         let test_solver = pob.options_bool("-test_solver", "", "ksp-ex29", false)?;
         let check_matis = pob.options_bool("-check_matis", "", "ksp-ex29", false)?;
-        Ok(Opt { rho, nu, bc_type, test_solver, check_matis })
+        Ok(Opt {
+            rho,
+            nu,
+            bc_type,
+            test_solver,
+            check_matis,
+        })
     }
 }
 
@@ -88,13 +99,35 @@ fn main() -> petsc_rs::Result<()> {
         .help_msg(HELP_MSG)
         .init()?;
 
-    let Opt { rho, nu, bc_type, test_solver: _test_solver, check_matis } = petsc.options_get()?;
+    let Opt {
+        rho,
+        nu,
+        bc_type,
+        test_solver: _test_solver,
+        check_matis,
+    } = petsc.options_get()?;
 
-    petsc_println!(petsc.world(), "(petsc_println!) Hello parallel world of {} processes!", petsc.world().size() )?;
+    petsc_println!(
+        petsc.world(),
+        "(petsc_println!) Hello parallel world of {} processes!",
+        petsc.world().size()
+    )?;
 
     let mut ksp = petsc.ksp_create()?;
-    let mut da = DM::da_create_2d(petsc.world(), DMBoundaryType::DM_BOUNDARY_NONE, DMBoundaryType::DM_BOUNDARY_NONE,
-        DMDAStencilType::DMDA_STENCIL_STAR, 3, 3, None, None, 1, 1, None, None)?;
+    let mut da = DM::da_create_2d(
+        petsc.world(),
+        DMBoundaryType::DM_BOUNDARY_NONE,
+        DMBoundaryType::DM_BOUNDARY_NONE,
+        DMDAStencilType::DMDA_STENCIL_STAR,
+        3,
+        3,
+        None,
+        None,
+        1,
+        1,
+        None,
+        None,
+    )?;
     da.set_from_options()?;
     da.set_up()?;
     da.da_set_uniform_coordinates(0.0, 1.0, 0.0, 1.0, 0.0, 0.0)?;
@@ -107,19 +140,32 @@ fn main() -> petsc_rs::Result<()> {
         // We will define the forcing function $f = e^{-x^2/\nu} e^{-y^2/\nu}$
         let dm = ksp.try_get_dm().unwrap();
         let (_, mx, my, _, _, _, _, _, _, _, _, _, _) = dm.da_get_info()?;
-        let (hx, hy) = (1.0 / (PetscScalar::from(mx as PetscReal) - 1.0), 
-            1.0 / (PetscScalar::from(my as PetscReal) - 1.0));
+        let (hx, hy) = (
+            1.0 / (PetscScalar::from(mx as PetscReal) - 1.0),
+            1.0 / (PetscScalar::from(my as PetscReal) - 1.0),
+        );
         let (xs, ys, _, _xm, _ym, _) = dm.da_get_corners()?;
 
         {
             let mut b_view = dm.da_vec_view_mut(b)?;
 
-            b_view.indexed_iter_mut().map(|(pat, v)| { 
+            b_view
+                .indexed_iter_mut()
+                .map(|(pat, v)| {
                     let s = pat.slice();
-                    (((s[0]+xs as usize) as PetscReal, (s[1]+ys as usize) as PetscReal), v) 
+                    (
+                        (
+                            (s[0] + xs as usize) as PetscReal,
+                            (s[1] + ys as usize) as PetscReal,
+                        ),
+                        v,
+                    )
                 })
-                .for_each(|((i,j), v)| {
-                    *v = PetscScalar::exp(-(i*hx)*(i*hx)/nu)*PetscScalar::exp(-(j*hy)*(j*hy)/nu)*hx*hy;
+                .for_each(|((i, j), v)| {
+                    *v = PetscScalar::exp(-(i * hx) * (i * hx) / nu)
+                        * PetscScalar::exp(-(j * hy) * (j * hy) / nu)
+                        * hx
+                        * hy;
                 });
         }
 
@@ -136,39 +182,136 @@ fn main() -> petsc_rs::Result<()> {
     ksp.set_compute_operators(|ksp, _, jac| {
         let dm = ksp.try_get_dm().unwrap();
         let (_, mx, my, _, _, _, _, _, _, _, _, _, _) = dm.da_get_info()?;
-        let (hx, hy) = (1.0 / (PetscScalar::from(mx as PetscReal) - 1.0), 
-            1.0 / (PetscScalar::from(my as PetscReal) - 1.0));
-        let (hxdhy, hydhx) = (hx/hy, hy/hx);
+        let (hx, hy) = (
+            1.0 / (PetscScalar::from(mx as PetscReal) - 1.0),
+            1.0 / (PetscScalar::from(my as PetscReal) - 1.0),
+        );
+        let (hxdhy, hydhx) = (hx / hy, hy / hx);
         let (xs, ys, _, xm, ym, _) = dm.da_get_corners()?;
 
-        jac.assemble_with_stencil((ys..ys+ym).map(|j| (xs..xs+xm).map(move |i| (i,j))).flatten()
-                .map(|(i,j)| {
+        jac.assemble_with_stencil(
+            (ys..ys + ym)
+                .map(|j| (xs..xs + xm).map(move |i| (i, j)))
+                .flatten()
+                .map(|(i, j)| {
                     let row = MatStencil { i, j, c: 0, k: 0 };
                     let rho = compute_rho(i, j, mx, my, rho);
-                    if i == 0 || j == 0 || i == mx-1 || j == my-1 {
+                    if i == 0 || j == 0 || i == mx - 1 || j == my - 1 {
                         if bc_type == BCType::DIRICHLET {
-                            vec![(row, row, 2.0*rho*(hxdhy + hydhx))]
+                            vec![(row, row, 2.0 * rho * (hxdhy + hydhx))]
                         } else {
                             let mut vec = vec![];
-                            let mut numx = 0; let mut numy = 0;
-                            if j != 0 { vec.push((row, MatStencil { i, j: j-1, c: 0, k: 0 }, -rho*hxdhy)); numy += 1; }
-                            if i != 0 { vec.push((row, MatStencil { i: i-1, j, c: 0, k: 0 }, -rho*hydhx)); numx += 1; }
-                            if i != mx-1 { vec.push((row, MatStencil { i: i+1, j, c: 0, k: 0 }, -rho*hydhx)); numx += 1; }
-                            if j != my-1 { vec.push((row, MatStencil { i, j: j+1, c: 0, k: 0 }, -rho*hxdhy)); numy += 1; }
-                            vec.push((row, row, numx as PetscReal *rho*hydhx + numy as PetscReal*rho*hxdhy));
+                            let mut numx = 0;
+                            let mut numy = 0;
+                            if j != 0 {
+                                vec.push((
+                                    row,
+                                    MatStencil {
+                                        i,
+                                        j: j - 1,
+                                        c: 0,
+                                        k: 0,
+                                    },
+                                    -rho * hxdhy,
+                                ));
+                                numy += 1;
+                            }
+                            if i != 0 {
+                                vec.push((
+                                    row,
+                                    MatStencil {
+                                        i: i - 1,
+                                        j,
+                                        c: 0,
+                                        k: 0,
+                                    },
+                                    -rho * hydhx,
+                                ));
+                                numx += 1;
+                            }
+                            if i != mx - 1 {
+                                vec.push((
+                                    row,
+                                    MatStencil {
+                                        i: i + 1,
+                                        j,
+                                        c: 0,
+                                        k: 0,
+                                    },
+                                    -rho * hydhx,
+                                ));
+                                numx += 1;
+                            }
+                            if j != my - 1 {
+                                vec.push((
+                                    row,
+                                    MatStencil {
+                                        i,
+                                        j: j + 1,
+                                        c: 0,
+                                        k: 0,
+                                    },
+                                    -rho * hxdhy,
+                                ));
+                                numy += 1;
+                            }
+                            vec.push((
+                                row,
+                                row,
+                                numx as PetscReal * rho * hydhx + numy as PetscReal * rho * hxdhy,
+                            ));
                             vec
                         }
                     } else {
                         vec![
-                            (row, MatStencil { i, j: j-1, c: 0, k: 0 },-rho*hxdhy),
-                            (row, MatStencil { i: i-1, j, c: 0, k: 0 },-rho*hydhx),
-                            (row, row, 2.0*rho*(hxdhy + hydhx)),
-                            (row, MatStencil { i: i+1, j, c: 0, k: 0 },-rho*hydhx),
-                            (row, MatStencil { i, j: j+1, c: 0, k: 0 },-rho*hxdhy),
+                            (
+                                row,
+                                MatStencil {
+                                    i,
+                                    j: j - 1,
+                                    c: 0,
+                                    k: 0,
+                                },
+                                -rho * hxdhy,
+                            ),
+                            (
+                                row,
+                                MatStencil {
+                                    i: i - 1,
+                                    j,
+                                    c: 0,
+                                    k: 0,
+                                },
+                                -rho * hydhx,
+                            ),
+                            (row, row, 2.0 * rho * (hxdhy + hydhx)),
+                            (
+                                row,
+                                MatStencil {
+                                    i: i + 1,
+                                    j,
+                                    c: 0,
+                                    k: 0,
+                                },
+                                -rho * hydhx,
+                            ),
+                            (
+                                row,
+                                MatStencil {
+                                    i,
+                                    j: j + 1,
+                                    c: 0,
+                                    k: 0,
+                                },
+                                -rho * hxdhy,
+                            ),
                         ]
                     }
-                }).flatten(), 
-            InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
+                })
+                .flatten(),
+            InsertMode::INSERT_VALUES,
+            MatAssemblyType::MAT_FINAL_ASSEMBLY,
+        )?;
 
         if check_matis {
             todo!()
@@ -190,20 +333,33 @@ fn main() -> petsc_rs::Result<()> {
     let iters = ksp.get_iteration_number()?;
     petsc_println!(petsc.world(), "Iters {}", iters)?;
 
-    //ksp.view_with(Some(&petsc.viewer_create_ascii_stdout()?))?;
+    // ksp.view_with(Some(&petsc.viewer_create_ascii_stdout()?))?;
     x.view_with(Some(&petsc.viewer_create_ascii_stdout()?))?;
-    petsc_println_sync!(petsc.world(), "Process [{}]\n{:.5e}", petsc.world().rank(), 
-        *ksp.try_get_dm().unwrap().da_vec_view(&x)?)?;
+    petsc_println_sync!(
+        petsc.world(),
+        "Process [{}]\n{:.5e}",
+        petsc.world().rank(),
+        *ksp.try_get_dm().unwrap().da_vec_view(&x)?
+    )?;
 
     // return
     Ok(())
 }
 
-fn compute_rho(i: PetscInt, j: PetscInt, mx: PetscInt, my: PetscInt, center_rho: PetscReal) -> PetscReal {
-    if (i as PetscReal) > (mx as PetscReal/3.0) && (i as PetscReal) < (2.0*mx as PetscReal/3.0)
-        && (j as PetscReal) > (my as PetscReal/3.0) && (j as PetscReal) < (2.0 * (my as PetscReal) / 3.0) {
-      center_rho
+fn compute_rho(
+    i: PetscInt,
+    j: PetscInt,
+    mx: PetscInt,
+    my: PetscInt,
+    center_rho: PetscReal,
+) -> PetscReal {
+    if (i as PetscReal) > (mx as PetscReal / 3.0)
+        && (i as PetscReal) < (2.0 * mx as PetscReal / 3.0)
+        && (j as PetscReal) > (my as PetscReal / 3.0)
+        && (j as PetscReal) < (2.0 * (my as PetscReal) / 3.0)
+    {
+        center_rho
     } else {
-      1.0
+        1.0
     }
 }

@@ -2,16 +2,10 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/Viewer/index.html>
 
-use std::mem::MaybeUninit;
-use crate::{
-    petsc_raw,
-    Result,
-    PetscAsRaw,
-    PetscObject,
-    PetscObjectPrivate
-};
+use crate::{petsc_raw, PetscAsRaw, PetscObject, PetscObjectPrivate, Result};
 use mpi::topology::UserCommunicator;
 use mpi::traits::*;
+use std::mem::MaybeUninit;
 
 pub use petsc_sys::PetscViewerFormat;
 
@@ -32,17 +26,22 @@ pub struct Viewer<'a> {
 
 impl<'a> Viewer<'a> {
     /// Creates a ASCII PetscViewer shared by all processors in a communicator.
-    pub fn create_ascii_stdout(world: &'a UserCommunicator) -> Result<Self>
-    {
+    pub fn create_ascii_stdout(world: &'a UserCommunicator) -> Result<Self> {
         // Note, `PetscViewerASCIIGetStdout` calls `PetscObjectRegisterDestroy` which will cause
-        // the object to be destroyed when `PetscFinalize()` is called. That is why we increase the 
+        // the object to be destroyed when `PetscFinalize()` is called. That is why we increase the
         // reference count.
         let mut viewer_p = MaybeUninit::uninit();
-        let ierr = unsafe { petsc_sys::PetscViewerASCIIGetStdout(world.as_raw(), viewer_p.as_mut_ptr()) };
+        let ierr =
+            unsafe { petsc_sys::PetscViewerASCIIGetStdout(world.as_raw(), viewer_p.as_mut_ptr()) };
         unsafe { chkerrq!(world, ierr) }?;
 
-        let mut viewer = Viewer { world, viewer_p: unsafe { viewer_p.assume_init() } };
-        unsafe { viewer.reference()?; }
+        let mut viewer = Viewer {
+            world,
+            viewer_p: unsafe { viewer_p.assume_init() },
+        };
+        unsafe {
+            viewer.reference()?;
+        }
         Ok(viewer)
     }
 
@@ -66,7 +65,8 @@ impl<'a> Viewer<'a> {
 /// A PETSc object that can be viewed with a [`Viewer`]
 pub trait PetscViewable {
     /// Views the object with a [`Viewer`]
-    fn view_with<'vl, 'val: 'vl>(&self, viewer: impl Into<Option<&'vl Viewer<'val>>>) -> Result<()>;
+    fn view_with<'vl, 'val: 'vl>(&self, viewer: impl Into<Option<&'vl Viewer<'val>>>)
+        -> Result<()>;
 }
 
 impl_petsc_object_traits! { Viewer, viewer_p, petsc_raw::_p_PetscViewer, PetscViewerView, PetscViewerDestroy; }

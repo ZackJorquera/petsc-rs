@@ -21,8 +21,8 @@
 
 static HELP_MSG: &str = "Solves 1D variable coefficient Laplacian using multigrid.\n\n";
 
-use petsc_rs::prelude::*;
 use mpi::traits::*;
+use petsc_rs::prelude::*;
 
 struct Opt {
     /// The conductivity
@@ -45,13 +45,24 @@ fn main() -> petsc_rs::Result<()> {
         .args(std::env::args())
         .help_msg(HELP_MSG)
         .init()?;
-        
-    let Opt {k, e} = petsc.options_get()?;
 
-    petsc_println!(petsc.world(), "(petsc_println!) Hello parallel world of {} processes!", petsc.world().size() )?;
+    let Opt { k, e } = petsc.options_get()?;
+
+    petsc_println!(
+        petsc.world(),
+        "(petsc_println!) Hello parallel world of {} processes!",
+        petsc.world().size()
+    )?;
 
     let mut ksp = petsc.ksp_create()?;
-    let mut da = DM::da_create_1d(petsc.world(), DMBoundaryType::DM_BOUNDARY_NONE, 128, 1, 1, None)?;
+    let mut da = DM::da_create_1d(
+        petsc.world(),
+        DMBoundaryType::DM_BOUNDARY_NONE,
+        128,
+        1,
+        1,
+        None,
+    )?;
     da.set_from_options()?;
     da.set_up()?;
 
@@ -69,8 +80,12 @@ fn main() -> petsc_rs::Result<()> {
 
         {
             let mut b_view = dm.da_vec_view_mut(b)?;
-            if xs == 0 { b_view[0] = PetscScalar::from(0.0); }
-            if xs + xm == mx { b_view[xm as usize -1] = PetscScalar::from(0.0); }
+            if xs == 0 {
+                b_view[0] = PetscScalar::from(0.0);
+            }
+            if xs + xm == mx {
+                b_view[xm as usize - 1] = PetscScalar::from(0.0);
+            }
         }
 
         b.assemble()?;
@@ -85,26 +100,56 @@ fn main() -> petsc_rs::Result<()> {
         let (xs, _, _, xm, _, _) = dm.da_get_corners()?;
         let pi = PetscScalar::from(std::f64::consts::PI as PetscReal);
 
-        jac.assemble_with_stencil((xs..xs+xm)
+        jac.assemble_with_stencil(
+            (xs..xs + xm)
                 .map(|i| {
-                    let row = MatStencil { i, j: 0, c: 0, k: 0 };
-                    if i == 0 || i == mx-1 {
-                        vec![(row, row, 2.0/h)]
+                    let row = MatStencil {
+                        i,
+                        j: 0,
+                        c: 0,
+                        k: 0,
+                    };
+                    if i == 0 || i == mx - 1 {
+                        vec![(row, row, 2.0 / h)]
                     } else {
-                        let xlow  = h* i as PetscReal - 0.5*h;
-                        let xhigh  = xlow + h;
+                        let xlow = h * i as PetscReal - 0.5 * h;
+                        let xhigh = xlow + h;
                         vec![
-                            (row, MatStencil { i: i-1, j: 0, c: 0, k: 0 },
-                                (-1.0 - e * PetscScalar::sin(2.0 * pi * k as PetscReal * xlow))/h),
-                            (row, row,
-                                (2.0 + e * PetscScalar::sin(2.0 * pi * k as PetscReal * xlow) 
-                                + e * PetscScalar::sin(2.0 * pi * k as PetscReal * xhigh))/h),
-                            (row, MatStencil { i: i+1, j: 0, c: 0, k: 0 },
-                                (-1.0 - e * PetscScalar::sin(2.0 * pi * k as PetscReal * xhigh))/h),
+                            (
+                                row,
+                                MatStencil {
+                                    i: i - 1,
+                                    j: 0,
+                                    c: 0,
+                                    k: 0,
+                                },
+                                (-1.0 - e * PetscScalar::sin(2.0 * pi * k as PetscReal * xlow)) / h,
+                            ),
+                            (
+                                row,
+                                row,
+                                (2.0 + e * PetscScalar::sin(2.0 * pi * k as PetscReal * xlow)
+                                    + e * PetscScalar::sin(2.0 * pi * k as PetscReal * xhigh))
+                                    / h,
+                            ),
+                            (
+                                row,
+                                MatStencil {
+                                    i: i + 1,
+                                    j: 0,
+                                    c: 0,
+                                    k: 0,
+                                },
+                                (-1.0 - e * PetscScalar::sin(2.0 * pi * k as PetscReal * xhigh))
+                                    / h,
+                            ),
                         ]
                     }
-                }).flatten(), 
-            InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
+                })
+                .flatten(),
+            InsertMode::INSERT_VALUES,
+            MatAssemblyType::MAT_FINAL_ASSEMBLY,
+        )?;
 
         Ok(())
     })?;
@@ -115,9 +160,9 @@ fn main() -> petsc_rs::Result<()> {
     ksp.solve(None, &mut x)?;
 
     let b = ksp.get_rhs()?;
-    let (a_mat,_) = ksp.get_operators_or_create()?;
+    let (a_mat, _) = ksp.get_operators_or_create()?;
     let mut b2 = b.duplicate()?;
-    Mat::mult(&a_mat,&x,&mut b2)?;
+    Mat::mult(&a_mat, &x, &mut b2)?;
     b2.axpy(PetscScalar::from(-1.0), &b)?;
     let r_norm = b2.norm(NormType::NORM_INFINITY)?;
     petsc_println!(petsc.world(), "Residual norm: {:.5e}", r_norm)?;
@@ -125,10 +170,14 @@ fn main() -> petsc_rs::Result<()> {
     let iters = ksp.get_iteration_number()?;
     petsc_println!(petsc.world(), "Iters {}", iters)?;
 
-    //ksp.view_with(Some(&petsc.viewer_create_ascii_stdout()?))?;
+    // ksp.view_with(Some(&petsc.viewer_create_ascii_stdout()?))?;
     x.view_with(Some(&petsc.viewer_create_ascii_stdout()?))?;
-    petsc_println_sync!(petsc.world(), "Process [{}]\n{:.5e}", petsc.world().rank(), 
-        *ksp.try_get_dm().unwrap().da_vec_view(&x)?)?;
+    petsc_println_sync!(
+        petsc.world(),
+        "Process [{}]\n{:.5e}",
+        petsc.world().rank(),
+        *ksp.try_get_dm().unwrap().da_vec_view(&x)?
+    )?;
 
     // return
     Ok(())

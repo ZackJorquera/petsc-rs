@@ -1,8 +1,6 @@
 #![doc = include_str!("../README.md")]
-
 // Note to developer, to run all the tests for the generated code use:
 // `cargo test --features generate-enums,use-private-headers`
-
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 #![allow(dead_code)]
@@ -51,7 +49,7 @@ impl Into<bool> for PetscBool {
     fn into(self) -> bool {
         match self {
             PetscBool::PETSC_FALSE => false,
-            PetscBool::PETSC_TRUE => true
+            PetscBool::PETSC_TRUE => true,
         }
     }
 }
@@ -60,7 +58,7 @@ impl From<bool> for PetscBool {
     fn from(b: bool) -> Self {
         match b {
             false => PetscBool::PETSC_FALSE,
-            true => PetscBool::PETSC_TRUE
+            true => PetscBool::PETSC_TRUE,
         }
     }
 }
@@ -75,24 +73,58 @@ impl std::str::FromStr for DMBoundaryType {
         // last item being NULL) in `dm.c`. We only care about the first 5. Each of these
         // entries are valid c strings.
         let dm_types_p = unsafe { DMBoundaryTypes.as_ptr() };
-        let dm_types_slice =  unsafe { std::slice::from_raw_parts(dm_types_p, 5) };
-        if input.to_uppercase().as_str() 
-            == unsafe { std::ffi::CStr::from_ptr(dm_types_slice[DMBoundaryType::DM_BOUNDARY_NONE as usize]) }.to_str().unwrap() {
+        let dm_types_slice = unsafe { std::slice::from_raw_parts(dm_types_p, 5) };
+        if input.to_uppercase().as_str()
+            == unsafe {
+                std::ffi::CStr::from_ptr(dm_types_slice[DMBoundaryType::DM_BOUNDARY_NONE as usize])
+            }
+            .to_str()
+            .unwrap()
+        {
             Ok(DMBoundaryType::DM_BOUNDARY_NONE)
-        } else if input.to_uppercase().as_str() 
-            == unsafe { std::ffi::CStr::from_ptr(dm_types_slice[DMBoundaryType::DM_BOUNDARY_GHOSTED as usize]) }.to_str().unwrap() {
+        } else if input.to_uppercase().as_str()
+            == unsafe {
+                std::ffi::CStr::from_ptr(
+                    dm_types_slice[DMBoundaryType::DM_BOUNDARY_GHOSTED as usize],
+                )
+            }
+            .to_str()
+            .unwrap()
+        {
             Ok(DMBoundaryType::DM_BOUNDARY_GHOSTED)
-        } else if input.to_uppercase().as_str() 
-            == unsafe { std::ffi::CStr::from_ptr(dm_types_slice[DMBoundaryType::DM_BOUNDARY_MIRROR as usize]) }.to_str().unwrap() {
+        } else if input.to_uppercase().as_str()
+            == unsafe {
+                std::ffi::CStr::from_ptr(
+                    dm_types_slice[DMBoundaryType::DM_BOUNDARY_MIRROR as usize],
+                )
+            }
+            .to_str()
+            .unwrap()
+        {
             Ok(DMBoundaryType::DM_BOUNDARY_MIRROR)
-        } else if input.to_uppercase().as_str() 
-            == unsafe { std::ffi::CStr::from_ptr(dm_types_slice[DMBoundaryType::DM_BOUNDARY_PERIODIC as usize]) }.to_str().unwrap() {
+        } else if input.to_uppercase().as_str()
+            == unsafe {
+                std::ffi::CStr::from_ptr(
+                    dm_types_slice[DMBoundaryType::DM_BOUNDARY_PERIODIC as usize],
+                )
+            }
+            .to_str()
+            .unwrap()
+        {
             Ok(DMBoundaryType::DM_BOUNDARY_PERIODIC)
-        } else if input.to_uppercase().as_str() 
-            == unsafe { std::ffi::CStr::from_ptr(dm_types_slice[DMBoundaryType::DM_BOUNDARY_TWIST as usize]) }.to_str().unwrap() {
+        } else if input.to_uppercase().as_str()
+            == unsafe {
+                std::ffi::CStr::from_ptr(dm_types_slice[DMBoundaryType::DM_BOUNDARY_TWIST as usize])
+            }
+            .to_str()
+            .unwrap()
+        {
             Ok(DMBoundaryType::DM_BOUNDARY_TWIST)
         } else {
-            Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("{}, is not valid", input)))
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("{}, is not valid", input),
+            ))
         }
     }
 }
@@ -105,13 +137,20 @@ impl std::fmt::Display for DMBoundaryType {
         // Thus we have to trick rust into thinking it is size 5, because that's all
         // we care about.
         let dm_types_p = unsafe { DMBoundaryTypes.as_ptr() };
-        let dm_types_slice =  unsafe { std::slice::from_raw_parts(dm_types_p, 5) };
-        write!(f, "{}", unsafe { 
-            std::ffi::CStr::from_ptr(dm_types_slice[*self as usize]) }.to_str().unwrap())
+        let dm_types_slice = unsafe { std::slice::from_raw_parts(dm_types_p, 5) };
+        write!(
+            f,
+            "{}",
+            unsafe { std::ffi::CStr::from_ptr(dm_types_slice[*self as usize]) }
+                .to_str()
+                .unwrap()
+        )
     }
 }
 
 #[cfg(feature = "generate-enums")]
 impl Default for DMBoundaryType {
-    fn default() -> Self { DMBoundaryType::DM_BOUNDARY_NONE }
+    fn default() -> Self {
+        DMBoundaryType::DM_BOUNDARY_NONE
+    }
 }

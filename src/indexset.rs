@@ -2,16 +2,16 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/IS/index.html>
 
-use std::mem::MaybeUninit;
-use std::ops::Deref;
-use crate::{petsc_raw, Result, PetscAsRaw, PetscInt, PetscObject};
+use crate::{petsc_raw, PetscAsRaw, PetscInt, PetscObject, Result};
 use mpi::topology::UserCommunicator;
 use mpi::traits::*;
+use std::mem::MaybeUninit;
+use std::ops::Deref;
 
 /// [`IS`] Type
 pub type ISType = crate::petsc_raw::ISTypeEnum;
 
-/// Abstract PETSc object that allows indexing. 
+/// Abstract PETSc object that allows indexing.
 pub struct IS<'a> {
     pub(crate) world: &'a UserCommunicator,
 
@@ -35,13 +35,16 @@ impl Drop for ISView<'_, '_> {
 }
 
 impl<'a> IS<'a> {
-    /// Creates an index set object. 
+    /// Creates an index set object.
     pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut is_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::ISCreate(world.as_raw(), is_p.as_mut_ptr()) };
         unsafe { chkerrq!(world, ierr) }?;
 
-        Ok(IS { world, is_p: unsafe { is_p.assume_init() } })
+        Ok(IS {
+            world,
+            is_p: unsafe { is_p.assume_init() },
+        })
     }
 
     /// Returns [`ISView`] that derefs into a slice of the indices.
@@ -62,13 +65,18 @@ impl<'a, 'b> ISView<'a, 'b> {
         let ierr = unsafe { petsc_raw::ISGetIndices(is.is_p, array.as_mut_ptr()) };
         unsafe { chkerrq!(is.world, ierr) }?;
 
-        // let ndarray = unsafe { 
+        // let ndarray = unsafe {
         //     ArrayView::from_shape_ptr(ndarray::Ix1(is.get_local_size()? as usize), array.assume_init()) };
-        let slice = unsafe { 
-            std::slice::from_raw_parts(array.assume_init(), is.get_local_size()? as usize)} ;
+        let slice = unsafe {
+            std::slice::from_raw_parts(array.assume_init(), is.get_local_size()? as usize)
+        };
 
         // Ok(Self { is, array: unsafe { array.assume_init() }, ndarray })
-        Ok(Self { is, array: unsafe { array.assume_init() }, slice })
+        Ok(Self {
+            is,
+            array: unsafe { array.assume_init() },
+            slice,
+        })
     }
 }
 

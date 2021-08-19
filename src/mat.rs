@@ -3,26 +3,19 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/Mat/index.html>
 
-use std::{ffi::CString, marker::PhantomData, ops::{Deref, DerefMut}};
-use std::mem::{MaybeUninit, ManuallyDrop};
-use std::rc::Rc;
 use crate::{
-    Petsc,
-    petsc_raw,
-    Result,
-    PetscAsRaw,
-    PetscObject,
-    PetscScalar,
-    PetscReal,
-    PetscInt,
-    InsertMode,
-    NormType,
-    PetscErrorKind,
-    vector::{Vector, },
-    indexset::{IS, },
+    indexset::IS, petsc_raw, vector::Vector, InsertMode, NormType, Petsc, PetscAsRaw,
+    PetscErrorKind, PetscInt, PetscObject, PetscReal, PetscScalar, Result,
 };
 use mpi::topology::UserCommunicator;
 use mpi::traits::*;
+use std::mem::{ManuallyDrop, MaybeUninit};
+use std::rc::Rc;
+use std::{
+    ffi::CString,
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+};
 
 pub use mat_shell::MatShell;
 
@@ -32,14 +25,16 @@ pub use mat_shell::MatShell;
 /// If you want to define your own matrix representation and operations use [`MatShell`] instead.
 pub struct Mat<'a, 'tl> {
     pub(crate) world: &'a UserCommunicator,
-    pub(crate) mat_p: *mut petsc_raw::_p_Mat, // I could use Mat which is the same thing, but i think using a pointer is more clear
+    pub(crate) mat_p: *mut petsc_raw::_p_Mat, /* I could use Mat which is the same thing, but i think using a pointer is more clear */
 
     // if Mat uses the closures (under the hood) we want to make
     // sure that it holds the lifetimes of them too.
     // TODO: do we even want/need this, it causes problems with lifetimes with SNES closure
     // setting functions. In the PC this problem is caused when we store a `&'bl Mat<'a, 'tl>`.
     // which causes `'bl: 'tl` which isn't necessary for the function signature.
-    pub(crate) _phantom_closure: PhantomData<Box<dyn FnMut(&Mat<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>>
+    pub(crate) _phantom_closure: PhantomData<
+        Box<dyn FnMut(&Mat<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>,
+    >,
 }
 
 /// A wrapper around [`Mat`] that is used when the [`Mat`] shouldn't be destroyed.
@@ -85,11 +80,11 @@ pub struct NullSpace<'a> {
 }
 
 pub use petsc_raw::MatAssemblyType;
-pub use petsc_raw::MatOption;
 pub use petsc_raw::MatDuplicateOption;
-pub use petsc_raw::MatStencil;
 pub use petsc_raw::MatOperation;
+pub use petsc_raw::MatOption;
 use petsc_raw::MatReuse;
+pub use petsc_raw::MatStencil;
 
 /// [`Mat`] Type
 pub type MatType = crate::petsc_raw::MatTypeEnum;
@@ -97,11 +92,15 @@ pub type MatType = crate::petsc_raw::MatTypeEnum;
 impl<'a, 'tl> Mat<'a, 'tl> {
     /// Same as `Mat { ... }` but sets all optional params to `None`
     pub(crate) fn new(world: &'a UserCommunicator, mat_p: *mut petsc_raw::_p_Mat) -> Self {
-        Mat { world, mat_p, _phantom_closure: PhantomData }
+        Mat {
+            world,
+            mat_p,
+            _phantom_closure: PhantomData,
+        }
     }
 
     /// Same at [`Petsc::mat_create()`](crate::Petsc::mat_create).
-    pub fn create(world: &'a UserCommunicator,) -> Result<Self> {
+    pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut mat_p = MaybeUninit::uninit();
         let ierr = unsafe { petsc_raw::MatCreate(world.as_raw(), mat_p.as_mut_ptr()) };
         unsafe { chkerrq!(world, ierr) }?;
@@ -112,11 +111,22 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// Creates a new matrix class ([`MatShell`]) for use with a user-defined data storage format.
     ///
     /// Same as [`MatShell::create()`].
-    pub fn create_shell<T>(world: &'a UserCommunicator, local_rows: impl Into<Option<PetscInt>>,
-        local_cols: impl Into<Option<PetscInt>>, global_rows: impl Into<Option<PetscInt>>,
-        global_cols: impl Into<Option<PetscInt>>, data: Box<T>) -> Result<MatShell<'a, 'tl, T>>
-    {
-        MatShell::create(world, local_rows, local_cols, global_rows, global_cols, data)
+    pub fn create_shell<T>(
+        world: &'a UserCommunicator,
+        local_rows: impl Into<Option<PetscInt>>,
+        local_cols: impl Into<Option<PetscInt>>,
+        global_rows: impl Into<Option<PetscInt>>,
+        global_cols: impl Into<Option<PetscInt>>,
+        data: Box<T>,
+    ) -> Result<MatShell<'a, 'tl, T>> {
+        MatShell::create(
+            world,
+            local_rows,
+            local_cols,
+            global_rows,
+            global_cols,
+            data,
+        )
     }
 
     /// Duplicates a matrix including the non-zero structure.
@@ -128,8 +138,11 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// See the manual page for [`MatDuplicateOption`](https://petsc.org/release/docs/manualpages/Mat/MatDuplicateOption.html#MatDuplicateOption) for an explanation of these options.
     pub fn duplicate(&self, op: MatDuplicateOption) -> Result<Self> {
         if self.type_compare(MatType::MATSHELL)? {
-            seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
-                "You can't duplicate a MatShell")?;
+            seterrq!(
+                self.world,
+                PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+                "You can't duplicate a MatShell"
+            )?;
         }
 
         let mut mat2_p = MaybeUninit::uninit();
@@ -143,23 +156,37 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     ///
     /// For rows and columns, local and global cannot be both None. If one processor calls this with a global of None then all processors must, otherwise the program will hang.
     /// If None is not used for the local sizes, then the user must ensure that they are chosen to be compatible with the vectors.
-    pub fn set_sizes(&mut self, local_rows: impl Into<Option<PetscInt>>, local_cols: impl Into<Option<PetscInt>>, global_rows: impl Into<Option<PetscInt>>, global_cols: impl Into<Option<PetscInt>>) -> Result<()> {
-        let ierr = unsafe { petsc_raw::MatSetSizes(
-            self.mat_p, local_rows.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
-            local_cols.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
-            global_rows.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER), 
-            global_cols.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER)) };
+    pub fn set_sizes(
+        &mut self,
+        local_rows: impl Into<Option<PetscInt>>,
+        local_cols: impl Into<Option<PetscInt>>,
+        global_rows: impl Into<Option<PetscInt>>,
+        global_cols: impl Into<Option<PetscInt>>,
+    ) -> Result<()> {
+        let ierr = unsafe {
+            petsc_raw::MatSetSizes(
+                self.mat_p,
+                local_rows.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
+                local_cols.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
+                global_rows
+                    .into()
+                    .unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
+                global_cols
+                    .into()
+                    .unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
+            )
+        };
         unsafe { chkerrq!(self.world, ierr) }
     }
 
-    /// Inserts or adds a block of values into a matrix. 
+    /// Inserts or adds a block of values into a matrix.
     ///
-    /// These values may be cached, so [`Mat::assembly_begin()`] and [`Mat::assembly_end()`] MUST 
+    /// These values may be cached, so [`Mat::assembly_begin()`] and [`Mat::assembly_end()`] MUST
     /// be called after all calls to [`Mat::set_values()`] have been completed.
     /// For more info read: <https://petsc.org/release/docs/manualpages/Mat/MatSetValues.html>
     ///
-    /// If you create the matrix yourself (that is not with a call to DMCreateMatrix()) then you 
-    /// MUST call some `set_preallocation()` (such as [`Mat::seq_aij_set_preallocation()`]) or 
+    /// If you create the matrix yourself (that is not with a call to DMCreateMatrix()) then you
+    /// MUST call some `set_preallocation()` (such as [`Mat::seq_aij_set_preallocation()`]) or
     /// [`Mat::set_up`] before using this routine.
     ///
     /// Negative indices may be passed in idxm and idxn, these rows and columns are simply ignored.
@@ -174,8 +201,8 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// * `idxm` - the row indices to add values to
     /// * `idxn` - the column indices to add values to
     /// * `v` - a logivally two-dimensional array of values (of size `idxm.len() * idxn.len()`)
-    /// * `addv` - Either [`INSERT_VALUES`](InsertMode::INSERT_VALUES) or [`ADD_VALUES`](InsertMode::ADD_VALUES), 
-    /// where [`ADD_VALUES`](InsertMode::ADD_VALUES) adds values to any existing entries, and 
+    /// * `addv` - Either [`INSERT_VALUES`](InsertMode::INSERT_VALUES) or [`ADD_VALUES`](InsertMode::ADD_VALUES),
+    /// where [`ADD_VALUES`](InsertMode::ADD_VALUES) adds values to any existing entries, and
     /// [`INSERT_VALUES`](InsertMode::INSERT_VALUES) replaces existing entries with new values.
     ///
     /// # Example
@@ -188,7 +215,11 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// if petsc.world().size() != 1 {
     ///     // note, cargo wont run tests with mpi so this will never be reached,
     ///     // but this example will only work in a uniprocessor comm world
-    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
+    ///     Petsc::set_error(
+    ///         petsc.world(),
+    ///         PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE,
+    ///         "This is a uniprocessor example only!",
+    ///     )?;
     /// }
     ///
     /// let n = 3;
@@ -203,11 +234,14 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// //  3  4  5
     /// //  6  7  8
     /// for i in 0..n {
-    ///     let v = [PetscScalar::from(i as PetscReal) * 3.0, PetscScalar::from(i as PetscReal) * 3.0+1.0,
-    ///         PetscScalar::from(i as PetscReal) * 3.0+2.0];
-    ///     mat.set_values(&[i], &[0,1,2], &v, InsertMode::INSERT_VALUES)?;
+    ///     let v = [
+    ///         PetscScalar::from(i as PetscReal) * 3.0,
+    ///         PetscScalar::from(i as PetscReal) * 3.0 + 1.0,
+    ///         PetscScalar::from(i as PetscReal) * 3.0 + 2.0,
+    ///     ];
+    ///     mat.set_values(&[i], &[0, 1, 2], &v, InsertMode::INSERT_VALUES)?;
     /// }
-    /// // You MUST assemble before you can use 
+    /// // You MUST assemble before you can use
     /// mat.assembly_begin(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
     /// mat.assembly_end(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
     /// # // for debugging
@@ -215,31 +249,56 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// # mat.view_with(Some(&viewer))?;
     ///
     /// for i in 0..n {
-    ///     let v = [PetscScalar::from(i as PetscReal), PetscScalar::from(i as PetscReal) + 3.0,
-    ///         PetscScalar::from(i as PetscReal) + 6.0];
-    ///     mat2.set_values(&[0,1,2], &[i], &v, InsertMode::INSERT_VALUES)?;
+    ///     let v = [
+    ///         PetscScalar::from(i as PetscReal),
+    ///         PetscScalar::from(i as PetscReal) + 3.0,
+    ///         PetscScalar::from(i as PetscReal) + 6.0,
+    ///     ];
+    ///     mat2.set_values(&[0, 1, 2], &[i], &v, InsertMode::INSERT_VALUES)?;
     /// }
-    /// // You MUST assemble before you can use 
+    /// // You MUST assemble before you can use
     /// mat2.assembly_begin(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
     /// mat2.assembly_end(MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
     /// # // for debugging
     /// # mat2.view_with(Some(&viewer))?;
-    /// 
+    ///
     /// // We do that map in the case that `PetscScalar` is complex.
-    /// assert_eq!(mat.get_values(0..n, 0..n).unwrap(), mat2.get_values(0..n, 0..n).unwrap());
-    /// assert_eq!(mat.get_values(0..n, 0..n).unwrap(), [ 0.0,  1.0,  2.0,
-    ///                                                   3.0,  4.0,  5.0,
-    ///                                                   6.0,  7.0,  8.0,]
-    ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
+    /// assert_eq!(
+    ///     mat.get_values(0..n, 0..n).unwrap(),
+    ///     mat2.get_values(0..n, 0..n).unwrap()
+    /// );
+    /// assert_eq!(
+    ///     mat.get_values(0..n, 0..n).unwrap(),
+    ///     [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,]
+    ///         .iter()
+    ///         .cloned()
+    ///         .map(|v| PetscScalar::from(v))
+    ///         .collect::<Vec<_>>()
+    /// );
     /// # Ok(())
     /// # }
     /// ```
-    pub fn set_values(&mut self, idxm: &[PetscInt], idxn: &[PetscInt], v: &[PetscScalar], addv: InsertMode) -> Result<()> {
+    pub fn set_values(
+        &mut self,
+        idxm: &[PetscInt],
+        idxn: &[PetscInt],
+        v: &[PetscScalar],
+        addv: InsertMode,
+    ) -> Result<()> {
         let m = idxm.len();
         let n = idxn.len();
-        assert_eq!(v.len(), m*n);
-        let ierr = unsafe { petsc_raw::MatSetValues(self.mat_p, m as PetscInt, idxm.as_ptr(), n as PetscInt,
-            idxn.as_ptr(), v.as_ptr() as *mut _, addv) };
+        assert_eq!(v.len(), m * n);
+        let ierr = unsafe {
+            petsc_raw::MatSetValues(
+                self.mat_p,
+                m as PetscInt,
+                idxm.as_ptr(),
+                n as PetscInt,
+                idxn.as_ptr(),
+                v.as_ptr() as *mut _,
+                addv,
+            )
+        };
         unsafe { chkerrq!(self.world, ierr) }
     }
 
@@ -263,24 +322,54 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// 1 dimensional problems the `k` and `j` entries are ignored). The `c` represents the the degrees
     /// of freedom at each grid point (the dof argument to DMDASetDOF()). If dof is 1 then this entry
     /// is ignored.
-    pub fn set_values_stencil(&mut self, idxm: &[MatStencil], idxn: &[MatStencil], v: &[PetscScalar], addv: InsertMode) -> Result<()> {
+    pub fn set_values_stencil(
+        &mut self,
+        idxm: &[MatStencil],
+        idxn: &[MatStencil],
+        v: &[PetscScalar],
+        addv: InsertMode,
+    ) -> Result<()> {
         let m = idxm.len();
         let n = idxn.len();
-        assert_eq!(v.len(), m*n);
-        let ierr = unsafe { petsc_raw::MatSetValuesStencil(self.mat_p, m as PetscInt, idxm.as_ptr(), n as PetscInt,
-            idxn.as_ptr(), v.as_ptr() as *mut _, addv) };
+        assert_eq!(v.len(), m * n);
+        let ierr = unsafe {
+            petsc_raw::MatSetValuesStencil(
+                self.mat_p,
+                m as PetscInt,
+                idxm.as_ptr(),
+                n as PetscInt,
+                idxn.as_ptr(),
+                v.as_ptr() as *mut _,
+                addv,
+            )
+        };
         unsafe { chkerrq!(self.world, ierr) }
     }
 
     /// Inserts or adds values into certain locations of a matrix, using a local numbering of the nodes.
     ///
     /// Similar to [`Mat::set_values()`].
-    pub fn set_local_values(&mut self, idxm: &[PetscInt], idxn: &[PetscInt], v: &[PetscScalar], addv: InsertMode) -> Result<()> {
+    pub fn set_local_values(
+        &mut self,
+        idxm: &[PetscInt],
+        idxn: &[PetscInt],
+        v: &[PetscScalar],
+        addv: InsertMode,
+    ) -> Result<()> {
         let m = idxm.len();
         let n = idxn.len();
-        assert_eq!(v.len(), m*n);
-        let ierr = unsafe { petsc_raw::MatSetValuesLocal(self.mat_p, m as PetscInt, idxm.as_ptr(), n as PetscInt,
-            idxn.as_ptr(), v.as_ptr() as *mut _, addv) };
+        assert_eq!(v.len(), m * n);
+        let ierr = unsafe {
+            petsc_raw::MatSetValuesLocal(
+                self.mat_p,
+                m as PetscInt,
+                idxm.as_ptr(),
+                n as PetscInt,
+                idxn.as_ptr(),
+                v.as_ptr() as *mut _,
+                addv,
+            )
+        };
         unsafe { chkerrq!(self.world, ierr) }
     }
 
@@ -292,7 +381,9 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     pub fn get_ownership_range(&self) -> Result<std::ops::Range<PetscInt>> {
         let mut low = MaybeUninit::<PetscInt>::uninit();
         let mut high = MaybeUninit::<PetscInt>::uninit();
-        let ierr = unsafe { petsc_raw::MatGetOwnershipRange(self.mat_p, low.as_mut_ptr(), high.as_mut_ptr()) };
+        let ierr = unsafe {
+            petsc_raw::MatGetOwnershipRange(self.mat_p, low.as_mut_ptr(), high.as_mut_ptr())
+        };
         unsafe { chkerrq!(self.world, ierr) }?;
 
         Ok(unsafe { low.assume_init()..high.assume_init() })
@@ -309,12 +400,13 @@ impl<'a, 'tl> Mat<'a, 'tl> {
         unsafe { chkerrq!(self.world, ierr) }?;
 
         // SAFETY: Petsc says it is an array of length size+1
-        let slice_from_array = unsafe { 
-            std::slice::from_raw_parts(array.assume_init(), self.world.size() as usize + 1) };
+        let slice_from_array = unsafe {
+            std::slice::from_raw_parts(array.assume_init(), self.world.size() as usize + 1)
+        };
         let array_iter = slice_from_array.iter();
         let mut slice_iter_p1 = slice_from_array.iter();
         let _ = slice_iter_p1.next();
-        Ok(array_iter.zip(slice_iter_p1).map(|(s,e)| *s..*e).collect())
+        Ok(array_iter.zip(slice_iter_p1).map(|(s, e)| *s..*e).collect())
     }
 
     /// Allows you to give an iter that will be use to make a series of calls to [`Mat::set_values`].
@@ -359,7 +451,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// # // for debugging
     /// # let viewer = Viewer::create_ascii_stdout(petsc.world())?;
     /// # mat.view_with(Some(&viewer))?;
-    /// 
+    ///
     /// // We do that map in the case that `PetscScalar` is complex.
     /// assert_eq!(mat.get_values(0..n, 0..n).unwrap(), [ 2.0, -1.0,  0.0,  0.0,  0.0,
     ///                                                  -1.0,  2.0, -1.0,  0.0,  0.0,
@@ -370,16 +462,29 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn assemble_with<I>(&mut self, iter_builder: I, addv: InsertMode, assembly_type: MatAssemblyType) -> Result<()>
+    pub fn assemble_with<I>(
+        &mut self,
+        iter_builder: I,
+        addv: InsertMode,
+        assembly_type: MatAssemblyType,
+    ) -> Result<()>
     where
-        I: IntoIterator<Item = (PetscInt, PetscInt, PetscScalar)>
+        I: IntoIterator<Item = (PetscInt, PetscInt, PetscScalar)>,
     {
         // We don't actually care about the num_inserts value, we just need something that
         // implements `Sum` so we can use the sum method and `()` does not.
-        let _num_inserts = iter_builder.into_iter().map(|(idxm, idxn, v)| {
-            self.set_values(std::slice::from_ref(&idxm), std::slice::from_ref(&idxn),
-                std::slice::from_ref(&v), addv).map(|_| 1)
-        }).sum::<Result<PetscInt>>()?;
+        let _num_inserts = iter_builder
+            .into_iter()
+            .map(|(idxm, idxn, v)| {
+                self.set_values(
+                    std::slice::from_ref(&idxm),
+                    std::slice::from_ref(&idxn),
+                    std::slice::from_ref(&v),
+                    addv,
+                )
+                .map(|_| 1)
+            })
+            .sum::<Result<PetscInt>>()?;
         // Note, `sum()` will short-circuit the iterator if an error is encountered.
 
         self.assembly_begin(assembly_type)?;
@@ -406,7 +511,11 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// if petsc.world().size() != 1 {
     ///     // note, cargo wont run tests with mpi so this will never be reached,
     ///     // but this example will only work in a uniprocessor comm world
-    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
+    ///     Petsc::set_error(
+    ///         petsc.world(),
+    ///         PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE,
+    ///         "This is a uniprocessor example only!",
+    ///     )?;
     /// }
     ///
     /// let n = 5;
@@ -421,27 +530,50 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// //  0 -1  2 -1  0
     /// //  0  0 -1  2 -1
     /// //  0  0  0 -1  2
-    /// let v = [PetscScalar::from(-1.0), PetscScalar::from(2.0), PetscScalar::from(-1.0)];
-    /// mat.assemble_with_batched((0..n)
+    /// let v = [
+    ///     PetscScalar::from(-1.0),
+    ///     PetscScalar::from(2.0),
+    ///     PetscScalar::from(-1.0),
+    /// ];
+    /// mat.assemble_with_batched(
+    ///     (0..n)
     ///         // Note, negative indices are ignored
-    ///         .map(|i| if i == 0 { ( [i], [-1, i, i+1], &v ) }
-    ///                  else if i == n-1 { ( [i], [i-1, i, -1], &v ) }
-    ///                  else { ( [i], [i-1, i, i+1], &v ) }),
-    ///     InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
+    ///         .map(|i| {
+    ///             if i == 0 {
+    ///                 ([i], [-1, i, i + 1], &v)
+    ///             } else if i == n - 1 {
+    ///                 ([i], [i - 1, i, -1], &v)
+    ///             } else {
+    ///                 ([i], [i - 1, i, i + 1], &v)
+    ///             }
+    ///         }),
+    ///     InsertMode::INSERT_VALUES,
+    ///     MatAssemblyType::MAT_FINAL_ASSEMBLY,
+    /// )?;
     /// # // for debugging
     /// # let viewer = Viewer::create_ascii_stdout(petsc.world())?;
     /// # mat.view_with(Some(&viewer))?;
-    /// 
-    /// assert_eq!(mat.get_values(0..n, 0..n).unwrap(), [ 2.0, -1.0,  0.0,  0.0,  0.0,
-    ///                                                  -1.0,  2.0, -1.0,  0.0,  0.0,
-    ///                                                   0.0, -1.0,  2.0, -1.0,  0.0,
-    ///                                                   0.0,  0.0, -1.0,  2.0, -1.0,
-    ///                                                   0.0,  0.0,  0.0, -1.0,  2.0]
-    ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
+    ///
+    /// assert_eq!(
+    ///     mat.get_values(0..n, 0..n).unwrap(),
+    ///     [
+    ///         2.0, -1.0, 0.0, 0.0, 0.0, -1.0, 2.0, -1.0, 0.0, 0.0, 0.0, -1.0, 2.0, -1.0, 0.0, 0.0,
+    ///         0.0, -1.0, 2.0, -1.0, 0.0, 0.0, 0.0, -1.0, 2.0
+    ///     ]
+    ///     .iter()
+    ///     .cloned()
+    ///     .map(|v| PetscScalar::from(v))
+    ///     .collect::<Vec<_>>()
+    /// );
     /// # Ok(())
     /// # }
     /// ```
-    pub fn assemble_with_batched<I, A1, A2, A3>(&mut self, iter_builder: I, addv: InsertMode, assembly_type: MatAssemblyType) -> Result<()>
+    pub fn assemble_with_batched<I, A1, A2, A3>(
+        &mut self,
+        iter_builder: I,
+        addv: InsertMode,
+        assembly_type: MatAssemblyType,
+    ) -> Result<()>
     where
         I: IntoIterator<Item = (A1, A2, A3)>,
         A1: AsRef<[PetscInt]>,
@@ -450,11 +582,15 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     {
         // We don't actually care about the num_inserts value, we just need something that
         // implements `Sum` so we can use the sum method and `()` does not.
-        let _num_inserts = iter_builder.into_iter().map(|(idxm, idxn, v)| {
-            self.set_values(idxm.as_ref(), idxn.as_ref(), v.as_ref(), addv).map(|_| 1)
-        }).sum::<Result<i32>>()?;
+        let _num_inserts = iter_builder
+            .into_iter()
+            .map(|(idxm, idxn, v)| {
+                self.set_values(idxm.as_ref(), idxn.as_ref(), v.as_ref(), addv)
+                    .map(|_| 1)
+            })
+            .sum::<Result<i32>>()?;
         // Note, `sum()` will short-circuit the iterator if an error is encountered.
-        
+
         self.assembly_begin(assembly_type)?;
         self.assembly_end(assembly_type)
     }
@@ -463,16 +599,29 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// Then is followed by both [`Mat::assembly_begin()`] and [`Mat::assembly_end()`].
     ///
     /// This functions identically to [`Mat::assemble_with()`] but uses [`Mat::set_values_stencil()`].
-    pub fn assemble_with_stencil<I>(&mut self, iter_builder: I, addv: InsertMode, assembly_type: MatAssemblyType) -> Result<()>
+    pub fn assemble_with_stencil<I>(
+        &mut self,
+        iter_builder: I,
+        addv: InsertMode,
+        assembly_type: MatAssemblyType,
+    ) -> Result<()>
     where
-        I: IntoIterator<Item = (MatStencil, MatStencil, PetscScalar)>
+        I: IntoIterator<Item = (MatStencil, MatStencil, PetscScalar)>,
     {
         // We don't actually care about the num_inserts value, we just need something that
         // implements `Sum` so we can use the sum method and `()` does not.
-        let _num_inserts = iter_builder.into_iter().map(|(idxm, idxn, v)| {
-            self.set_values_stencil(std::slice::from_ref(&idxm), std::slice::from_ref(&idxn),
-                std::slice::from_ref(&v), addv).map(|_| 1)
-        }).sum::<Result<PetscInt>>()?;
+        let _num_inserts = iter_builder
+            .into_iter()
+            .map(|(idxm, idxn, v)| {
+                self.set_values_stencil(
+                    std::slice::from_ref(&idxm),
+                    std::slice::from_ref(&idxn),
+                    std::slice::from_ref(&v),
+                    addv,
+                )
+                .map(|_| 1)
+            })
+            .sum::<Result<PetscInt>>()?;
         // Note, `sum()` will short-circuit the iterator if an error is encountered.
 
         self.assembly_begin(assembly_type)?;
@@ -483,7 +632,12 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// Then is followed by both [`Mat::assembly_begin()`] and [`Mat::assembly_end()`].
     ///
     /// This functions identically to [`Mat::assemble_with_batched()`] but uses [`Mat::set_values_stencil()`].
-    pub fn assemble_with_stencil_batched<I, A1, A2, A3>(&mut self, iter_builder: I, addv: InsertMode, assembly_type: MatAssemblyType) -> Result<()>
+    pub fn assemble_with_stencil_batched<I, A1, A2, A3>(
+        &mut self,
+        iter_builder: I,
+        addv: InsertMode,
+        assembly_type: MatAssemblyType,
+    ) -> Result<()>
     where
         I: IntoIterator<Item = (A1, A2, A3)>,
         A1: AsRef<[MatStencil]>,
@@ -492,9 +646,13 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     {
         // We don't actually care about the num_inserts value, we just need something that
         // implements `Sum` so we can use the sum method and `()` does not.
-        let _num_inserts = iter_builder.into_iter().map(|(idxm, idxn, v)| {
-            self.set_values_stencil(idxm.as_ref(), idxn.as_ref(), v.as_ref(), addv).map(|_| 1)
-        }).sum::<Result<i32>>()?;
+        let _num_inserts = iter_builder
+            .into_iter()
+            .map(|(idxm, idxn, v)| {
+                self.set_values_stencil(idxm.as_ref(), idxn.as_ref(), v.as_ref(), addv)
+                    .map(|_| 1)
+            })
+            .sum::<Result<i32>>()?;
         // Note, `sum()` will short-circuit the iterator if an error is encountered.
 
         self.assembly_begin(assembly_type)?;
@@ -502,32 +660,44 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     }
 
     /// Allows you to give an iter that will be use to make a series of calls to [`Mat::set_local_values`].
-    /// 
+    ///
     /// Note, this is NOT followed by both [`Mat::assembly_begin()`] or [`Mat::assembly_end()`].
     /// You are required to make those calls.
-    /// 
+    ///
     /// Similar to [`Mat::assemble_with()`].
     pub fn set_local_values_with<I>(&mut self, iter_builder: I, addv: InsertMode) -> Result<()>
     where
-        I: IntoIterator<Item = (PetscInt, PetscInt, PetscScalar)>
+        I: IntoIterator<Item = (PetscInt, PetscInt, PetscScalar)>,
     {
         // We don't actually care about the num_inserts value, we just need something that
         // implements `Sum` so we can use the sum method and `()` does not.
-        let _num_inserts = iter_builder.into_iter().map(|(idxm, idxn, v)| {
-            self.set_local_values(std::slice::from_ref(&idxm), std::slice::from_ref(&idxn),
-                std::slice::from_ref(&v), addv).map(|_| 1)
-        }).sum::<Result<PetscInt>>()?;
+        let _num_inserts = iter_builder
+            .into_iter()
+            .map(|(idxm, idxn, v)| {
+                self.set_local_values(
+                    std::slice::from_ref(&idxm),
+                    std::slice::from_ref(&idxn),
+                    std::slice::from_ref(&v),
+                    addv,
+                )
+                .map(|_| 1)
+            })
+            .sum::<Result<PetscInt>>()?;
         // Note, `sum()` will short-circuit the iterator if an error is encountered.
         Ok(())
     }
 
     /// Allows you to give an iter that will be use to make a series of calls to [`Mat::set_local_values`].
-    /// 
+    ///
     /// Note, this is NOT followed by both [`Mat::assembly_begin()`] or [`Mat::assembly_end()`].
     /// You are required to make those calls.
-    /// 
+    ///
     /// Similar to [`Mat::assemble_with_batched()`].
-    pub fn set_local_values_with_batched<I, A1, A2, A3>(&mut self, iter_builder: I, addv: InsertMode) -> Result<()>
+    pub fn set_local_values_with_batched<I, A1, A2, A3>(
+        &mut self,
+        iter_builder: I,
+        addv: InsertMode,
+    ) -> Result<()>
     where
         I: IntoIterator<Item = (A1, A2, A3)>,
         A1: AsRef<[PetscInt]>,
@@ -536,9 +706,13 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     {
         // We don't actually care about the num_inserts value, we just need something that
         // implements `Sum` so we can use the sum method and `()` does not.
-        let _num_inserts = iter_builder.into_iter().map(|(idxm, idxn, v)| {
-            self.set_local_values(idxm.as_ref(), idxn.as_ref(), v.as_ref(), addv).map(|_| 1)
-        }).sum::<Result<i32>>()?;
+        let _num_inserts = iter_builder
+            .into_iter()
+            .map(|(idxm, idxn, v)| {
+                self.set_local_values(idxm.as_ref(), idxn.as_ref(), v.as_ref(), addv)
+                    .map(|_| 1)
+            })
+            .sum::<Result<i32>>()?;
         // Note, `sum()` will short-circuit the iterator if an error is encountered.
         Ok(())
     }
@@ -548,7 +722,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// Currently can only get values on the same processor.
     ///
     /// # Example
-    /// 
+    ///
     /// ```
     /// # use petsc_rs::prelude::*;
     /// # use mpi::traits::*;
@@ -557,7 +731,11 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// if petsc.world().size() != 1 {
     ///     // note, cargo wont run tests with mpi so this will never be reached,
     ///     // but this example will only work in a uniprocessor comm world
-    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
+    ///     Petsc::set_error(
+    ///         petsc.world(),
+    ///         PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE,
+    ///         "This is a uniprocessor example only!",
+    ///     )?;
     /// }
     ///
     /// let n = 3;
@@ -570,22 +748,52 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// //  0  1  2
     /// //  3  4  5
     /// //  6  7  8
-    /// mat.assemble_with((0..n).map(|i| (0..n).map(move |j| (i,j))).flatten().enumerate()
-    ///         .map(|(v, (i,j))| (i,j,PetscScalar::from(v as PetscReal))),
-    ///     InsertMode::INSERT_VALUES, MatAssemblyType::MAT_FINAL_ASSEMBLY)?;
+    /// mat.assemble_with(
+    ///     (0..n)
+    ///         .map(|i| (0..n).map(move |j| (i, j)))
+    ///         .flatten()
+    ///         .enumerate()
+    ///         .map(|(v, (i, j))| (i, j, PetscScalar::from(v as PetscReal))),
+    ///     InsertMode::INSERT_VALUES,
+    ///     MatAssemblyType::MAT_FINAL_ASSEMBLY,
+    /// )?;
     /// # // for debugging
     /// # let viewer = Viewer::create_ascii_stdout(petsc.world())?;
     /// # mat.view_with(Some(&viewer))?;
-    /// 
+    ///
     /// // We do that map in the case that `PetscScalar` is complex.
-    /// assert_eq!(mat.get_values(0..n, 0..n).unwrap(),
-    ///            [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
-    /// assert_eq!(mat.get_values(0..n, [0]).unwrap(),
-    ///            [0.0, 3.0, 6.0].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
-    /// assert_eq!(mat.get_values([1], 0..2).unwrap(),
-    ///            [3.0, 4.0].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
-    /// assert_eq!(mat.get_values([1,2], [0,2]).unwrap(),
-    ///            [3.0, 5.0, 6.0, 8.0].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
+    /// assert_eq!(
+    ///     mat.get_values(0..n, 0..n).unwrap(),
+    ///     [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
+    ///         .iter()
+    ///         .cloned()
+    ///         .map(|v| PetscScalar::from(v))
+    ///         .collect::<Vec<_>>()
+    /// );
+    /// assert_eq!(
+    ///     mat.get_values(0..n, [0]).unwrap(),
+    ///     [0.0, 3.0, 6.0]
+    ///         .iter()
+    ///         .cloned()
+    ///         .map(|v| PetscScalar::from(v))
+    ///         .collect::<Vec<_>>()
+    /// );
+    /// assert_eq!(
+    ///     mat.get_values([1], 0..2).unwrap(),
+    ///     [3.0, 4.0]
+    ///         .iter()
+    ///         .cloned()
+    ///         .map(|v| PetscScalar::from(v))
+    ///         .collect::<Vec<_>>()
+    /// );
+    /// assert_eq!(
+    ///     mat.get_values([1, 2], [0, 2]).unwrap(),
+    ///     [3.0, 5.0, 6.0, 8.0]
+    ///         .iter()
+    ///         .cloned()
+    ///         .map(|v| PetscScalar::from(v))
+    ///         .collect::<Vec<_>>()
+    /// );
     /// # Ok(())
     /// # }
     /// ```
@@ -601,19 +809,26 @@ impl<'a, 'tl> Mat<'a, 'tl> {
         let idxn_iter = idxn.into_iter();
         let idxn_array = idxn_iter.collect::<Vec<_>>();
         let ni = idxn_array.len();
-        
+
         let mut out_vec = vec![PetscScalar::default(); mi * ni];
 
-        let ierr = unsafe { petsc_raw::MatGetValues(self.mat_p, mi as PetscInt, idxm_array.as_ptr(),
-            ni as PetscInt, idxn_array.as_ptr(), out_vec[..].as_mut_ptr() as *mut _) };
+        let ierr = unsafe {
+            petsc_raw::MatGetValues(
+                self.mat_p,
+                mi as PetscInt,
+                idxm_array.as_ptr(),
+                ni as PetscInt,
+                idxn_array.as_ptr(),
+                out_vec[..].as_mut_ptr() as *mut _,
+            )
+        };
         unsafe { chkerrq!(self.world, ierr) }?;
 
         Ok(out_vec)
     }
 
     /// Assembles the matrix by calling [`Mat::assembly_begin()`] then [`Mat::assembly_end()`]
-    pub fn assemble(&mut self, assembly_type: MatAssemblyType) -> Result<()>
-    {
+    pub fn assemble(&mut self, assembly_type: MatAssemblyType) -> Result<()> {
         self.assembly_begin(assembly_type)?;
         self.assembly_end(assembly_type)
     }
@@ -622,11 +837,18 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     ///
     /// Expected fill as ratio of `nnz(C)/(nnz(self) + nnz(other))`, use `None` if you do not have
     /// a good estimate. If the result is a dense matrix this is irrelevant.
-    pub fn mat_mult(&self, other: &Mat, fill: impl Into<Option<PetscReal>>) -> Result<Self>{
+    pub fn mat_mult(&self, other: &Mat, fill: impl Into<Option<PetscReal>>) -> Result<Self> {
         let mut mat_out_p = MaybeUninit::uninit();
         // TODO: do we want other MatReuse options
-        let ierr = unsafe { petsc_raw::MatMatMult(self.mat_p, other.mat_p, MatReuse::MAT_INITIAL_MATRIX,
-            fill.into().unwrap_or(petsc_raw::PETSC_DEFAULT_REAL), mat_out_p.as_mut_ptr()) };
+        let ierr = unsafe {
+            petsc_raw::MatMatMult(
+                self.mat_p,
+                other.mat_p,
+                MatReuse::MAT_INITIAL_MATRIX,
+                fill.into().unwrap_or(petsc_raw::PETSC_DEFAULT_REAL),
+                mat_out_p.as_mut_ptr(),
+            )
+        };
         unsafe { chkerrq!(self.world, ierr) }?;
 
         Ok(Mat::new(self.world, unsafe { mat_out_p.assume_init() }))
@@ -643,8 +865,15 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     // the nullspace after they set it (we don't actually use it to reference count).
     // Or we should just store the nullspace object in the Mat
     pub fn set_nullspace(&mut self, nullspace: impl Into<Option<Rc<NullSpace<'a>>>>) -> Result<()> {
-        let ierr = unsafe { petsc_raw::MatSetNullSpace(self.mat_p,
-            nullspace.into().as_ref().map_or(std::ptr::null_mut(), |ns| ns.ns_p)) };
+        let ierr = unsafe {
+            petsc_raw::MatSetNullSpace(
+                self.mat_p,
+                nullspace
+                    .into()
+                    .as_ref()
+                    .map_or(std::ptr::null_mut(), |ns| ns.ns_p),
+            )
+        };
         unsafe { chkerrq!(self.world, ierr) }
     }
 
@@ -655,9 +884,19 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     ///
     /// Krylov solvers can produce the minimal norm solution to the least squares problem by utilizing
     /// [`NullSpace::remove_from()`].
-    pub fn set_left_nullspace(&mut self, nullspace: impl Into<Option<Rc<NullSpace<'a>>>>) -> Result<()> {
-        let ierr = unsafe { petsc_raw::MatSetTransposeNullSpace(self.mat_p,
-            nullspace.into().as_ref().map_or(std::ptr::null_mut(), |ns| ns.ns_p)) };
+    pub fn set_left_nullspace(
+        &mut self,
+        nullspace: impl Into<Option<Rc<NullSpace<'a>>>>,
+    ) -> Result<()> {
+        let ierr = unsafe {
+            petsc_raw::MatSetTransposeNullSpace(
+                self.mat_p,
+                nullspace
+                    .into()
+                    .as_ref()
+                    .map_or(std::ptr::null_mut(), |ns| ns.ns_p),
+            )
+        };
         unsafe { chkerrq!(self.world, ierr) }
     }
 
@@ -667,9 +906,19 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     ///
     /// This null space is used by the linear solvers. Overwrites any previous null space that may
     /// have been attached. You can remove the null space by calling this routine with `None`.
-    pub fn set_near_nullspace(&mut self, nullspace: impl Into<Option<Rc<NullSpace<'a>>>>) -> Result<()> {
-        let ierr = unsafe { petsc_raw::MatSetNearNullSpace(self.mat_p,
-            nullspace.into().as_ref().map_or(std::ptr::null_mut(), |ns| ns.ns_p)) };
+    pub fn set_near_nullspace(
+        &mut self,
+        nullspace: impl Into<Option<Rc<NullSpace<'a>>>>,
+    ) -> Result<()> {
+        let ierr = unsafe {
+            petsc_raw::MatSetNearNullSpace(
+                self.mat_p,
+                nullspace
+                    .into()
+                    .as_ref()
+                    .map_or(std::ptr::null_mut(), |ns| ns.ns_p),
+            )
+        };
         unsafe { chkerrq!(self.world, ierr) }
     }
 
@@ -679,23 +928,39 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     ///
     /// Depending on the format of mat, the returned submat may not implement [`Mat::mult()`]
     /// or other functions. Its communicator may be the same as self, it may be `PETSC_COMM_SELF`,
-    /// or some other subcomm of mat's. 
+    /// or some other subcomm of mat's.
     ///
     /// The submat always implements [`Mat::set_local_values()`] (and thus you can also use
     /// [`Mat::set_local_values_with()`]).
-    pub fn get_local_sub_matrix_mut<'bv>(&'bv mut self, is_row: Rc<IS<'a>>, is_col: Rc<IS<'a>>) -> Result<BorrowMatMut<'a, 'tl, 'bv>> {
+    pub fn get_local_sub_matrix_mut<'bv>(
+        &'bv mut self,
+        is_row: Rc<IS<'a>>,
+        is_col: Rc<IS<'a>>,
+    ) -> Result<BorrowMatMut<'a, 'tl, 'bv>> {
         // TODO: make a non-mut version of this function
         let mut mat_p = MaybeUninit::uninit();
-        let ierr = unsafe { petsc_raw::MatGetLocalSubMatrix(self.mat_p,
-            is_row.is_p, is_col.is_p, mat_p.as_mut_ptr()) };
+        let ierr = unsafe {
+            petsc_raw::MatGetLocalSubMatrix(
+                self.mat_p,
+                is_row.is_p,
+                is_col.is_p,
+                mat_p.as_mut_ptr(),
+            )
+        };
         unsafe { chkerrq!(self.world, ierr) }?;
-        Ok(BorrowMatMut::new( 
-            ManuallyDrop::new( Mat::new(self.world, unsafe { mat_p.assume_init() })),
+        Ok(BorrowMatMut::new(
+            ManuallyDrop::new(Mat::new(self.world, unsafe { mat_p.assume_init() })),
             Some(Box::new(move |borrow_mat| {
-                    let ierr = unsafe { petsc_raw::MatRestoreLocalSubMatrix(self.mat_p,
-                        is_row.is_p, is_col.is_p, &mut borrow_mat.owned_mat.mat_p as *mut _) };
-                    let _ = unsafe { chkerrq!(self.world, ierr) }; // TODO: should I unwrap ?
-                })),
+                let ierr = unsafe {
+                    petsc_raw::MatRestoreLocalSubMatrix(
+                        self.mat_p,
+                        is_row.is_p,
+                        is_col.is_p,
+                        &mut borrow_mat.owned_mat.mat_p as *mut _,
+                    )
+                };
+                let _ = unsafe { chkerrq!(self.world, ierr) }; // TODO: should I unwrap ?
+            })),
         ))
     }
 
@@ -714,7 +979,10 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     }
 
     /// Sets the type of the [`Mat`] to be [`MatType::MATSHELL`](petsc_raw::MatTypeEnum::MATSHELL) and then returns a [`MatShell`].
-    pub fn into_shell<T>(mut self, mat_data: impl Into<Option<Box<T>>>) -> Result<MatShell<'a, 'tl, T>> {
+    pub fn into_shell<T>(
+        mut self,
+        mat_data: impl Into<Option<Box<T>>>,
+    ) -> Result<MatShell<'a, 'tl, T>> {
         self.set_type(MatType::MATSHELL)?;
         let mut ms = MatShell::new(self);
         ms.set_mat_data(mat_data.into())?;
@@ -739,53 +1007,62 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// Get left vector compatible with the matrix, i.e., with the same parallel layout.
     pub fn create_left_vector(&self) -> Result<Vector<'a>> {
         let mut vec_p = MaybeUninit::uninit();
-        let ierr = unsafe { petsc_raw::MatCreateVecs(self.as_raw(), std::ptr::null_mut(), vec_p.as_mut_ptr()) };
+        let ierr = unsafe {
+            petsc_raw::MatCreateVecs(self.as_raw(), std::ptr::null_mut(), vec_p.as_mut_ptr())
+        };
         unsafe { chkerrq!(self.world, ierr) }?;
 
-        Ok(Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } })
+        Ok(Vector {
+            world: self.world,
+            vec_p: unsafe { vec_p.assume_init() },
+        })
     }
 
     /// Get a right vector compatible with the matrix, i.e., with the same parallel layout.
     pub fn create_right_vector(&self) -> Result<Vector<'a>> {
         let mut vec_p = MaybeUninit::uninit();
-        let ierr = unsafe { petsc_raw::MatCreateVecs(self.as_raw(), vec_p.as_mut_ptr(), std::ptr::null_mut()) };
+        let ierr = unsafe {
+            petsc_raw::MatCreateVecs(self.as_raw(), vec_p.as_mut_ptr(), std::ptr::null_mut())
+        };
         unsafe { chkerrq!(self.world, ierr) }?;
 
-        Ok(Vector { world: self.world, vec_p: unsafe { vec_p.assume_init() } })
+        Ok(Vector {
+            world: self.world,
+            vec_p: unsafe { vec_p.assume_init() },
+        })
     }
 }
 
 /// Types to be used to define your own matrix type -- perhaps matrix free
 pub mod mat_shell {
-    use std::{ffi::CString, ops::{Deref, DerefMut}, pin::Pin, ptr::NonNull};
-    use std::mem::{MaybeUninit, ManuallyDrop};
-    use super::{MatOperation, Mat, MatDuplicateOption};
+    use super::{Mat, MatDuplicateOption, MatOperation};
     use crate::{
-        Petsc,
         petsc_raw,
-        Result,
-        PetscAsRaw,
-        PetscObject,
-        PetscInt,
-        InsertMode,
-        PetscErrorKind,
         vector::{Vector, VectorType},
+        InsertMode, Petsc, PetscAsRaw, PetscErrorKind, PetscInt, PetscObject, Result,
     };
     use mpi::topology::UserCommunicator;
     use mpi::traits::*;
     use seq_macro::seq;
+    use std::mem::{ManuallyDrop, MaybeUninit};
+    use std::{
+        ffi::CString,
+        ops::{Deref, DerefMut},
+        pin::Pin,
+        ptr::NonNull,
+    };
 
     // TODO: there are 148 ops, but this might change so we should get this number in a better way
     // Also if this number changes, this is not the only occurrence of it. You will have to change
     // it in other places too. Sadly, some of the occurrences of 148 require int literals so we
     // can't use this const there. But they should fail to compile.
     const NUM_MAT_OPS: usize = 148;
-    
+
     /// A matrix type to be used to define your own matrix type -- perhaps matrix free
     ///
     /// Is a wrapper around [`Mat`] that [`Deref`]s into [`Mat`]
     ///
-    /// For examples, look at docs for [`MatShell::shell_set_operation_mvv()`] and other 
+    /// For examples, look at docs for [`MatShell::shell_set_operation_mvv()`] and other
     /// `shell_set_operation_*` methods.
     pub struct MatShell<'a, 'tl, T> {
         pub(crate) inner_mat: Mat<'a, 'tl>,
@@ -820,16 +1097,16 @@ pub mod mat_shell {
         MATOP_SOLVE = 7,
         /// op for `MatSolveTranspose()`
         MATOP_SOLVE_TRANSPOSE = 9,
-        // There are probably more that have the correct function signature that can be
-        // added in the future. If you add any entries here, you must also add them to the
-        // `impl From<MatOperation> for MatOperationMVV` at the bottom of the file and to the
-        // table bellow. You also need to change the size use by the seq! macro in
-        // `shell_set_operation_mvv` (there is a comment there).
+        /* There are probably more that have the correct function signature that can be
+         * added in the future. If you add any entries here, you must also add them to the
+         * `impl From<MatOperation> for MatOperationMVV` at the bottom of the file and to the
+         * table bellow. You also need to change the size use by the seq! macro in
+         * `shell_set_operation_mvv` (there is a comment there). */
     }
 
     // Note, this is usize because it is used for indexing. It doesn't matter what
     // repr type MatOperationMVV uses.
-    static MAT_OPERATION_MVV_TABLE: [usize; 4] = [3,5,7,9];
+    static MAT_OPERATION_MVV_TABLE: [usize; 4] = [3, 5, 7, 9];
 
     /// Specifies a matrix operation that has a "`Mat` `Vector` `Vector` `mut Vector`" function signature.
     ///
@@ -852,14 +1129,14 @@ pub mod mat_shell {
         MATOP_SOLVE_ADD = 8,
         /// op for `MatSolveTransposeAdd()`
         MATOP_SOLVE_TRANSPOSE_ADD = 10,
-        // There are probably more that have the correct function signature that can be
-        // added in the future. If you add any entries here, you must also add them to the
-        // `impl From<MatOperation> for MatOperationMVVV` at the bottom of the file and to the
-        // table bellow. You also need to change the size use by the seq! macro in
-        // `shell_set_operation_mvvv` (there is a comment there).
+        /* There are probably more that have the correct function signature that can be
+         * added in the future. If you add any entries here, you must also add them to the
+         * `impl From<MatOperation> for MatOperationMVVV` at the bottom of the file and to the
+         * table bellow. You also need to change the size use by the seq! macro in
+         * `shell_set_operation_mvvv` (there is a comment there). */
     }
 
-    static MAT_OPERATION_MVVV_TABLE: [usize; 4] = [4,6,8,10];
+    static MAT_OPERATION_MVVV_TABLE: [usize; 4] = [4, 6, 8, 10];
 
     /// Specifies a matrix operation that has a "`Mat` `mut Vector`" function signature.
     ///
@@ -876,11 +1153,11 @@ pub mod mat_shell {
     pub enum MatOperationMV {
         /// op for [`Mat::get_diagonal()`]
         MATOP_GET_DIAGONAL = 17,
-        // There are probably more that have the correct function signature that can be
-        // added in the future. If you add any entries here, you must also add them to the
-        // `impl From<MatOperation> for MatOperationMV` at the bottom of the file and to the
-        // table bellow. You also need to change the size use by the seq! macro in
-        // `shell_set_operation_mv` (there is a comment there).
+        /* There are probably more that have the correct function signature that can be
+         * added in the future. If you add any entries here, you must also add them to the
+         * `impl From<MatOperation> for MatOperationMV` at the bottom of the file and to the
+         * table bellow. You also need to change the size use by the seq! macro in
+         * `shell_set_operation_mv` (there is a comment there). */
     }
 
     static MAT_OPERATION_MV_TABLE: [usize; 1] = [17];
@@ -899,19 +1176,29 @@ pub mod mat_shell {
     #[allow(non_camel_case_types)]
     pub enum MatOperationMVI {
         /// op for [`Mat::diagonal_set()`]
-        MATOP_DIAGONAL_SET=47,
-        // There are probably more that have the correct function signature that can be
-        // added in the future. If you add any entries here, you must also add them to the
-        // `impl From<MatOperation> for MatOperationMVI` at the bottom of the file and to the
-        // table bellow. You also need to change the size use by the seq! macro in
-        // `shell_set_operation_mvi` (there is a comment there).
+        MATOP_DIAGONAL_SET = 47,
+        /* There are probably more that have the correct function signature that can be
+         * added in the future. If you add any entries here, you must also add them to the
+         * `impl From<MatOperation> for MatOperationMVI` at the bottom of the file and to the
+         * table bellow. You also need to change the size use by the seq! macro in
+         * `shell_set_operation_mvi` (there is a comment there). */
     }
 
     static MAT_OPERATION_MVI_TABLE: [usize; 1] = [47];
 
     /// Internal struct to help with multiple types of closures
     enum MatShellSingleOperationTrampolineData<'a, 'tl, T> {
-        MVVV(Box<dyn Fn(&MatShell<'a, 'tl, T>, &Vector<'a>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>),
+        MVVV(
+            Box<
+                dyn Fn(
+                        &MatShell<'a, 'tl, T>,
+                        &Vector<'a>,
+                        &Vector<'a>,
+                        &mut Vector<'a>,
+                    ) -> Result<()>
+                    + 'tl,
+            >,
+        ),
         MVV(Box<dyn Fn(&MatShell<'a, 'tl, T>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>),
         MV(Box<dyn Fn(&MatShell<'a, 'tl, T>, &mut Vector<'a>) -> Result<()> + 'tl>),
         MVI(Box<dyn FnMut(&mut MatShell<'a, 'tl, T>, &Vector<'a>, InsertMode) -> Result<()> + 'tl>),
@@ -919,13 +1206,18 @@ pub mod mat_shell {
         // and thier signatures can be found in `include/petsc/private/matimpl.h` the struct `_MatOps`.
         // I think adding more of these will end up being very manual.
         // Would it make sense to make a different variant for each function, not just each function type.
-        
+
         // TODO: do we want a `destroy_func`? what would it even do. Is it just to drop things in the
         // context? if that is the case then we don't need this as rust will will call that drop on the
         // context type. It might still make sense to have it though, although.
         #[allow(dead_code)]
         Destroy(Box<dyn FnOnce(&mut MatShell<'a, 'tl, T>) -> Result<()> + 'tl>),
-        Duplicate(Box<dyn Fn(&MatShell<'a, 'tl, T>, MatDuplicateOption) -> Result<MatShell<'a, 'tl, T>> + 'tl>),
+        Duplicate(
+            Box<
+                dyn Fn(&MatShell<'a, 'tl, T>, MatDuplicateOption) -> Result<MatShell<'a, 'tl, T>>
+                    + 'tl,
+            >,
+        ),
     }
 
     struct MatShellTrampolineData<'a, 'tl, T> {
@@ -938,27 +1230,46 @@ pub mod mat_shell {
     impl<'a, 'tl, T> MatShell<'a, 'tl, T> {
         /// Same as `MatShell { ... }` but sets all optional params to `None`
         pub(crate) fn new(inner_mat: Mat<'a, 'tl>) -> Self {
-            MatShell { inner_mat, shell_trampoline_data: None, tmp_mat_data: None,
-                in_operation_closure: false }
+            MatShell {
+                inner_mat,
+                shell_trampoline_data: None,
+                tmp_mat_data: None,
+                in_operation_closure: false,
+            }
         }
 
         /// Creates a new matrix class for use with a user-defined data storage format.
-        pub fn create(world: &'a UserCommunicator, local_rows: impl Into<Option<PetscInt>>,
-            local_cols: impl Into<Option<PetscInt>>, global_rows: impl Into<Option<PetscInt>>,
-            global_cols: impl Into<Option<PetscInt>>, mat_data: Box<T>) -> Result<Self>
-        {
+        pub fn create(
+            world: &'a UserCommunicator,
+            local_rows: impl Into<Option<PetscInt>>,
+            local_cols: impl Into<Option<PetscInt>>,
+            global_rows: impl Into<Option<PetscInt>>,
+            global_cols: impl Into<Option<PetscInt>>,
+            mat_data: Box<T>,
+        ) -> Result<Self> {
             let data = Some(mat_data);
             let none_array = seq!(N in 0..148 { [ #( None, )* ] });
-            let ctx = Box::pin(MatShellTrampolineData { 
-                world: world, user_funcs: none_array, data });
+            let ctx = Box::pin(MatShellTrampolineData {
+                world: world,
+                user_funcs: none_array,
+                data,
+            });
             let mut mat_p = MaybeUninit::uninit();
-            let ierr = unsafe { petsc_raw::MatCreateShell(world.as_raw(),
-                local_rows.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
-                local_cols.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
-                global_rows.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
-                global_cols.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
-                std::mem::transmute(ctx.as_ref()),
-                mat_p.as_mut_ptr()) };
+            let ierr = unsafe {
+                petsc_raw::MatCreateShell(
+                    world.as_raw(),
+                    local_rows.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
+                    local_cols.into().unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
+                    global_rows
+                        .into()
+                        .unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
+                    global_cols
+                        .into()
+                        .unwrap_or(petsc_raw::PETSC_DECIDE_INTEGER),
+                    std::mem::transmute(ctx.as_ref()),
+                    mat_p.as_mut_ptr(),
+                )
+            };
             unsafe { chkerrq!(world, ierr) }?;
 
             let inner_mat = Mat::new(world, unsafe { mat_p.assume_init() });
@@ -974,15 +1285,25 @@ pub mod mat_shell {
                 td.as_mut().data = mat_data;
             } else {
                 if self.in_operation_closure {
-                    seterrq!(self.world, PetscErrorKind::PETSC_ERR_ORDER,
-                        "You can not set new trampoline data in an operation closure.")?;
+                    seterrq!(
+                        self.world,
+                        PetscErrorKind::PETSC_ERR_ORDER,
+                        "You can not set new trampoline data in an operation closure."
+                    )?;
                 }
                 let none_array = seq!(N in 0..148 { [ #( None, )* ] });
-                let td = MatShellTrampolineData { 
-                    world: self.world, user_funcs: none_array, data: mat_data };
+                let td = MatShellTrampolineData {
+                    world: self.world,
+                    user_funcs: none_array,
+                    data: mat_data,
+                };
                 let td_anchor = Box::pin(td);
-                let ierr = unsafe { petsc_raw::MatShellSetContext(self.mat_p,
-                    std::mem::transmute(td_anchor.as_ref())) }; // this will also erase the lifetimes
+                let ierr = unsafe {
+                    petsc_raw::MatShellSetContext(
+                        self.mat_p,
+                        std::mem::transmute(td_anchor.as_ref()),
+                    )
+                }; // this will also erase the lifetimes
                 unsafe { chkerrq!(self.world, ierr) }?;
                 self.shell_trampoline_data = Some(td_anchor);
             }
@@ -1021,7 +1342,7 @@ pub mod mat_shell {
         //        different enum for each method type. This would also make the trampoline type easier.
         //        We could also implement Into into each of those types from the base type. idk.
         //        We could basically use the same strategy that we are now with the `seq!` macro.
-        //     2. Make a new MatOperation enum that contains the rust closure type and have one 
+        //     2. Make a new MatOperation enum that contains the rust closure type and have one
         //        `shell_set_operation` function do all the work. This would mean that we would take Box<dyn _>
         //        and not a generic like we do now. I dont think this is the best way to do it, at lease
         //        on the user side, under the hood this makes more sense.
@@ -1065,13 +1386,17 @@ pub mod mat_shell {
         /// # let petsc = Petsc::init_no_args()?;
         /// // Note: this example will only work in a uniprocessor comm world.
         /// let mut x = Vector::from_slice(petsc.world(), &[c(1.2), c(-0.5)])?;
-        /// let mut y = Vector::from_slice(petsc.world(), &[c(0.0), c( 0.0)])?;
+        /// let mut y = Vector::from_slice(petsc.world(), &[c(0.0), c(0.0)])?;
         ///
         /// let theta = std::f64::consts::PI as PetscReal / c(2.0);
-        /// let mat_data = [PetscScalar::cos(theta), -PetscScalar::sin(theta),
-        ///                 PetscScalar::sin(theta),  PetscScalar::cos(theta)];
+        /// let mat_data = [
+        ///     PetscScalar::cos(theta),
+        ///     -PetscScalar::sin(theta),
+        ///     PetscScalar::sin(theta),
+        ///     PetscScalar::cos(theta),
+        /// ];
         /// // we can set the mat_data or access it by ref, here we set it
-        /// let mut mat = Mat::create_shell(petsc.world(),2,2,2,2, Box::new(mat_data))?;
+        /// let mut mat = Mat::create_shell(petsc.world(), 2, 2, 2, 2, Box::new(mat_data))?;
         /// mat.set_up()?;
         ///
         /// mat.shell_set_operation_mvv(MatOperation::MATOP_MULT, |m, x, y| {
@@ -1094,20 +1419,35 @@ pub mod mat_shell {
         ///
         /// mat.mult(&x, &mut y)?;
         /// # // assert!(y.view()?.slice(s![..]).abs_diff_eq(&array![0.5, 1.2], 1e-15));
-        /// assert!(slice_abs_diff_eq(y.view()?.as_slice().unwrap(), &[c(0.5), c(1.2)], 1e-15));
+        /// assert!(slice_abs_diff_eq(
+        ///     y.view()?.as_slice().unwrap(),
+        ///     &[c(0.5), c(1.2)],
+        ///     1e-15
+        /// ));
         /// mat.mult_transpose(&y, &mut x)?;
         /// # // assert!(x.view()?.slice(s![..]).abs_diff_eq(&array![1.2, -0.5], 1e-15));
-        /// assert!(slice_abs_diff_eq(x.view()?.as_slice().unwrap(), &[c(1.2), c(-0.5)], 1e-15));
+        /// assert!(slice_abs_diff_eq(
+        ///     x.view()?.as_slice().unwrap(),
+        ///     &[c(1.2), c(-0.5)],
+        ///     1e-15
+        /// ));
         /// # Ok(())
         /// # }
         /// ```
-        pub fn shell_set_operation_mvv<F>(&mut self, op: impl Into<MatOperationMVV>, user_f: F) -> Result<()>
+        pub fn shell_set_operation_mvv<F>(
+            &mut self,
+            op: impl Into<MatOperationMVV>,
+            user_f: F,
+        ) -> Result<()>
         where
-            F: Fn(&MatShell<'a, 'tl, T>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
+            F: Fn(&MatShell<'a, 'tl, T>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl,
         {
             if self.in_operation_closure {
-                seterrq!(self.world, PetscErrorKind::PETSC_ERR_ORDER,
-                    "You can not set operations in another operation.")?;
+                seterrq!(
+                    self.world,
+                    PetscErrorKind::PETSC_ERR_ORDER,
+                    "You can not set operations in another operation."
+                )?;
             }
 
             let op: MatOperationMVV = op.into();
@@ -1118,12 +1458,19 @@ pub mod mat_shell {
                 td.as_mut().user_funcs[op as usize] = Some(closure_anchor);
             } else {
                 let none_array = seq!(N in 0..148 { [ #( None, )* ] });
-                let mut td = MatShellTrampolineData { 
-                    world: self.world, user_funcs: none_array, data: None };
+                let mut td = MatShellTrampolineData {
+                    world: self.world,
+                    user_funcs: none_array,
+                    data: None,
+                };
                 td.user_funcs[op as usize] = Some(closure_anchor);
                 let td_anchor = Box::pin(td);
-                let ierr = unsafe { petsc_raw::MatShellSetContext(self.mat_p,
-                    std::mem::transmute(td_anchor.as_ref())) }; // this will also erase the lifetimes
+                let ierr = unsafe {
+                    petsc_raw::MatShellSetContext(
+                        self.mat_p,
+                        std::mem::transmute(td_anchor.as_ref()),
+                    )
+                }; // this will also erase the lifetimes
                 unsafe { chkerrq!(self.world, ierr) }?;
                 self.shell_trampoline_data = Some(td_anchor);
             }
@@ -1155,12 +1502,12 @@ pub mod mat_shell {
                     let MatShellTrampolineData { world, user_funcs, data } = trampoline_data.get_mut();
                     let world = *world;
 
-                    let mut mat = ManuallyDrop::new(MatShell::new(Mat::new(world, mat_p))); 
+                    let mut mat = ManuallyDrop::new(MatShell::new(Mat::new(world, mat_p)));
                     mat.tmp_mat_data = data.as_deref_mut();
                     mat.in_operation_closure = true;
                     let x = ManuallyDrop::new(Vector {world, vec_p: x_p });
                     let mut y = ManuallyDrop::new(Vector {world, vec_p: y_p });
-                    
+
                     (user_funcs[MAT_OPERATION_MVV_TABLE[N]].as_mut()
                         .map_or_else(
                             || seterrq!(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
@@ -1182,7 +1529,8 @@ pub mod mat_shell {
             // macro bellow to be the number of variants in `MatOperationMVV`, or the number of elements
             // in `MAT_OPERATION_MVV_TABLE`.
             let mut trampolines = [mat_shell_operation_mvv_trampoline_0::<T>
-                as unsafe extern "C" fn(_, _, _) -> _; NUM_MAT_OPS];
+                as unsafe extern "C" fn(_, _, _) -> _;
+                NUM_MAT_OPS];
             seq!(N in 0..4 {
                 debug_assert!(N < MAT_OPERATION_MVV_TABLE.len(),
                     "Internal Error: `shell_set_operation_mvv` was not updated, but `MAT_OPERATION_MVV_TABLE` was.");
@@ -1190,12 +1538,20 @@ pub mod mat_shell {
             });
 
             let mat_shell_operation_trampoline_ptr: ::std::option::Option<
-                unsafe extern "C" fn(mat_p: *mut petsc_raw::_p_Mat, x_p: *mut petsc_raw::_p_Vec,
-                y_p: *mut petsc_raw::_p_Vec, ) -> petsc_raw::PetscErrorCode, >
-                = Some(trampolines[op as usize]);
+                unsafe extern "C" fn(
+                    mat_p: *mut petsc_raw::_p_Mat,
+                    x_p: *mut petsc_raw::_p_Vec,
+                    y_p: *mut petsc_raw::_p_Vec,
+                ) -> petsc_raw::PetscErrorCode,
+            > = Some(trampolines[op as usize]);
 
-            let ierr = unsafe { petsc_raw::MatShellSetOperation(self.mat_p, op.into(),
-                std::mem::transmute(mat_shell_operation_trampoline_ptr)) }; // this will also erase the lifetimes
+            let ierr = unsafe {
+                petsc_raw::MatShellSetOperation(
+                    self.mat_p,
+                    op.into(),
+                    std::mem::transmute(mat_shell_operation_trampoline_ptr),
+                )
+            }; // this will also erase the lifetimes
             unsafe { chkerrq!(self.world, ierr) }?;
 
             Ok(())
@@ -1238,10 +1594,14 @@ pub mod mat_shell {
         /// let mut v = Vector::from_slice(petsc.world(), &[c(0.0), c(0.0)])?;
         ///
         /// let theta = std::f64::consts::PI as PetscReal / c(2.0);
-        /// let mat_data = [PetscScalar::cos(theta), -PetscScalar::sin(theta),
-        ///                 PetscScalar::sin(theta),  PetscScalar::cos(theta)];
+        /// let mat_data = [
+        ///     PetscScalar::cos(theta),
+        ///     -PetscScalar::sin(theta),
+        ///     PetscScalar::sin(theta),
+        ///     PetscScalar::cos(theta),
+        /// ];
         /// // we can set the mat_data or access it by ref, here we access it by ref
-        /// let mut mat = Mat::create_shell(petsc.world(),2,2,2,2,Box::new(()))?;
+        /// let mut mat = Mat::create_shell(petsc.world(), 2, 2, 2, 2, Box::new(()))?;
         /// mat.set_up()?;
         ///
         /// mat.shell_set_operation_mv(MatOperation::MATOP_GET_DIAGONAL, |_m, v| {
@@ -1253,37 +1613,55 @@ pub mod mat_shell {
         ///
         /// mat.get_diagonal(&mut v)?;
         /// # // assert!(v.view()?.slice(s![..]).abs_diff_eq(&array![0.0, 0.0], 1e-15));
-        /// assert!(slice_abs_diff_eq(v.view()?.as_slice().unwrap(), &[c(0.0), c(0.0)], 1e-15));
+        /// assert!(slice_abs_diff_eq(
+        ///     v.view()?.as_slice().unwrap(),
+        ///     &[c(0.0), c(0.0)],
+        ///     1e-15
+        /// ));
         /// # Ok(())
         /// # }
         /// ```
-        pub fn shell_set_operation_mv<F>(&mut self, op: impl Into<MatOperationMV>, user_f: F) -> Result<()>
+        pub fn shell_set_operation_mv<F>(
+            &mut self,
+            op: impl Into<MatOperationMV>,
+            user_f: F,
+        ) -> Result<()>
         where
-            F: Fn(&MatShell<'a, 'tl, T>, &mut Vector<'a>) -> Result<()> + 'tl
+            F: Fn(&MatShell<'a, 'tl, T>, &mut Vector<'a>) -> Result<()> + 'tl,
         {
             if self.in_operation_closure {
-                seterrq!(self.world, PetscErrorKind::PETSC_ERR_ORDER,
-                    "You can not set operations in another operation.")?;
+                seterrq!(
+                    self.world,
+                    PetscErrorKind::PETSC_ERR_ORDER,
+                    "You can not set operations in another operation."
+                )?;
             }
 
             let op: MatOperationMV = op.into();
             let closure_anchor = MatShellSingleOperationTrampolineData::MV(Box::new(user_f));
-        
+
             if let Some(td) = self.shell_trampoline_data.as_mut() {
                 let _ = td.as_mut().user_funcs[op as usize].take();
                 td.as_mut().user_funcs[op as usize] = Some(closure_anchor);
             } else {
                 let none_array = seq!(N in 0..148 { [ #( None, )* ] });
-                let mut td = MatShellTrampolineData { 
-                    world: self.world, user_funcs: none_array, data: None };
+                let mut td = MatShellTrampolineData {
+                    world: self.world,
+                    user_funcs: none_array,
+                    data: None,
+                };
                 td.user_funcs[op as usize] = Some(closure_anchor);
                 let td_anchor = Box::pin(td);
-                let ierr = unsafe { petsc_raw::MatShellSetContext(self.mat_p,
-                    std::mem::transmute(td_anchor.as_ref())) }; // this will also erase the lifetimes
+                let ierr = unsafe {
+                    petsc_raw::MatShellSetContext(
+                        self.mat_p,
+                        std::mem::transmute(td_anchor.as_ref()),
+                    )
+                }; // this will also erase the lifetimes
                 unsafe { chkerrq!(self.world, ierr) }?;
                 self.shell_trampoline_data = Some(td_anchor);
             }
-        
+
             // The `MatOperationMV` enum has 1 variants so we want to create 1 functions.
             // We use the `MAT_OPERATION_MV_TABLE` to get what the correct index is.
             // If you change `MatOperationMV`, then you have to update the number 1 used by the seq!
@@ -1300,7 +1678,7 @@ pub mod mat_shell {
                     let mut ctx = MaybeUninit::<*mut ::std::os::raw::c_void>::uninit();
                     let ierr = petsc_raw::MatShellGetContext(mat_p, ctx.as_mut_ptr() as *mut _);
                     assert_eq!(ierr, 0);
-        
+
                     // SAFETY: We construct ctx to be a Pin<Box<MatShellTrampolineData<T>>> but pass it in as a *void.
                     // Box<T> is equivalent to *T (or &T) for ffi. Because the MatShell owns the closure we can make sure
                     // everything in it (and the closure its self) lives for at least as long as this function can be
@@ -1311,11 +1689,11 @@ pub mod mat_shell {
                     let MatShellTrampolineData { world, user_funcs, data } = trampoline_data.get_mut();
                     let world = *world;
 
-                    let mut mat = ManuallyDrop::new(MatShell::new(Mat::new(world, mat_p))); 
+                    let mut mat = ManuallyDrop::new(MatShell::new(Mat::new(world, mat_p)));
                     mat.tmp_mat_data = data.as_deref_mut();
                     mat.in_operation_closure = true;
                     let mut v = ManuallyDrop::new(Vector {world, vec_p: v_p });
-        
+
                     (user_funcs[MAT_OPERATION_MV_TABLE[N]].as_mut()
                         .map_or_else(
                             || seterrq!(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
@@ -1343,19 +1721,26 @@ pub mod mat_shell {
                     "Internal Error: `shell_set_operation_mv` was not updated, but `MAT_OPERATION_MV_TABLE` was.");
                 trampolines[MAT_OPERATION_MV_TABLE[N]] = mat_shell_operation_mv_trampoline_#N::<T>;
             });
-        
+
             let mat_shell_operation_trampoline_ptr: ::std::option::Option<
-                unsafe extern "C" fn(mat_p: *mut petsc_raw::_p_Mat,
-                v_p: *mut petsc_raw::_p_Vec, ) -> petsc_raw::PetscErrorCode, >
-                = Some(trampolines[op as usize]);
-        
-            let ierr = unsafe { petsc_raw::MatShellSetOperation(self.mat_p, op.into(),
-                std::mem::transmute(mat_shell_operation_trampoline_ptr)) }; // this will also erase the lifetimes
+                unsafe extern "C" fn(
+                    mat_p: *mut petsc_raw::_p_Mat,
+                    v_p: *mut petsc_raw::_p_Vec,
+                ) -> petsc_raw::PetscErrorCode,
+            > = Some(trampolines[op as usize]);
+
+            let ierr = unsafe {
+                petsc_raw::MatShellSetOperation(
+                    self.mat_p,
+                    op.into(),
+                    std::mem::transmute(mat_shell_operation_trampoline_ptr),
+                )
+            }; // this will also erase the lifetimes
             unsafe { chkerrq!(self.world, ierr) }?;
-        
+
             Ok(())
         }
-        
+
         /// Allows user to set a matrix operation for a shell matrix.
         ///
         /// Works in the same way [`MatShell::shell_set_operation_mvv()`] works, but you can only set operations
@@ -1372,33 +1757,48 @@ pub mod mat_shell {
         ///     * `v1` - The first input vector
         ///     * `v2` - The second input vector
         ///     * `v3` *(output)* - The output vector
-        pub fn shell_set_operation_mvvv<F>(&mut self, op: impl Into<MatOperationMVVV>, user_f: F) -> Result<()>
+        pub fn shell_set_operation_mvvv<F>(
+            &mut self,
+            op: impl Into<MatOperationMVVV>,
+            user_f: F,
+        ) -> Result<()>
         where
-            F: Fn(&MatShell<'a, 'tl, T>, &Vector<'a>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl
+            F: Fn(&MatShell<'a, 'tl, T>, &Vector<'a>, &Vector<'a>, &mut Vector<'a>) -> Result<()>
+                + 'tl,
         {
             if self.in_operation_closure {
-                seterrq!(self.world, PetscErrorKind::PETSC_ERR_ORDER,
-                    "You can not set operations in another operation.")?;
+                seterrq!(
+                    self.world,
+                    PetscErrorKind::PETSC_ERR_ORDER,
+                    "You can not set operations in another operation."
+                )?;
             }
 
             let op: MatOperationMVVV = op.into();
             let closure_anchor = MatShellSingleOperationTrampolineData::MVVV(Box::new(user_f));
-        
+
             if let Some(td) = self.shell_trampoline_data.as_mut() {
                 let _ = td.as_mut().user_funcs[op as usize].take();
                 td.as_mut().user_funcs[op as usize] = Some(closure_anchor);
             } else {
                 let none_array = seq!(N in 0..148 { [ #( None, )* ] });
-                let mut td = MatShellTrampolineData { 
-                    world: self.world, user_funcs: none_array, data: None };
+                let mut td = MatShellTrampolineData {
+                    world: self.world,
+                    user_funcs: none_array,
+                    data: None,
+                };
                 td.user_funcs[op as usize] = Some(closure_anchor);
                 let td_anchor = Box::pin(td);
-                let ierr = unsafe { petsc_raw::MatShellSetContext(self.mat_p,
-                    std::mem::transmute(td_anchor.as_ref())) }; // this will also erase the lifetimes
+                let ierr = unsafe {
+                    petsc_raw::MatShellSetContext(
+                        self.mat_p,
+                        std::mem::transmute(td_anchor.as_ref()),
+                    )
+                }; // this will also erase the lifetimes
                 unsafe { chkerrq!(self.world, ierr) }?;
                 self.shell_trampoline_data = Some(td_anchor);
             }
-        
+
             // The `MatOperationMVVV` enum has 4 variants so we want to create 4 functions.
             // We use the `MAT_OPERATION_MVVV_TABLE` to get what the correct index is.
             // If you change `MatOperationMVVV`, then you have to update the number 1 used by the seq!
@@ -1415,7 +1815,7 @@ pub mod mat_shell {
                     let mut ctx = MaybeUninit::<*mut ::std::os::raw::c_void>::uninit();
                     let ierr = petsc_raw::MatShellGetContext(mat_p, ctx.as_mut_ptr() as *mut _);
                     assert_eq!(ierr, 0);
-        
+
                     // SAFETY: We construct ctx to be a Pin<Box<MatShellTrampolineData<T>>> but pass it in as a *void.
                     // Box<T> is equivalent to *T (or &T) for ffi. Because the MatShell owns the closure we can make sure
                     // everything in it (and the closure its self) lives for at least as long as this function can be
@@ -1426,13 +1826,13 @@ pub mod mat_shell {
                     let MatShellTrampolineData { world, user_funcs, data } = trampoline_data.get_mut();
                     let world = *world;
 
-                    let mut mat = ManuallyDrop::new(MatShell::new(Mat::new(world, mat_p))); 
+                    let mut mat = ManuallyDrop::new(MatShell::new(Mat::new(world, mat_p)));
                     mat.tmp_mat_data = data.as_deref_mut();
                     mat.in_operation_closure = true;
                     let v1 = ManuallyDrop::new(Vector {world, vec_p: v1_p });
                     let v2 = ManuallyDrop::new(Vector {world, vec_p: v2_p });
                     let mut v3 = ManuallyDrop::new(Vector {world, vec_p: v3_p });
-        
+
                     (user_funcs[MAT_OPERATION_MVVV_TABLE[N]].as_mut()
                         .map_or_else(
                             || seterrq!(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
@@ -1454,22 +1854,32 @@ pub mod mat_shell {
             // macro bellow to be the number of variants in `MatOperationMVVV`, or the number of elements
             // in `MAT_OPERATION_MVVV_TABLE`.
             let mut trampolines = [mat_shell_operation_mvvv_trampoline_0::<T>
-                as unsafe extern "C" fn(_, _, _, _) -> _; NUM_MAT_OPS];
+                as unsafe extern "C" fn(_, _, _, _) -> _;
+                NUM_MAT_OPS];
             seq!(N in 0..4 {
                 debug_assert!(N < MAT_OPERATION_MVVV_TABLE.len(),
                     "Internal Error: `shell_set_operation_mvvv` was not updated, but `MAT_OPERATION_MVVV_TABLE` was.");
                 trampolines[MAT_OPERATION_MVVV_TABLE[N]] = mat_shell_operation_mvvv_trampoline_#N::<T>;
             });
-        
+
             let mat_shell_operation_trampoline_ptr: ::std::option::Option<
-                unsafe extern "C" fn(mat_p: *mut petsc_raw::_p_Mat, v1_p: *mut petsc_raw::_p_Vec,
-                    v2_p: *mut petsc_raw::_p_Vec, v3_p: *mut petsc_raw::_p_Vec, ) -> petsc_raw::PetscErrorCode, >
-                = Some(trampolines[op as usize]);
-        
-            let ierr = unsafe { petsc_raw::MatShellSetOperation(self.mat_p, op.into(),
-                std::mem::transmute(mat_shell_operation_trampoline_ptr)) }; // this will also erase the lifetimes
+                unsafe extern "C" fn(
+                    mat_p: *mut petsc_raw::_p_Mat,
+                    v1_p: *mut petsc_raw::_p_Vec,
+                    v2_p: *mut petsc_raw::_p_Vec,
+                    v3_p: *mut petsc_raw::_p_Vec,
+                ) -> petsc_raw::PetscErrorCode,
+            > = Some(trampolines[op as usize]);
+
+            let ierr = unsafe {
+                petsc_raw::MatShellSetOperation(
+                    self.mat_p,
+                    op.into(),
+                    std::mem::transmute(mat_shell_operation_trampoline_ptr),
+                )
+            }; // this will also erase the lifetimes
             unsafe { chkerrq!(self.world, ierr) }?;
-        
+
             Ok(())
         }
 
@@ -1511,9 +1921,13 @@ pub mod mat_shell {
         /// let v_add = Vector::from_slice(petsc.world(), &[c(1.2), c(2.1)])?;
         ///
         /// let theta = c(std::f64::consts::PI as PetscReal);
-        /// let mat_data = [PetscScalar::cos(theta), -PetscScalar::sin(theta),
-        ///                 PetscScalar::sin(theta),  PetscScalar::cos(theta)];
-        /// let mut mat = Mat::create_shell(petsc.world(),2,2,2,2, Box::new(mat_data))?;
+        /// let mat_data = [
+        ///     PetscScalar::cos(theta),
+        ///     -PetscScalar::sin(theta),
+        ///     PetscScalar::sin(theta),
+        ///     PetscScalar::cos(theta),
+        /// ];
+        /// let mut mat = Mat::create_shell(petsc.world(), 2, 2, 2, 2, Box::new(mat_data))?;
         /// mat.shell_set_manage_scaling_shifts()?;
         /// mat.set_up()?;
         ///
@@ -1539,46 +1953,72 @@ pub mod mat_shell {
         /// })?;
         ///
         /// mat.get_diagonal(&mut v)?;
-        /// assert!(slice_abs_diff_eq(v.view()?.as_slice().unwrap(),&[c(-1.0), c(-1.0)], 1e-15));
+        /// assert!(slice_abs_diff_eq(
+        ///     v.view()?.as_slice().unwrap(),
+        ///     &[c(-1.0), c(-1.0)],
+        ///     1e-15
+        /// ));
         /// # // assert!(v.view()?.slice(s![..]).abs_diff_eq(&array![-1.0, -1.0], 1e-15));
         /// mat.diagonal_set(&v_add, InsertMode::ADD_VALUES)?;
         /// mat.get_diagonal(&mut v)?;
-        /// assert!(slice_abs_diff_eq(v.view()?.as_slice().unwrap(),&[c(0.2), c(1.1)], 1e-15));
+        /// assert!(slice_abs_diff_eq(
+        ///     v.view()?.as_slice().unwrap(),
+        ///     &[c(0.2), c(1.1)],
+        ///     1e-15
+        /// ));
         /// # // assert!(v.view()?.slice(s![..]).abs_diff_eq(&array![0.2, 1.1], 1e-15));
         /// mat.diagonal_set(&v_add, InsertMode::INSERT_VALUES)?;
         /// mat.get_diagonal(&mut v)?;
-        /// assert!(slice_abs_diff_eq(v.view()?.as_slice().unwrap(),&[c(1.2), c(2.1)], 1e-15));
+        /// assert!(slice_abs_diff_eq(
+        ///     v.view()?.as_slice().unwrap(),
+        ///     &[c(1.2), c(2.1)],
+        ///     1e-15
+        /// ));
         /// # // assert!(v.view()?.slice(s![..]).abs_diff_eq(&array![1.2, 2.1], 1e-15));
         /// # Ok(())
         /// # }
         /// ```
-        pub fn shell_set_operation_mvi<F>(&mut self, op: impl Into<MatOperationMVI>, user_f: F) -> Result<()>
+        pub fn shell_set_operation_mvi<F>(
+            &mut self,
+            op: impl Into<MatOperationMVI>,
+            user_f: F,
+        ) -> Result<()>
         where
-            F: FnMut(&mut MatShell<'a, 'tl, T>, &Vector<'a>, InsertMode) -> Result<()> + 'tl
+            F: FnMut(&mut MatShell<'a, 'tl, T>, &Vector<'a>, InsertMode) -> Result<()> + 'tl,
         {
             if self.in_operation_closure {
-                seterrq!(self.world, PetscErrorKind::PETSC_ERR_ORDER,
-                    "You can not set operations in another operation.")?;
+                seterrq!(
+                    self.world,
+                    PetscErrorKind::PETSC_ERR_ORDER,
+                    "You can not set operations in another operation."
+                )?;
             }
 
             let op: MatOperationMVI = op.into();
             let closure_anchor = MatShellSingleOperationTrampolineData::MVI(Box::new(user_f));
-        
+
             if let Some(td) = self.shell_trampoline_data.as_mut() {
                 let _ = td.as_mut().user_funcs[op as usize].take();
                 td.as_mut().user_funcs[op as usize] = Some(closure_anchor);
             } else {
                 let none_array = seq!(N in 0..148 { [ #( None, )* ] });
-                let mut td = MatShellTrampolineData { 
-                    world: self.world, user_funcs: none_array, data: None };
+                let mut td = MatShellTrampolineData {
+                    world: self.world,
+                    user_funcs: none_array,
+                    data: None,
+                };
                 td.user_funcs[op as usize] = Some(closure_anchor);
                 let td_anchor = Box::pin(td);
-                let ierr = unsafe { petsc_raw::MatShellSetContext(self.mat_p,
-                    std::mem::transmute(td_anchor.as_ref())) }; // this will also erase the lifetimes
+                let ierr = unsafe {
+                    petsc_raw::MatShellSetContext(
+                        self.mat_p,
+                        std::mem::transmute(td_anchor.as_ref()),
+                    )
+                }; // this will also erase the lifetimes
                 unsafe { chkerrq!(self.world, ierr) }?;
                 self.shell_trampoline_data = Some(td_anchor);
             }
-        
+
             // The `MatOperationMVI` enum has 1 variants so we want to create 1 functions.
             // We use the `MAT_OPERATION_MVI_TABLE` to get what the correct index is.
             // If you change `MatOperationMVI`, then you have to update the number 1 used by the seq!
@@ -1595,7 +2035,7 @@ pub mod mat_shell {
                     let mut ctx = MaybeUninit::<*mut ::std::os::raw::c_void>::uninit();
                     let ierr = petsc_raw::MatShellGetContext(mat_p, ctx.as_mut_ptr() as *mut _);
                     assert_eq!(ierr, 0);
-        
+
                     // SAFETY: We construct ctx to be a Pin<Box<MatShellTrampolineData<T>>> but pass it in as a *void.
                     // Box<T> is equivalent to *T (or &T) for ffi. Because the MatShell owns the closure we can make sure
                     // everything in it (and the closure its self) lives for at least as long as this function can be
@@ -1606,11 +2046,11 @@ pub mod mat_shell {
                     let MatShellTrampolineData { world, user_funcs, data } = trampoline_data.get_mut();
                     let world = *world;
 
-                    let mut mat = ManuallyDrop::new(MatShell::new(Mat::new(world, mat_p))); 
+                    let mut mat = ManuallyDrop::new(MatShell::new(Mat::new(world, mat_p)));
                     mat.tmp_mat_data = data.as_deref_mut();
                     mat.in_operation_closure = true;
                     let v = ManuallyDrop::new(Vector {world, vec_p: v_p });
-        
+
                     (user_funcs[MAT_OPERATION_MVI_TABLE[N]].as_mut()
                         .map_or_else(
                             || seterrq!(world, PetscErrorKind::PETSC_ERR_ARG_CORRUPT,
@@ -1632,28 +2072,38 @@ pub mod mat_shell {
             // macro bellow to be the number of variants in `MatOperationMVI`, or the number of elements
             // in `MAT_OPERATION_MVI_TABLE`.
             let mut trampolines = [mat_shell_operation_mvi_trampoline_0::<T>
-                as unsafe extern "C" fn(_, _, _) -> _; NUM_MAT_OPS];
+                as unsafe extern "C" fn(_, _, _) -> _;
+                NUM_MAT_OPS];
             seq!(N in 0..1 {
                 debug_assert!(N < MAT_OPERATION_MVI_TABLE.len(),
                     "Internal Error: `shell_set_operation_mv` was not updated, but `MAT_OPERATION_MVI_TABLE` was.");
                 trampolines[MAT_OPERATION_MVI_TABLE[N]] = mat_shell_operation_mvi_trampoline_#N::<T>;
             });
-        
+
             let mat_shell_operation_trampoline_ptr: ::std::option::Option<
-                unsafe extern "C" fn(mat_p: *mut petsc_raw::_p_Mat,
-                v_p: *mut petsc_raw::_p_Vec, im: InsertMode) -> petsc_raw::PetscErrorCode, >
-                = Some(trampolines[op as usize]);
-        
-            let ierr = unsafe { petsc_raw::MatShellSetOperation(self.mat_p, op.into(),
-                std::mem::transmute(mat_shell_operation_trampoline_ptr)) }; // this will also erase the lifetimes
+                unsafe extern "C" fn(
+                    mat_p: *mut petsc_raw::_p_Mat,
+                    v_p: *mut petsc_raw::_p_Vec,
+                    im: InsertMode,
+                ) -> petsc_raw::PetscErrorCode,
+            > = Some(trampolines[op as usize]);
+
+            let ierr = unsafe {
+                petsc_raw::MatShellSetOperation(
+                    self.mat_p,
+                    op.into(),
+                    std::mem::transmute(mat_shell_operation_trampoline_ptr),
+                )
+            }; // this will also erase the lifetimes
             unsafe { chkerrq!(self.world, ierr) }?;
-        
+
             Ok(())
         }
 
         /// Sets the type of [`Vector`] returned by [`Mat::create_vectors()`].
         pub fn shell_set_vector_type(&mut self, vtype: VectorType) -> Result<()> {
-            let type_name_cs = ::std::ffi::CString::new(vtype.to_string()).expect("`CString::new` failed");
+            let type_name_cs =
+                ::std::ffi::CString::new(vtype.to_string()).expect("`CString::new` failed");
             let ierr = unsafe { petsc_raw::MatShellSetVecType(self.mat_p, type_name_cs.as_ptr()) };
             unsafe { chkerrq!(self.world, ierr) }
         }
@@ -1677,13 +2127,14 @@ pub mod mat_shell {
         /// # #[cfg(not(feature = "petsc-use-complex-unsafe"))]
         /// # fn slice_abs_diff_eq(s1: &[PetscScalar], s2: &[PetscScalar], tol: PetscReal) -> bool {
         /// # s1.len() == s2.len() && s1.iter().zip(s2).all(|(a,b)| (a-b).abs() < tol) }
-        /// fn my_mat_duplicate<'a, 'tl>(mat: &MatShell<'a, 'tl, [PetscScalar; 4]>, _op: MatDuplicateOption)
-        ///     -> petsc_rs::Result<MatShell<'a, 'tl, [PetscScalar; 4]>>
-        /// {
+        /// fn my_mat_duplicate<'a, 'tl>(
+        ///     mat: &MatShell<'a, 'tl, [PetscScalar; 4]>,
+        ///     _op: MatDuplicateOption,
+        /// ) -> petsc_rs::Result<MatShell<'a, 'tl, [PetscScalar; 4]>> {
         ///     let mat_data = mat.get_mat_data().unwrap();
         ///     let (mg, ng) = mat.get_global_size()?;
         ///     let (m, n) = mat.get_local_size()?;
-        ///     
+        ///
         ///     let mut new_mat = Mat::create_shell(mat.world(), m, n, mg, ng, Box::new(mat_data.clone()))?;
         ///     // We can't clone closures so we have to re set them.
         ///     new_mat.shell_set_operation_mvv(MatOperation::MATOP_MULT, my_mat_mult)?;
@@ -1691,7 +2142,11 @@ pub mod mat_shell {
         ///     Ok(new_mat)
         /// }
         ///
-        /// fn my_mat_mult(m: &MatShell<[PetscScalar; 4]>, x: &Vector, y: &mut Vector) -> petsc_rs::Result<()> {
+        /// fn my_mat_mult(
+        ///     m: &MatShell<[PetscScalar; 4]>,
+        ///     x: &Vector,
+        ///     y: &mut Vector,
+        /// ) -> petsc_rs::Result<()> {
         ///     let mat_data = m.get_mat_data().unwrap();
         ///     let xx = x.view()?;
         ///     let mut yy = y.view_mut()?;
@@ -1704,12 +2159,16 @@ pub mod mat_shell {
         /// # let petsc = Petsc::init_no_args()?;
         /// // Note: this example will only work in a uniprocessor comm world.
         /// let mut x = Vector::from_slice(petsc.world(), &[c(1.2), c(-0.5)])?;
-        /// let mut y = Vector::from_slice(petsc.world(), &[c(0.0), c( 0.0)])?;
+        /// let mut y = Vector::from_slice(petsc.world(), &[c(0.0), c(0.0)])?;
         ///
         /// let theta = std::f64::consts::PI as PetscReal / c(2.0);
-        /// let mat_data = [PetscScalar::cos(theta), -PetscScalar::sin(theta),
-        ///                 PetscScalar::sin(theta),  PetscScalar::cos(theta)];
-        /// let mut mat = Mat::create_shell(petsc.world(),2,2,2,2, Box::new(mat_data))?;
+        /// let mat_data = [
+        ///     PetscScalar::cos(theta),
+        ///     -PetscScalar::sin(theta),
+        ///     PetscScalar::sin(theta),
+        ///     PetscScalar::cos(theta),
+        /// ];
+        /// let mut mat = Mat::create_shell(petsc.world(), 2, 2, 2, 2, Box::new(mat_data))?;
         /// mat.shell_set_manage_scaling_shifts()?;
         /// mat.set_up()?;
         ///
@@ -1719,17 +2178,29 @@ pub mod mat_shell {
         ///
         /// mat.mult(&x, &mut y)?;
         /// # // assert!(y.view()?.slice(s![..]).abs_diff_eq(&array![0.5, 1.2], 1e-15));
-        /// assert!(slice_abs_diff_eq(y.view()?.as_slice().unwrap(), &[c(0.5), c(1.2)], 1e-15));
+        /// assert!(slice_abs_diff_eq(
+        ///     y.view()?.as_slice().unwrap(),
+        ///     &[c(0.5), c(1.2)],
+        ///     1e-15
+        /// ));
         ///
         /// let new_mat = mat.clone(); // calls `mat.duplicate`
         /// new_mat.mult(&y, &mut x)?;
         /// # // assert!(x.view()?.slice(s![..]).abs_diff_eq(&array![-1.2, 0.5], 1e-15));
-        /// assert!(slice_abs_diff_eq(x.view()?.as_slice().unwrap(), &[c(-1.2), c(0.5)], 1e-15));
+        /// assert!(slice_abs_diff_eq(
+        ///     x.view()?.as_slice().unwrap(),
+        ///     &[c(-1.2), c(0.5)],
+        ///     1e-15
+        /// ));
         ///
         /// let new_new_mat = new_mat.clone(); // calls `mat.duplicate`
         /// new_mat.mult(&x, &mut y)?;
         /// # // assert!(y.view()?.slice(s![..]).abs_diff_eq(&array![-0.5, -1.2], 1e-15));
-        /// assert!(slice_abs_diff_eq(y.view()?.as_slice().unwrap(), &[c(-0.5), c(-1.2)], 1e-15));
+        /// assert!(slice_abs_diff_eq(
+        ///     y.view()?.as_slice().unwrap(),
+        ///     &[c(-0.5), c(-1.2)],
+        ///     1e-15
+        /// ));
         /// # Ok(())
         /// # }
         /// ```
@@ -1738,28 +2209,41 @@ pub mod mat_shell {
             F: Fn(&MatShell<'a, 'tl, T>, MatDuplicateOption) -> Result<MatShell<'a, 'tl, T>> + 'tl,
         {
             if self.in_operation_closure {
-                seterrq!(self.world, PetscErrorKind::PETSC_ERR_ORDER,
-                    "You can not set operations in another operation.")?;
+                seterrq!(
+                    self.world,
+                    PetscErrorKind::PETSC_ERR_ORDER,
+                    "You can not set operations in another operation."
+                )?;
             }
 
             let closure_anchor = MatShellSingleOperationTrampolineData::Duplicate(Box::new(user_f));
-        
+
             if let Some(td) = self.shell_trampoline_data.as_mut() {
                 let _ = td.as_mut().user_funcs[MatOperation::MATOP_DUPLICATE as usize].take();
-                td.as_mut().user_funcs[MatOperation::MATOP_DUPLICATE as usize] = Some(closure_anchor);
+                td.as_mut().user_funcs[MatOperation::MATOP_DUPLICATE as usize] =
+                    Some(closure_anchor);
             } else {
                 let none_array = seq!(N in 0..148 { [ #( None, )* ] });
-                let mut td = MatShellTrampolineData { 
-                    world: self.world, user_funcs: none_array, data: None };
+                let mut td = MatShellTrampolineData {
+                    world: self.world,
+                    user_funcs: none_array,
+                    data: None,
+                };
                 td.user_funcs[MatOperation::MATOP_DUPLICATE as usize] = Some(closure_anchor);
                 let td_anchor = Box::pin(td);
-                let ierr = unsafe { petsc_raw::MatShellSetContext(self.mat_p,
-                    std::mem::transmute(td_anchor.as_ref())) }; // this will also erase the lifetimes
+                let ierr = unsafe {
+                    petsc_raw::MatShellSetContext(
+                        self.mat_p,
+                        std::mem::transmute(td_anchor.as_ref()),
+                    )
+                }; // this will also erase the lifetimes
                 unsafe { chkerrq!(self.world, ierr) }?;
                 self.shell_trampoline_data = Some(td_anchor);
             }
-        
-            let ierr = unsafe { petsc_raw::MatShellSetOperation(self.mat_p, MatOperation::MATOP_DUPLICATE, None) };
+
+            let ierr = unsafe {
+                petsc_raw::MatShellSetOperation(self.mat_p, MatOperation::MATOP_DUPLICATE, None)
+            };
             unsafe { chkerrq!(self.world, ierr) }
         }
 
@@ -1774,35 +2258,79 @@ pub mod mat_shell {
             // This is by no means safe rust code.
             let is_assembled: bool = unsafe { &*self.mat_p }.assembled.into();
             if op == MatDuplicateOption::MAT_COPY_VALUES && !is_assembled {
-                seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
-                    "MAT_COPY_VALUES not allowed for unassembled matrix")?;
+                seterrq!(
+                    self.world,
+                    PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+                    "MAT_COPY_VALUES not allowed for unassembled matrix"
+                )?;
             }
             if unsafe { &*self.mat_p }.factortype != petsc_raw::MatFactorType::MAT_FACTOR_NONE {
-                seterrq!(self.world, PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
-                    "`duplicate`: Not for factored matrix")?;
+                seterrq!(
+                    self.world,
+                    PetscErrorKind::PETSC_ERR_ARG_WRONGSTATE,
+                    "`duplicate`: Not for factored matrix"
+                )?;
             }
 
             if let Some(td) = self.shell_trampoline_data.as_ref() {
-                if let Some(MatShellSingleOperationTrampolineData::Duplicate(ref duplicate))
-                    = td.as_ref().user_funcs[MatOperation::MATOP_DUPLICATE as usize]
+                if let Some(MatShellSingleOperationTrampolineData::Duplicate(ref duplicate)) =
+                    td.as_ref().user_funcs[MatOperation::MATOP_DUPLICATE as usize]
                 {
                     // This code is taken from the `PetscLogEventBegin/End` macros in `include/petsclog.h`
                     // TODO: should we make is an actuall function
-                    let petsc_log_event_with = |plb_ple: Option<unsafe extern "C" fn(petsc_raw::PetscLogEvent, 
-                        ::std::os::raw::c_int, petsc_raw::PetscObject, petsc_raw::PetscObject, 
-                        petsc_raw::PetscObject, petsc_raw::PetscObject) -> petsc_raw::PetscErrorCode>| -> Result<()>
-                    {
+                    let petsc_log_event_with = |plb_ple: Option<
+                        unsafe extern "C" fn(
+                            petsc_raw::PetscLogEvent,
+                            ::std::os::raw::c_int,
+                            petsc_raw::PetscObject,
+                            petsc_raw::PetscObject,
+                            petsc_raw::PetscObject,
+                            petsc_raw::PetscObject,
+                        ) -> petsc_raw::PetscErrorCode,
+                    >|
+                     -> Result<()> {
                         if let Some(petsc_log_plb) = plb_ple {
                             let mut petsc_stagelog = MaybeUninit::uninit();
-                            let ierr = unsafe { petsc_raw::PetscLogGetStageLog(petsc_stagelog.as_mut_ptr()) };
+                            let ierr = unsafe {
+                                petsc_raw::PetscLogGetStageLog(petsc_stagelog.as_mut_ptr())
+                            };
                             unsafe { chkerrq!(self.world, ierr) }?;
 
                             let petsc_stagelog = unsafe { &*petsc_stagelog.assume_init() };
-                            let stage_info = unsafe { std::slice::from_raw_parts_mut(petsc_stagelog.stageInfo, petsc_stagelog.maxStages as usize) };
-                            if  stage_info[petsc_stagelog.curStage as usize].perfInfo.active.into() {
-                                let event_info = unsafe { std::slice::from_raw_parts_mut((&*stage_info[petsc_stagelog.curStage as usize].eventLog).eventInfo, (&*stage_info[petsc_stagelog.curStage as usize].eventLog).maxEvents as usize) };
-                                if event_info[unsafe { petsc_raw::MAT_Convert } as usize].active.into() {
-                                    let ierr = unsafe { petsc_log_plb(petsc_raw::MAT_Convert, 0, self.mat_p as *mut _, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut()) };
+                            let stage_info = unsafe {
+                                std::slice::from_raw_parts_mut(
+                                    petsc_stagelog.stageInfo,
+                                    petsc_stagelog.maxStages as usize,
+                                )
+                            };
+                            if stage_info[petsc_stagelog.curStage as usize]
+                                .perfInfo
+                                .active
+                                .into()
+                            {
+                                let event_info = unsafe {
+                                    std::slice::from_raw_parts_mut(
+                                        (&*stage_info[petsc_stagelog.curStage as usize].eventLog)
+                                            .eventInfo,
+                                        (&*stage_info[petsc_stagelog.curStage as usize].eventLog)
+                                            .maxEvents
+                                            as usize,
+                                    )
+                                };
+                                if event_info[unsafe { petsc_raw::MAT_Convert } as usize]
+                                    .active
+                                    .into()
+                                {
+                                    let ierr = unsafe {
+                                        petsc_log_plb(
+                                            petsc_raw::MAT_Convert,
+                                            0,
+                                            self.mat_p as *mut _,
+                                            std::ptr::null_mut(),
+                                            std::ptr::null_mut(),
+                                            std::ptr::null_mut(),
+                                        )
+                                    };
                                     unsafe { chkerrq!(self.world, ierr) }?;
                                 }
                             }
@@ -1831,31 +2359,48 @@ pub mod mat_shell {
 
                     let mut dm_p = MaybeUninit::zeroed();
                     let cstr = CString::new("__PETSc_dm").expect("`CString::new` failed");
-                    let ierr = unsafe { petsc_raw::PetscObjectQuery(self.mat_p as *mut _, cstr.as_ptr(), dm_p.as_mut_ptr()) };
+                    let ierr = unsafe {
+                        petsc_raw::PetscObjectQuery(
+                            self.mat_p as *mut _,
+                            cstr.as_ptr(),
+                            dm_p.as_mut_ptr(),
+                        )
+                    };
                     unsafe { chkerrq!(self.world(), ierr) }?;
-                    let dm_p_nn = NonNull::new(unsafe { dm_p.assume_init() } );
+                    let dm_p_nn = NonNull::new(unsafe { dm_p.assume_init() });
                     if let Some(dm_p) = dm_p_nn {
-                        let ierr = unsafe { petsc_raw::PetscObjectCompose(new_mat_ref as *mut _ as *mut _, cstr.as_ptr(), dm_p.as_ptr()) };
+                        let ierr = unsafe {
+                            petsc_raw::PetscObjectCompose(
+                                new_mat_ref as *mut _ as *mut _,
+                                cstr.as_ptr(),
+                                dm_p.as_ptr(),
+                            )
+                        };
                         unsafe { chkerrq!(self.world(), ierr) }?;
                     }
 
                     // Does: PetscLogEventEnd(MAT_Convert,mat,0,0,0);CHKERRQ(ierr);
                     petsc_log_event_with(unsafe { petsc_raw::PetscLogPLE })?;
 
-                    unsafe { &mut *(new_mat_ref as *mut _ as *mut petsc_raw::_p_PetscObject) }.state += 1;
+                    unsafe { &mut *(new_mat_ref as *mut _ as *mut petsc_raw::_p_PetscObject) }
+                        .state += 1;
 
                     Ok(new_mat)
-                }
-                else
-                {
-                    seterrq!(self.world, PetscErrorKind::PETSC_ERR_SUP, 
-                        "No `duplicate` operation written for matrix type `MatShell`\n")
-                            .map(|_| unreachable!())
+                } else {
+                    seterrq!(
+                        self.world,
+                        PetscErrorKind::PETSC_ERR_SUP,
+                        "No `duplicate` operation written for matrix type `MatShell`\n"
+                    )
+                    .map(|_| unreachable!())
                 }
             } else {
-                seterrq!(self.world, PetscErrorKind::PETSC_ERR_SUP, 
-                    "No `duplicate` operation written for matrix type `MatShell`\n")
-                        .map(|_| unreachable!())
+                seterrq!(
+                    self.world,
+                    PetscErrorKind::PETSC_ERR_SUP,
+                    "No `duplicate` operation written for matrix type `MatShell`\n"
+                )
+                .map(|_| unreachable!())
             }
         }
     }
@@ -1863,7 +2408,10 @@ pub mod mat_shell {
     impl<'a, 'tl, T> Clone for MatShell<'a, 'tl, T> {
         /// Same as [`x.duplicate(MatDuplicateOption::MAT_COPY_VALUES)`](MatShell::duplicate()).
         fn clone(&self) -> Self {
-            Petsc::unwrap_or_abort(MatShell::duplicate(&self, MatDuplicateOption::MAT_COPY_VALUES), self.world())
+            Petsc::unwrap_or_abort(
+                MatShell::duplicate(&self, MatDuplicateOption::MAT_COPY_VALUES),
+                self.world(),
+            )
         }
     }
 
@@ -1888,7 +2436,10 @@ pub mod mat_shell {
                 MatOperation::MATOP_SOLVE_TRANSPOSE => MatOperationMVV::MATOP_SOLVE_TRANSPOSE,
                 // There are more
                 // TODO: use petsc_panic, maybe grab the global comm world from mpi
-                _ => panic!("The given op: `{:?}` can not be turned into a `MatOperationMVV`", op)
+                _ => panic!(
+                    "The given op: `{:?}` can not be turned into a `MatOperationMVV`",
+                    op
+                ),
             }
         }
     }
@@ -1913,7 +2464,10 @@ pub mod mat_shell {
                 MatOperation::MATOP_SOLVE => MatOperationMVVV::MATOP_SOLVE_ADD,
                 MatOperation::MATOP_SOLVE_TRANSPOSE => MatOperationMVVV::MATOP_SOLVE_TRANSPOSE_ADD,
                 // There are more
-                _ => panic!("The given op: `{:?}` can not be turned into a `MatOperationMVVV`", op)
+                _ => panic!(
+                    "The given op: `{:?}` can not be turned into a `MatOperationMVVV`",
+                    op
+                ),
             }
         }
     }
@@ -1935,7 +2489,10 @@ pub mod mat_shell {
             match op {
                 MatOperation::MATOP_GET_DIAGONAL => MatOperationMV::MATOP_GET_DIAGONAL,
                 // There are more
-                _ => panic!("The given op: `{:?}` can not be turned into a `MatOperationMV`", op)
+                _ => panic!(
+                    "The given op: `{:?}` can not be turned into a `MatOperationMV`",
+                    op
+                ),
             }
         }
     }
@@ -1957,7 +2514,10 @@ pub mod mat_shell {
             match op {
                 MatOperation::MATOP_DIAGONAL_SET => MatOperationMVI::MATOP_DIAGONAL_SET,
                 // There are more
-                _ => panic!("The given op: `{:?}` can not be turned into a `MatOperationMVI`", op)
+                _ => panic!(
+                    "The given op: `{:?}` can not be turned into a `MatOperationMVI`",
+                    op
+                ),
             }
         }
     }
@@ -1977,7 +2537,7 @@ pub mod mat_shell {
     }
 
     // macro impls
-    impl<'a, 'tl, T> MatShell<'a, 'tl, T> {    
+    impl<'a, 'tl, T> MatShell<'a, 'tl, T> {
         wrap_simple_petsc_member_funcs! {
             MatShellSetManageScalingShifts, pub shell_set_manage_scaling_shifts, takes mut, #[doc = "Allows the user to control the scaling and shift operations of the [`MatShell`].\n\n\
                 Must be called immediately after [`MatShell::create()`]."];
@@ -1988,21 +2548,38 @@ pub mod mat_shell {
 impl<'a, 'tl> Clone for Mat<'a, 'tl> {
     /// Same as [`x.duplicate(MatDuplicateOption::MAT_COPY_VALUES)`](Mat::duplicate()).
     fn clone(&self) -> Self {
-        Petsc::unwrap_or_abort(self.duplicate(MatDuplicateOption::MAT_COPY_VALUES), self.world())
+        Petsc::unwrap_or_abort(
+            self.duplicate(MatDuplicateOption::MAT_COPY_VALUES),
+            self.world(),
+        )
     }
 }
 
 impl<'a, 'tl, 'bv> BorrowMat<'a, 'tl, 'bv> {
     #[allow(dead_code)]
-    pub(crate) fn new(owned_mat: ManuallyDrop<Mat<'a, 'tl>>, drop_func: Option<Box<dyn FnOnce(&mut BorrowMat<'a, 'tl, 'bv>) + 'bv>>) -> Self {
-        BorrowMat { owned_mat, drop_func, _phantom: PhantomData }
+    pub(crate) fn new(
+        owned_mat: ManuallyDrop<Mat<'a, 'tl>>,
+        drop_func: Option<Box<dyn FnOnce(&mut BorrowMat<'a, 'tl, 'bv>) + 'bv>>,
+    ) -> Self {
+        BorrowMat {
+            owned_mat,
+            drop_func,
+            _phantom: PhantomData,
+        }
     }
 }
 
 impl<'a, 'tl, 'bv> BorrowMatMut<'a, 'tl, 'bv> {
     #[allow(dead_code)]
-    pub(crate) fn new(owned_mat: ManuallyDrop<Mat<'a, 'tl>>, drop_func: Option<Box<dyn FnOnce(&mut BorrowMatMut<'a, 'tl, 'bv>) + 'bv>>) -> Self {
-        BorrowMatMut { owned_mat, drop_func, _phantom: PhantomData }
+    pub(crate) fn new(
+        owned_mat: ManuallyDrop<Mat<'a, 'tl>>,
+        drop_func: Option<Box<dyn FnOnce(&mut BorrowMatMut<'a, 'tl, 'bv>) + 'bv>>,
+    ) -> Self {
+        BorrowMatMut {
+            owned_mat,
+            drop_func,
+            _phantom: PhantomData,
+        }
     }
 }
 
@@ -2039,23 +2616,36 @@ impl<'a> NullSpace<'a> {
     /// the constant vector); these vectors must be orthonormal.
     ///
     /// Note, the "constant vector" is the vector with all entries being the same.
-    pub fn create<T: Into<Vec<Vector<'a>>>>(world: &'a UserCommunicator, has_const: bool, vecs: T) -> Result<Self> {
+    pub fn create<T: Into<Vec<Vector<'a>>>>(
+        world: &'a UserCommunicator,
+        has_const: bool,
+        vecs: T,
+    ) -> Result<Self> {
         let vecs: Vec<Vector<'a>> = vecs.into();
         let vecs_p: Vec<_> = vecs.iter().map(|v| v.vec_p).collect();
         let n = vecs.len() as PetscInt;
 
         let mut ns_p = MaybeUninit::uninit();
-        let ierr = unsafe { petsc_raw::MatNullSpaceCreate(
-            world.as_raw(), has_const.into(),
-            n, vecs_p.as_ptr(), ns_p.as_mut_ptr()) };
+        let ierr = unsafe {
+            petsc_raw::MatNullSpaceCreate(
+                world.as_raw(),
+                has_const.into(),
+                n,
+                vecs_p.as_ptr(),
+                ns_p.as_mut_ptr(),
+            )
+        };
         unsafe { chkerrq!(world, ierr) }?;
 
-        Ok(NullSpace { world: world, ns_p: unsafe { ns_p.assume_init() } })
+        Ok(NullSpace {
+            world: world,
+            ns_p: unsafe { ns_p.assume_init() },
+        })
     }
 }
 
 // Macro impls
-impl<'a> Mat<'a, '_> {    
+impl<'a> Mat<'a, '_> {
     wrap_simple_petsc_member_funcs! {
         MatSetFromOptions, pub set_from_options, takes mut, #[doc = "Configures the Mat from the options database."];
         MatSetUp, pub set_up, takes mut, #[doc = "Sets up the internal matrix data structures for later use"];
@@ -2137,7 +2727,7 @@ impl<'a> NullSpace<'a> {
     }
 }
 
-impl_petsc_object_traits! { 
+impl_petsc_object_traits! {
     Mat, mat_p, petsc_raw::_p_Mat, MatView, MatDestroy, '_;
     NullSpace, ns_p, petsc_raw::_p_MatNullSpace, MatNullSpaceView, MatNullSpaceDestroy;
 }

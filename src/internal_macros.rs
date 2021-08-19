@@ -14,7 +14,7 @@
 /// These can be repeated multiple times to define multiple methods in one macro call.
 /// Also supports doc strings
 /// It is "simple" if it no type conversion is need between the petsc-rs types and the ones used by petsc-raw (or petsc-sys)
-/// 
+///
 /// # Usage
 ///
 /// Say we have a petsc function like `VecNorm` which is defined to be `pub unsafe fn VecNorm(arg1: Vec, arg2: NormType, arg3: *mut PetscReal) -> PetscErrorCode`
@@ -31,7 +31,7 @@
 /// Note, for the raw PETSc function, `VecNorm` in this case, do not include the `petsc_raw::` as it is done internally.
 ///
 /// For a more general case lets say we have a Petsc function called `VecSetABRetCD`
-/// that is defined as follows (from bindgen): 
+/// that is defined as follows (from bindgen):
 /// `pub unsafe fn VecSetABRetCD(arg1: Vec, arg2: PetscInt, arg3: PetscReal, arg4: *mut PetscReal, arg5: *mut PetscInt) -> PetscErrorCode`
 /// It takes in two inputs `arg2` and `arg3` and returns two outputs with `arg4` and
 /// `arg5` (through pointers). For reference the rust `petsc_rs::Vector` type is defined as the following:
@@ -47,14 +47,14 @@
 /// This can be done with the [`impl_petsc_object_traits!`] macro. Once a wrapper type implements
 /// [`PetscAsRaw`](crate::PetscAsRaw), so does `Option<T>` where the `None` case becomes null.
 ///
-/// We can then using the macro in the following way to create the function 
+/// We can then using the macro in the following way to create the function
 /// `pub fn set_ab_ret_cd(&mut self, a: i32, b: f64) -> crate::Result<(f64, i32)>`
 /// Note, you should use `PetscInt` and `PetscReal` instead of `i32` and `f64`.
 /// I'm just using `i32` and `f64` to save horizontal space in this example.
 /// ```ignore
 /// impl Vec<'_> {
 ///     wrap_simple_petsc_member_funcs! {
-///         VecSetABRetCD, pub set_ab_ret_cd, input i32, a, input f64, b, 
+///         VecSetABRetCD, pub set_ab_ret_cd, input i32, a, input f64, b,
 /// //         ^            ^         ^            ^
 /// //    PETSc func name   └─ vis    │            ├─ Then for each input
 /// //                           rust func name   put `input <type>, <param_name>,`
@@ -84,7 +84,7 @@
 /// }
 /// ```
 /// Note, simple method you give, `as_raw` in this case, is applied before the `.into()`.
-/// 
+///
 /// Like inputs, the output types can differ from the raw output types as long as `.into()` can
 /// be use for conversion. The following is an example returns a `bool` but the raw function
 /// returns a `petsc_raw::PetscBool`. Currently this macro can not be use to return anything that
@@ -112,9 +112,9 @@
 ///     owned_dm: Option<DM<'a, 'tl>>,
 ///     // some fields omitted
 /// }
-/// 
+///
 /// impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> { // ┌ You need the lifetime parameters
-///     wrap_simple_petsc_member_funcs! { //  v 
+///     wrap_simple_petsc_member_funcs! { //  v
 ///         KSPSetDM, pub set_dm, input DM<'a, 'tl>, dm .as_raw consume .owned_dm,
 /// //                                                     ^      ^         ^
 /// //                         Note, `as_raw` is only used ┘      │         │
@@ -156,7 +156,7 @@ $(
         #[allow(unused_unsafe)]
         unsafe { chkerrq!(self.world(), ierr) }?;
 
-        $($( 
+        $($(
             let _ = self.$member.take();
             self.$member = Some($param_name);
         )?)*
@@ -168,9 +168,8 @@ $(
     };
 }
 
-
-/// This macro is used specifically to wrap PETSc preallocate functions. It cover all the different 
-/// input patterns for that. 
+/// This macro is used specifically to wrap PETSc preallocate functions. It cover all the different
+/// input patterns for that.
 /// These can be repeated multiple times to define multiple like methods.
 macro_rules! wrap_prealloc_petsc_member_funcs {
     {$(
@@ -180,11 +179,11 @@ $(
     $( #[$att] )+
     pub fn $new_func(&mut self, $($arg1: crate::PetscInt,)? $($arg2: crate::PetscInt, $arg3: ::std::option::Option<&[PetscInt]>),+) -> crate::Result<()> {
         let ierr = unsafe { crate::petsc_raw::$raw_func(
-            self.as_raw(), 
+            self.as_raw(),
             $( $arg1, )?
             $(
                 $arg2,
-                $arg3.map(|o| o.as_ptr()).unwrap_or(::std::ptr::null()) 
+                $arg3.map(|o| o.as_ptr()).unwrap_or(::std::ptr::null())
             ),+ ) };
         unsafe { chkerrq!(self.world(), ierr) }
     }
@@ -222,14 +221,14 @@ macro_rules! impl_petsc_object_traits {
             fn as_raw(&self) -> Self::Raw {
                 self.$raw_ptr_var
             }
-        } 
+        }
 
         unsafe impl<'a> crate::PetscAsRawMut for $struct_name<'a, $( $add_lt ),*> {
             #[inline]
             fn as_raw_mut(&mut self) -> *mut Self::Raw {
                 &mut self.$raw_ptr_var as *mut _
             }
-        } 
+        }
 
         impl<'a> crate::PetscObject<'a, $raw_ptr_ty> for $struct_name<'a, $( $add_lt ),*> {
             #[inline]
@@ -286,7 +285,7 @@ macro_rules! function_name {
         }
         let name = type_name_of(f);
         &name[..name.len() - 3]
-    }}
+    }};
 }
 
 /// Calls [`Petsc::check_error()`](crate::Petsc::check_error()) with the line number, function name, and file name added.
@@ -296,21 +295,31 @@ macro_rules! function_name {
 ///
 /// Note, this is unsafe to use because [`Petsc::check_error()`](crate::Petsc::check_error()) is unsafe.
 macro_rules! chkerrq {
-    ($world:expr, $ierr_code:expr) => ({
+    ($world:expr, $ierr_code:expr) => {{
         #[allow(unused_unsafe)]
-        crate::Petsc::check_error($world, line!() as i32, function_name!(), file!(), $ierr_code)
-    });
+        crate::Petsc::check_error(
+            $world,
+            line!() as i32,
+            function_name!(),
+            file!(),
+            $ierr_code,
+        )
+    }};
 }
 
 /// Calls [`Petsc::set_error2()`](crate::Petsc::set_error2()) with the line number, function name, and file name added.
 ///
 /// For now, this macro is only intended for internal use.
 macro_rules! seterrq {
-    ($world:expr, $err_kind:expr, $err_msg:expr) => ({
+    ($world:expr, $err_kind:expr, $err_msg:expr) => {{
         #[allow(unused_unsafe)]
         crate::Petsc::set_error2(
-            $world, Some(line!() as i32), Some(function_name!()),
-            Some(file!()), $err_kind, $err_msg
+            $world,
+            Some(line!() as i32),
+            Some(function_name!()),
+            Some(file!()),
+            $err_kind,
+            $err_msg,
         )
-    });
+    }};
 }

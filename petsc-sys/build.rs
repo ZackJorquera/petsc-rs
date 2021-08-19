@@ -11,8 +11,8 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
 
-use quote::{ToTokens, quote};
 use proc_macro2::{Ident, Span};
+use quote::{quote, ToTokens};
 use syn::ItemConst;
 // use semver::Version;
 
@@ -25,8 +25,13 @@ fn rustfmt_string(code_str: &str) -> Cow<'_, str> {
         .stderr(Stdio::null())
         .spawn()
     {
-        child.stdin.as_mut().unwrap().write_all(code_str.as_bytes()).unwrap();
-        
+        child
+            .stdin
+            .as_mut()
+            .unwrap()
+            .write_all(code_str.as_bytes())
+            .unwrap();
+
         if let Ok(output) = child.wait_with_output() {
             if output.status.success() {
                 return Cow::Owned(String::from_utf8(output.stdout).unwrap());
@@ -41,8 +46,16 @@ fn rustfmt_string(code_str: &str) -> Cow<'_, str> {
 /// have to do `#[repr(i32)]` however c_int isn't always the same as `i32` all the
 /// time. So this will cause an error if `c_int` (cast_type) isn't the same as `i32` (repr_type).
 /// We also add some tests to the test function.
-fn create_enum_from_consts(name: Ident, items: Vec<ItemConst>, repr_type: proc_macro2::TokenStream, cast_type: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
-    let fn_ident = Ident::new(&format!("create_enum_from_consts_test_layout_{}", name), Span::call_site());
+fn create_enum_from_consts(
+    name: Ident,
+    items: Vec<ItemConst>,
+    repr_type: proc_macro2::TokenStream,
+    cast_type: proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
+    let fn_ident = Ident::new(
+        &format!("create_enum_from_consts_test_layout_{}", name),
+        Span::call_site(),
+    );
     let item_idents = items.into_iter().map(|i| i.ident);
     let item_idents2 = item_idents.clone();
     quote! {
@@ -90,7 +103,10 @@ fn create_enum_from_consts(name: Ident, items: Vec<ItemConst>, repr_type: proc_m
 fn create_type_enum_and_table(name: Ident, items: Vec<ItemConst>) -> proc_macro2::TokenStream {
     let enum_ident = Ident::new(&format!("{}Enum", name), Span::call_site());
     let table_ident = Ident::new(&format!("{}_TABLE", name).to_uppercase(), Span::call_site());
-    let fn_ident = Ident::new(&format!("create_type_enum_and_table_test_values_{}", name), Span::call_site());
+    let fn_ident = Ident::new(
+        &format!("create_type_enum_and_table_test_values_{}", name),
+        Span::call_site(),
+    );
     let item_idents = items.into_iter().map(|i| i.ident).collect::<Vec<_>>();
     let i = 0usize..item_idents.len();
     let item_idents2 = item_idents.clone();
@@ -185,21 +201,25 @@ fn create_all_type_enums(consts: &Vec<ItemConst>) -> proc_macro2::TokenStream {
     ];
     assert_eq!(enum_ident_strs.len() * 2, regex_pats.len());
 
-    let token_streams = enum_ident_strs.iter().zip(regex_pats.chunks_exact(2)).map(|(&name, pats)| {
-        let ident = Ident::new(name, Span::call_site());
-        let re1 = regex::Regex::new(pats[0]).unwrap();
-        let re2 = regex::Regex::new(pats[1]).unwrap();
-        let consts_for_enum = consts.iter().filter_map(|c| {
-            let s = format!("{}", c.ident.to_token_stream());
-            if re1.is_match(&s) && !re2.is_match(&s) {
-                Some(c.clone())
-            } else {
-                None
-            }
-        });
-        
-        create_type_enum_and_table(ident, consts_for_enum.collect())
-    });
+    let token_streams =
+        enum_ident_strs
+            .iter()
+            .zip(regex_pats.chunks_exact(2))
+            .map(|(&name, pats)| {
+                let ident = Ident::new(name, Span::call_site());
+                let re1 = regex::Regex::new(pats[0]).unwrap();
+                let re2 = regex::Regex::new(pats[1]).unwrap();
+                let consts_for_enum = consts.iter().filter_map(|c| {
+                    let s = format!("{}", c.ident.to_token_stream());
+                    if re1.is_match(&s) && !re2.is_match(&s) {
+                        Some(c.clone())
+                    } else {
+                        None
+                    }
+                });
+
+                create_type_enum_and_table(ident, consts_for_enum.collect())
+            });
 
     quote! {
         #(
@@ -212,35 +232,56 @@ fn main() {
     // TODO: get source and build petsc (idk, follow what rsmpi does maybe)
     // also look at libffi and how they do it with an external src
 
-    let features = ["CARGO_FEATURE_PETSC_REAL_F64",
-                    "CARGO_FEATURE_PETSC_REAL_F32",
-                    "CARGO_FEATURE_PETSC_USE_COMPLEX_UNSAFE",
-                    "CARGO_FEATURE_PETSC_INT_I32",
-                    "CARGO_FEATURE_PETSC_INT_I64",
-                    "CARGO_FEATURE_GENERATE_ENUMS",
-                    "CARGO_FEATURE_USE_PRIVATE_HEADERS"].iter()
-        .map(|&x| env::var(x).ok().map(|o| if o == "1" { Some(x) } else { None }).flatten())
-        .flatten().collect::<Vec<_>>();
+    let features = [
+        "CARGO_FEATURE_PETSC_REAL_F64",
+        "CARGO_FEATURE_PETSC_REAL_F32",
+        "CARGO_FEATURE_PETSC_USE_COMPLEX_UNSAFE",
+        "CARGO_FEATURE_PETSC_INT_I32",
+        "CARGO_FEATURE_PETSC_INT_I64",
+        "CARGO_FEATURE_GENERATE_ENUMS",
+        "CARGO_FEATURE_USE_PRIVATE_HEADERS",
+    ]
+    .iter()
+    .map(|&x| {
+        env::var(x)
+            .ok()
+            .map(|o| if o == "1" { Some(x) } else { None })
+            .flatten()
+    })
+    .flatten()
+    .collect::<Vec<_>>();
 
     println!("cargo:rerun-if-env-changed=PETSC_DIR");
     println!("cargo:rerun-if-env-changed=PETSC_ARCH");
     println!("cargo:rerun-if-env-changed=PETSC_ARCH_RELEASE");
     println!("cargo:rerun-if-env-changed=PKG_CONFIG_PATH");
 
-    let real_features = features.iter().filter(|a| a.contains("PETSC_REAL_"))
-        .copied().collect::<Vec<_>>();
+    let real_features = features
+        .iter()
+        .filter(|a| a.contains("PETSC_REAL_"))
+        .copied()
+        .collect::<Vec<_>>();
     let use_complex_feature = features.contains(&"CARGO_FEATURE_PETSC_USE_COMPLEX_UNSAFE");
-    let int_features = features.iter().filter(|a| a.contains("PETSC_INT_"))
-        .copied().collect::<Vec<_>>();
+    let int_features = features
+        .iter()
+        .filter(|a| a.contains("PETSC_INT_"))
+        .copied()
+        .collect::<Vec<_>>();
     let generate_enums_feature = features.contains(&"CARGO_FEATURE_GENERATE_ENUMS");
     let use_private_headers = features.contains(&"CARGO_FEATURE_USE_PRIVATE_HEADERS");
-    
-    assert_eq!(real_features.len(),  1, 
+
+    assert_eq!(
+        real_features.len(),
+        1,
         "There must be exactly one \"petsc-real-*\" feature enabled. There are {} enabled.",
-            real_features.len());
-    assert_eq!(int_features.len(), 1, 
+        real_features.len()
+    );
+    assert_eq!(
+        int_features.len(),
+        1,
         "There must be exactly one \"petsc-int-*\" feature enabled. There are {} enabled.",
-            int_features.len());
+        int_features.len()
+    );
 
     // let profile = env::var("PROFILE").expect("No profile set.");
 
@@ -250,7 +291,7 @@ fn main() {
     // let lib_version = Version::parse(&lib.version).unwrap();
     // let header_version = petsc_lib.get_version_from_consts();
     // eprintln!("lib found: {:?}, lib version: {:?} header version: {:?}", lib, lib_version, header_version);
-    
+
     let mut bindings = bindgen::Builder::default();
 
     for dir in &lib.link_paths {
@@ -266,12 +307,12 @@ fn main() {
         // TODO: what does this do? it requires the crate libloading
         // bindings = bindings.dynamic_library_name(lib);
     }
-    
+
     // Tell cargo to invalidate the built crate whenever the wrapper changes
     println!("cargo:rerun-if-changed=src/petsc_wrapper.h");
 
     for dir in &lib.include_paths {
-        //println!("cargo:rerun-if-changed={}", dir.to_string_lossy());
+        // println!("cargo:rerun-if-changed={}", dir.to_string_lossy());
         bindings = bindings.clang_arg(format!("-I{}", dir.to_string_lossy()));
     }
 
@@ -310,27 +351,24 @@ fn main() {
         // The input header we would like to generate
         // bindings for.
         .header("src/petsc_wrapper.h")
-
         .emit_builtins()
-
         .whitelist_function("[A-Z][a-zA-Z0-9]*(_Private)?")
         .whitelist_type("[A-Z][a-zA-Z0-9_]*")
         .whitelist_var("[A-Z][a-zA-Z0-9_]*")
-
         .opaque_type("FILE")
-
         // There is no need to make bindings for mpi types as that has already been done in the mpi crate
         .blacklist_item("(O?MPI|o?mpi)[\\w_]*")
         .blacklist_item("FP\\w*") // we need this because PETSc defines FP_* things twice and we will get errors
         // .raw_line("use mpi::ffi::*;")
-
         // Tell cargo to not mangle the function names
         .trust_clang_mangling(false)
         // Tell cargo to invalidate the built crate whenever any of the
         // included header files changed.
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
         // Make C enums into rust enums not consts
-        .default_enum_style(bindgen::EnumVariation::Rust{non_exhaustive:false})
+        .default_enum_style(bindgen::EnumVariation::Rust {
+            non_exhaustive: false,
+        })
         // Generate Comments
         .generate_comments(true)
         // Finish the builder and generate the bindings.
@@ -353,32 +391,55 @@ fn main() {
     file.read_to_string(&mut content).unwrap();
     let raw = syn::parse_file(&content).expect("Could not read generated bindings");
 
-    let raw_const_items = raw.items.iter()
+    let raw_const_items = raw
+        .items
+        .iter()
         .filter_map(|item| match item {
             syn::Item::Const(c_item) => Some(c_item.clone()),
             _ => None,
-        }).collect::<Vec<_>>();
+        })
+        .collect::<Vec<_>>();
 
     // Find all variables named: PETSC_ERR_*
-    let petsc_err_consts = raw_const_items.iter()
-        .filter_map(|c_item| if format!("{}", c_item.ident.to_token_stream()).contains("PETSC_ERR_") {
-            Some(c_item.clone())
-        } else {
-            None
-        }).collect::<Vec<_>>();
-    
+    let petsc_err_consts = raw_const_items
+        .iter()
+        .filter_map(|c_item| {
+            if format!("{}", c_item.ident.to_token_stream()).contains("PETSC_ERR_") {
+                Some(c_item.clone())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
     if generate_enums_feature {
         let enum_file = out_path.join("enums.rs");
         let mut f = File::create(enum_file).unwrap();
-        assert_eq!(size_of::<i32>(), size_of::<c_int>(), "Size of i32 and c_int");
-        assert_eq!(align_of::<i32>(), align_of::<c_int>(), "Align of i32 and c_int");
-        let code_string = format!("{}\n{}", 
+        assert_eq!(
+            size_of::<i32>(),
+            size_of::<c_int>(),
+            "Size of i32 and c_int"
+        );
+        assert_eq!(
+            align_of::<i32>(),
+            align_of::<c_int>(),
+            "Align of i32 and c_int"
+        );
+        let code_string = format!(
+            "{}\n{}",
             // We want `i32` as the repr type because `PetscErrorCode` is `i32` (or really it is `c_int`)
             // `c_int` isn't always a i32, and we cant do `#[repr(c_int)]` so we want detect the true
             // type of c_int and use that. Right now we just hard code the repr type to be `i32` and cast to
             // `c_int` so that we get compiler error when they differ. We also do the above asserts.
-            create_enum_from_consts(Ident::new("PetscErrorCodeEnum", Span::call_site()), petsc_err_consts, quote!{i32}, quote!{::std::os::raw::c_int}).into_token_stream(),
-            create_all_type_enums(&raw_const_items).into_token_stream());
+            create_enum_from_consts(
+                Ident::new("PetscErrorCodeEnum", Span::call_site()),
+                petsc_err_consts,
+                quote! {i32},
+                quote! {::std::os::raw::c_int}
+            )
+            .into_token_stream(),
+            create_all_type_enums(&raw_const_items).into_token_stream()
+        );
         f.write(rustfmt_string(&code_string).as_bytes()).unwrap();
     }
 
@@ -404,7 +465,7 @@ fn main() {
         assert!(!petsc_lib.defines_contains("PETSC_USE_COMPLEX"),
                 "PETSc is compiled to use complex for scalar, but the feature \"petsc-use-complex-unsafe\" is no set.");
     }
-    
+
     match int_features[0]
     {
         "CARGO_FEATURE_PETSC_INT_I64" => assert!(petsc_lib.defines_contains("PETSC_USE_64BIT_INDICES"),

@@ -11,16 +11,29 @@ fn main() {
         hv.pre = Prerelease::EMPTY;
         hv
     };
-    
+
     // We remove the pre-release because it makes things hard to compare
-    let petsc_version_3_16 = VersionReq::parse("=3.16").unwrap().matches(&header_version_without_pre);
-    let petsc_version_ge_3_16 = VersionReq::parse(">=3.16.0").unwrap().matches(&header_version_without_pre);
-    let petsc_version_3_15 = VersionReq::parse("~3.15").unwrap().matches(&header_version_without_pre);
-    let petsc_version_3 = VersionReq::parse("^3.15").unwrap().matches(&header_version_without_pre);
-    let petsc_version_ge_4 = VersionReq::parse(">=4").unwrap().matches(&header_version_without_pre);
+    let petsc_version_3_16 = VersionReq::parse("=3.16")
+        .unwrap()
+        .matches(&header_version_without_pre);
+    let petsc_version_ge_3_16 = VersionReq::parse(">=3.16.0")
+        .unwrap()
+        .matches(&header_version_without_pre);
+    let petsc_version_3_15 = VersionReq::parse("~3.15")
+        .unwrap()
+        .matches(&header_version_without_pre);
+    let petsc_version_3 = VersionReq::parse("^3.15")
+        .unwrap()
+        .matches(&header_version_without_pre);
+    let petsc_version_ge_4 = VersionReq::parse(">=4")
+        .unwrap()
+        .matches(&header_version_without_pre);
 
     if petsc_version_3_16 && petsc_version_prerelease {
-        println!("cargo:warning={}", "The current PETSc build is pre-release. petsc-rs will have unstable features");
+        println!(
+            "cargo:warning={}",
+            "The current PETSc build is pre-release. petsc-rs will have unstable features"
+        );
         println!("cargo:rustc-cfg=petsc_version_3_16_dev");
     } else if petsc_version_ge_3_16 {
         println!("cargo:rustc-cfg=petsc_version_ge_3_16");

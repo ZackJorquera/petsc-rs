@@ -40,7 +40,7 @@
 //! `petsc_println_sync!(petsc.world(), "(Process: {}) global vec:\n{:.1}", petsc.world().rank(), *dm.da_vec_view(&global)?);`
 //!
 //! ```text
-//! (Process: 0) global vec: 
+//! (Process: 0) global vec:
 //! [[0.0, 3.0],
 //!  [1.0, 4.0],
 //!  [2.0, 5.0]]
@@ -63,8 +63,8 @@
 
 static HELP_MSG: &str = "Tests VecView() contour plotting for 2d DMDAs.\n\n";
 
-use petsc_rs::prelude::*;
 use mpi::traits::*;
+use petsc_rs::prelude::*;
 
 struct Opt {
     star_stencil: bool,
@@ -75,7 +75,10 @@ impl PetscOpt for Opt {
     fn from_petsc_opt_builder(pob: &mut PetscOptBuilder) -> petsc_rs::Result<Self> {
         let star_stencil = pob.options_bool("-star_stencil", "", "dm-ex1", false)?;
         let view_global = pob.options_bool("-view_global", "", "dm-ex1", false)?;
-        Ok(Opt { star_stencil, view_global })
+        Ok(Opt {
+            star_stencil,
+            view_global,
+        })
     }
 }
 
@@ -87,14 +90,33 @@ fn main() -> petsc_rs::Result<()> {
         .help_msg(HELP_MSG)
         .init()?;
 
-    let Opt { star_stencil, view_global } = petsc.options_get()?;
-    
+    let Opt {
+        star_stencil,
+        view_global,
+    } = petsc.options_get()?;
+
     let viewer = petsc.viewer_create_ascii_stdout()?;
 
-    /* Create distributed array and get vectors */
-    let stype = if star_stencil {DMDAStencilType::DMDA_STENCIL_STAR} else {DMDAStencilType::DMDA_STENCIL_BOX};
-    let mut dm = DM::da_create_2d(petsc.world(), DMBoundaryType::DM_BOUNDARY_NONE, DMBoundaryType::DM_BOUNDARY_NONE,
-        stype, m, n, None, None, 1, 1, None, None)?;
+    // Create distributed array and get vectors
+    let stype = if star_stencil {
+        DMDAStencilType::DMDA_STENCIL_STAR
+    } else {
+        DMDAStencilType::DMDA_STENCIL_BOX
+    };
+    let mut dm = DM::da_create_2d(
+        petsc.world(),
+        DMBoundaryType::DM_BOUNDARY_NONE,
+        DMBoundaryType::DM_BOUNDARY_NONE,
+        stype,
+        m,
+        n,
+        None,
+        None,
+        1,
+        1,
+        None,
+        None,
+    )?;
     dm.set_from_options()?;
     dm.set_up()?;
 
@@ -110,9 +132,19 @@ fn main() -> petsc_rs::Result<()> {
 
     dm.view_with(Some(&viewer))?;
     if view_global {
-        petsc_println_sync!(petsc.world(), "(Process: {}) global vec (flat):\n{:0.1}", petsc.world().rank(), *global.view()?)?;
+        petsc_println_sync!(
+            petsc.world(),
+            "(Process: {}) global vec (flat):\n{:0.1}",
+            petsc.world().rank(),
+            *global.view()?
+        )?;
 
-        petsc_println_sync!(petsc.world(), "(Process: {}) global vec:\n{:0.1}", petsc.world().rank(), *dm.da_vec_view(&global)?)?;
+        petsc_println_sync!(
+            petsc.world(),
+            "(Process: {}) global vec:\n{:0.1}",
+            petsc.world().rank(),
+            *dm.da_vec_view(&global)?
+        )?;
 
         // Note, this might print the vector in a different order than the above two
         global.view_with(Some(&viewer))?;

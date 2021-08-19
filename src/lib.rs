@@ -8,7 +8,7 @@
 //! MPI through the `mpi` crate from [`rsmpi`](https://github.com/rsmpi/rsmpi).
 //!
 //! ## Basic Usage
-//! 
+//!
 //! First, you will need to add `petsc-rs` to your `Cargo.toml`.
 //! ```toml
 //! [dependencies]
@@ -36,13 +36,13 @@
 //!     Ok(())
 //! }
 //! ```
-//! 
+//!
 //! All PETSc routines return a [`petsc_rs::Result`](crate::Result), which is a wrapper around the
 //! standard [`Result`](std::result::Result) type which indicates whether an error has occurred during
 //! the call.
 //!
 //! ## Features
-//! 
+//!
 //! PETSc has support for multiple different sizes of scalars and integers. This is exposed
 //! to rust with different features that you can set. The following are all the features that
 //! can be set. Note, you are required to have exactly one scalar feature set and exactly
@@ -71,36 +71,36 @@
 //! ```
 //!
 //! ## Using `petsc-sys`
-//! 
+//!
 //! If you wish to use raw bindings from `petsc-sys` in the same crate that you are using `petsc-rs`
 //! you can import the `petsc-sys` crate with the following line in your `Cargo.toml`. An example of
 //! using both `petsc-rs` and `petsc-sys` can be found in
 //! [`examples/snes/src/ex12.rs`](https://gitlab.com/petsc/petsc-rs/-/blob/main/examples/snes/src/ex12.rs).
-//! 
+//!
 //! ```toml
 //! [dependencies]
 //! petsc-sys = { git = "https://gitlab.com/petsc/petsc-rs/", branch = "main", default-features = false }
 //! ```
-//! 
+//!
 //! Note, `petsc-sys` has the same type related feature flags as `petsc-rs`, and `petsc-rs` will pass
 //! its flags to `petsc-sys`. To avoid conflicts you should use `default-features = false` when importing
 //! `petsc-sys` so that you don't accidentally enable any additional flags.
-//! 
+//!
 //! ## Using `mpi`
-//! 
+//!
 //! If you want to use `mpi` in your project, you MUST use `rsmpi v0.6` or above. Currently, this isn't
 //! available on [crates.io](https://crates.io/) so you will have to get it from the GitHub repo. You
 //! can do that by adding the following to your `Cargo.toml`.
-//! 
+//!
 //! ```toml
 //! [dependencies]
 //! mpi = { git = "https://github.com/rsmpi/rsmpi.git", branch = "main" }
 //! ```
-//! 
+//!
 //! Or to be consistent with `petsc-rs` you can use `rev = "82e1d35"` instead of `branch = "main"`.
 //!
 //! ## Further Reading
-//! 
+//!
 //! - [C API Getting Started](https://petsc.org/release/documentation/manual/getting_started/)
 //!
 //! - [C API Programming with PETSc/TAO](https://petsc.org/release/documentation/manual/programming/)
@@ -111,7 +111,7 @@
 
 use std::fmt::Display;
 use std::marker::PhantomData;
-use std::ops::{Deref, Bound, RangeBounds};
+use std::ops::{Bound, Deref, RangeBounds};
 use std::os::raw::{c_char, c_int};
 use std::vec;
 
@@ -124,67 +124,57 @@ pub(crate) mod petsc_raw {
     pub use petsc_sys::*;
 }
 
-pub use petsc_raw::{PetscInt, PetscReal};
 pub use petsc_raw::NormType;
+pub use petsc_raw::{PetscInt, PetscReal};
 
-use mpi::{self, traits::*};
-use std::mem::{MaybeUninit, ManuallyDrop};
-use std::ffi::{CString, CStr, };
 use mpi::topology::UserCommunicator;
+use mpi::{self, traits::*};
+use std::ffi::{CStr, CString};
+use std::mem::{ManuallyDrop, MaybeUninit};
 
 pub(crate) mod internal_macros;
 
-pub mod vector;
-pub mod mat;
-pub mod ksp;
-#[path = "preconditioner.rs"] pub mod pc; // TODO: or should i just rename the file
-pub mod viewer;
-pub mod snes;
 pub mod dm;
 pub mod indexset;
+pub mod ksp;
+pub mod mat;
+#[path = "preconditioner.rs"]
+pub mod pc; // TODO: or should i just rename the file
+pub mod snes;
 pub mod spaces;
+pub mod vector;
+pub mod viewer;
 
-use vector::Vector;
-use mat::Mat;
 use ksp::KSP;
+use mat::Mat;
 use snes::SNES;
+use vector::Vector;
 use viewer::Viewer;
 
 pub mod prelude {
     //! Commonly used items.
-    pub use crate::{
-        Petsc,
-        PetscErrorKind,
-        PetscError,
-        InsertMode,
-        PetscInt,
-        PetscScalar,
-        PetscReal,
-        PetscAsRaw,
-        PetscAsRawMut,
-        PetscObject,
-        PetscOptBuilder,
-        petsc_println,
-        petsc_println_sync,
-        petsc_print,
-        petsc_print_sync,
-        petsc_panic,
-        vector::{Vector, VecOption, VectorType, },
-        mat::{Mat, MatAssemblyType, MatOption, MatDuplicateOption, MatStencil, NullSpace, MatType,
-            MatOperation, },
-        ksp::{KSP, KSPType, },
-        snes::{SNES, DomainOrPetscError::DomainErr, SNESType, },
-        pc::{PC, PCType, },
-        dm::{DM, DMBoundaryType, DMDAStencilType, DMType, FEDisc, DS, WeakForm, DMLabel,
-            DMBoundaryConditionType, FVDisc, DMField, },
-        indexset::{IS, ISType, },
-        viewer::{Viewer, PetscViewerFormat, ViewerType, PetscViewable, },
-        spaces::{Space, DualSpace, SpaceType, DualSpaceType},
-        NormType,
-        PetscOpt,
-    };
     #[cfg(feature = "petsc-use-complex-unsafe")]
     pub use crate::PetscComplex;
+    pub use crate::{
+        dm::{
+            DMBoundaryConditionType, DMBoundaryType, DMDAStencilType, DMField, DMLabel, DMType,
+            FEDisc, FVDisc, WeakForm, DM, DS,
+        },
+        indexset::{ISType, IS},
+        ksp::{KSPType, KSP},
+        mat::{
+            Mat, MatAssemblyType, MatDuplicateOption, MatOperation, MatOption, MatStencil, MatType,
+            NullSpace,
+        },
+        pc::{PCType, PC},
+        petsc_panic, petsc_print, petsc_print_sync, petsc_println, petsc_println_sync,
+        snes::{DomainOrPetscError::DomainErr, SNESType, SNES},
+        spaces::{DualSpace, DualSpaceType, Space, SpaceType},
+        vector::{VecOption, Vector, VectorType},
+        viewer::{PetscViewable, PetscViewerFormat, Viewer, ViewerType},
+        InsertMode, NormType, Petsc, PetscAsRaw, PetscAsRawMut, PetscError, PetscErrorKind,
+        PetscInt, PetscObject, PetscOpt, PetscOptBuilder, PetscReal, PetscScalar,
+    };
 }
 
 #[cfg(feature = "petsc-use-complex-unsafe")]
@@ -199,7 +189,7 @@ pub type Complex<T> = petsc_sys::__BindgenComplex<T>;
 /// Calls from other processes are ignored.
 ///
 /// Note, this macro creates a block that evaluates to a [`petsc_rs::Result`](Result), so the try operator, `?`,
-/// can and should be used. 
+/// can and should be used.
 ///
 /// # Example
 ///
@@ -210,7 +200,11 @@ pub type Complex<T> = petsc_sys::__BindgenComplex<T>;
 /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
 ///
 /// // will print once no matter how many processes there are
-/// petsc_println!(petsc.world(), "Hello parallel world of {} processes!", petsc.world().size())?;
+/// petsc_println!(
+///     petsc.world(),
+///     "Hello parallel world of {} processes!",
+///     petsc.world().size()
+/// )?;
 /// // This will print just a new line
 /// petsc_println!(petsc.world())?;
 /// # Ok(())
@@ -259,11 +253,21 @@ macro_rules! petsc_print {
 /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
 ///
 /// // will print multiple times, once for each processor
-/// Petsc::print_sync(petsc.world(), format!("Hello parallel world of {} processes from process {}!\n",
-///     petsc.world().size(), petsc.world().rank()))?;
+/// Petsc::print_sync(
+///     petsc.world(),
+///     format!(
+///         "Hello parallel world of {} processes from process {}!\n",
+///         petsc.world().size(),
+///         petsc.world().rank()
+///     ),
+/// )?;
 /// // or use:
-/// petsc_println_sync!(petsc.world(), "Hello parallel world of {} processes from process {}!", 
-///     petsc.world().size(), petsc.world().rank())?;
+/// petsc_println_sync!(
+///     petsc.world(),
+///     "Hello parallel world of {} processes from process {}!",
+///     petsc.world().size(),
+///     petsc.world().rank()
+/// )?;
 /// # Ok(())
 /// # }
 /// ```
@@ -311,10 +315,18 @@ macro_rules! petsc_print_sync {
 /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
 ///
 /// petsc_panic!(petsc.world(), PetscErrorKind::PETSC_ERR_USER);
-/// petsc_panic!(petsc.world(), PetscErrorKind::PETSC_ERR_USER,
-///     "this is a terrible mistake!");
-/// petsc_panic!(petsc.world(), PetscErrorKind::PETSC_ERR_USER,
-///     "this is a {} {message}", "fancy", message = "message");
+/// petsc_panic!(
+///     petsc.world(),
+///     PetscErrorKind::PETSC_ERR_USER,
+///     "this is a terrible mistake!"
+/// );
+/// petsc_panic!(
+///     petsc.world(),
+///     PetscErrorKind::PETSC_ERR_USER,
+///     "this is a {} {message}",
+///     "fancy",
+///     message = "message"
+/// );
 /// # Ok(())
 /// # }
 /// ```
@@ -371,7 +383,8 @@ pub use petsc_raw::InsertMode;
 ///     .world(univ.world().duplicate())
 ///     .help_msg("Hello, this is a help message\n")
 ///     .file("path/to/database/file")
-///     .init().unwrap();
+///     .init()
+///     .unwrap();
 /// ```
 ///
 /// Look at [`PetscBuilder::world()`] for more info on setting the comm world.
@@ -380,17 +393,14 @@ pub use petsc_raw::InsertMode;
 ///
 /// [`PetscInitialize`]: petsc_raw::PetscInitialize
 #[derive(Default)]
-pub struct PetscBuilder
-{
+pub struct PetscBuilder {
     world: Option<UserCommunicator>,
     args: Option<Vec<String>>,
     file: Option<String>,
     help_msg: Option<String>,
-
 }
 
-impl PetscBuilder
-{
+impl PetscBuilder {
     /// Calls [`PetscInitialize`] with the options given.
     ///
     /// Initializes the PETSc database and MPI. Will also call `MPI_Init()` if that has
@@ -398,8 +408,7 @@ impl PetscBuilder
     /// of your program -- usually the very first line!
     ///
     /// [`PetscInitialize`]: petsc_raw::PetscInitialize
-    pub fn init(self) -> Result<Petsc>
-    {
+    pub fn init(self) -> Result<Petsc> {
         // Note the argc/argv data we give to `PetscInitialize` is used internally and so it  must
         // live longer than the call to `PetscFinalize`. In other words, it must outlive the `Petsc`
         // type this method creates.
@@ -415,51 +424,78 @@ impl PetscBuilder
         };
 
         // We only need to drop the following 3 objects to clean up (and also argc)
-        let cstr_args_owned = self.args.as_ref().map_or(vec![], |args| 
-            args.iter().map(|arg| CString::new(arg.deref()).expect("CString::new failed"))
-                .collect::<Vec<CString>>());
-        let mut c_args_owned = cstr_args_owned.iter().map(|arg| arg.as_ptr() as *mut _)
+        let cstr_args_owned = self.args.as_ref().map_or(vec![], |args| {
+            args.iter()
+                .map(|arg| CString::new(arg.deref()).expect("CString::new failed"))
+                .collect::<Vec<CString>>()
+        });
+        let mut c_args_owned = cstr_args_owned
+            .iter()
+            .map(|arg| arg.as_ptr() as *mut _)
             .collect::<Vec<*mut c_char>>();
         c_args_owned.push(std::ptr::null_mut());
         let mut c_args_boxed = Box::new(c_args_owned.as_mut_ptr());
 
-        let c_args_p = self.args.as_ref().map_or(std::ptr::null_mut(), |_| &mut *c_args_boxed as *mut _);
+        let c_args_p = self
+            .args
+            .as_ref()
+            .map_or(std::ptr::null_mut(), |_| &mut *c_args_boxed as *mut _);
 
         // Note, the file string does not need to outlive the `Petsc` type
-        let file_cstring = self.file.map(|ref f| CString::new(f.deref()).ok()).flatten();
-        let file_c_str = file_cstring.as_ref().map_or_else(|| std::ptr::null(), |v| v.as_ptr());
+        let file_cstring = self
+            .file
+            .map(|ref f| CString::new(f.deref()).ok())
+            .flatten();
+        let file_c_str = file_cstring
+            .as_ref()
+            .map_or_else(|| std::ptr::null(), |v| v.as_ptr());
 
         // We dont have to leak the file string
-        let help_cstring = self.help_msg.map(|ref h| CString::new(h.deref()).ok()).flatten();
-        let help_c_str = help_cstring.as_ref().map_or_else(|| std::ptr::null(), |v| v.as_ptr());
+        let help_cstring = self
+            .help_msg
+            .map(|ref h| CString::new(h.deref()).ok())
+            .flatten();
+        let help_c_str = help_cstring
+            .as_ref()
+            .map_or_else(|| std::ptr::null(), |v| v.as_ptr());
 
         let drop_world_first;
         let ierr;
         // We pass in the args data so that we can reconstruct the vec to free all the memory.
-        let petsc = Petsc { world: match self.world { 
+        let petsc = Petsc {
+            world: match self.world {
                 Some(world) => {
                     // Note, in this case MPI has already initialized
 
                     // SAFETY: Nothing should use the global variable `PETSC_COMM_WORLD` directly
                     // everything should access it through the `Petsc.world()` method which is only
-                    // accessible after this (at least on the rust side of things). 
+                    // accessible after this (at least on the rust side of things).
                     // Additional info on using this variable can be found here:
                     // https://petsc.org/release/docs/manualpages/Sys/PETSC_COMM_WORLD.html
-                    unsafe { petsc_raw::PETSC_COMM_WORLD = world.as_raw(); }
+                    unsafe {
+                        petsc_raw::PETSC_COMM_WORLD = world.as_raw();
+                    }
                     drop_world_first = false;
-                    ierr = unsafe { petsc_raw::PetscInitialize(c_argc_p, c_args_p, file_c_str, help_c_str) };
+                    ierr = unsafe {
+                        petsc_raw::PetscInitialize(c_argc_p, c_args_p, file_c_str, help_c_str)
+                    };
 
                     ManuallyDrop::new(world)
-                }, 
+                }
                 _ => {
                     // Note, in this case MPI has not been initialized, it will be initialized by PETSc
-                    ierr = unsafe { petsc_raw::PetscInitialize(c_argc_p, c_args_p, file_c_str, help_c_str) };
+                    ierr = unsafe {
+                        petsc_raw::PetscInitialize(c_argc_p, c_args_p, file_c_str, help_c_str)
+                    };
                     drop_world_first = true;
                     ManuallyDrop::new(mpi::topology::SystemCommunicator::world().duplicate())
                 }
             },
-            _arg_data: self.args.as_ref().map(|_| (argc_boxed, cstr_args_owned, c_args_owned, c_args_boxed)),
-            drop_world_first
+            _arg_data: self
+                .args
+                .as_ref()
+                .map(|_| (argc_boxed, cstr_args_owned, c_args_owned, c_args_boxed)),
+            drop_world_first,
         };
         unsafe { chkerrq!(petsc.world(), ierr) }?;
 
@@ -472,7 +508,7 @@ impl PetscBuilder
     /// Most of the time just use `std::env::args()` as input.
     pub fn args<T>(mut self, args: T) -> Self
     where
-        T: std::iter::IntoIterator<Item = String>
+        T: std::iter::IntoIterator<Item = String>,
     {
         self.args = Some(args.into_iter().map(|e| e).collect());
         self
@@ -491,27 +527,24 @@ impl PetscBuilder
     /// Note, if no communicator is supplied then the system communicator will be used (duplicated as a [`UserCommunicator`]).
     ///
     /// After you call [`PetscBuilder::init()`], the value returned by [`Petsc::world()`] is the value set here.
-    pub fn world(mut self, world: UserCommunicator) -> Self
-    {
+    pub fn world(mut self, world: UserCommunicator) -> Self {
         self.world = Some(world);
         self
     }
 
     /// Help message to print
-    pub fn help_msg<T: ToString>(mut self, help_msg: T) -> Self
-    {
+    pub fn help_msg<T: ToString>(mut self, help_msg: T) -> Self {
         self.help_msg = Some(help_msg.to_string());
         self
     }
 
     /// PETSc database file.
     ///
-    /// Append ":yaml" to filename to specify YAML options format. 
+    /// Append ":yaml" to filename to specify YAML options format.
     /// Use empty string (or don't call this method) to not check for code specific file.
     /// Also checks ~/.petscrc, .petscrc and petscrc. Use -skip_petscrc in the code specific
     /// file (or command line) to skip ~/.petscrc, .petscrc and petscrc files
-    pub fn file<T: ToString>(mut self, file: T) -> Self
-    {
+    pub fn file<T: ToString>(mut self, file: T) -> Self {
         self.file = Some(file.to_string());
         self
     }
@@ -527,24 +560,43 @@ impl PetscBuilder
 pub struct PetscOptBuilder<'pl, 'pool, 'strlt> {
     petsc: &'pl Petsc,
     petsc_opt_obj: &'pool mut MaybeUninit<petsc_sys::PetscOptionItems>,
-    _str_phantom: PhantomData<&'strlt CStr> // There are string held in the petsc_opt_obj
+    _str_phantom: PhantomData<&'strlt CStr>, // There are string held in the petsc_opt_obj
 }
 
 impl<'pl, 'pool, 'strlt> PetscOptBuilder<'pl, 'pool, 'strlt> {
-    fn new(petsc: &'pl Petsc, petsc_opt_obj: &'pool mut MaybeUninit<petsc_sys::PetscOptionItems>,
-        prefix_cs: Option<&'strlt CStr>, mess_cs: &'strlt CStr, sec_cs: Option<&'strlt CStr>) -> Result<Self>
-    {
-        let ierr = unsafe { petsc_sys::PetscOptionsBegin_Private(
-            petsc_opt_obj.as_mut_ptr(), petsc.world().as_raw(),
-            prefix_cs.map_or(std::ptr::null() , |cs| cs.as_ptr()),
-            mess_cs.as_ptr(),
-            sec_cs.map_or(std::ptr::null() , |cs| cs.as_ptr())) };
+    fn new(
+        petsc: &'pl Petsc,
+        petsc_opt_obj: &'pool mut MaybeUninit<petsc_sys::PetscOptionItems>,
+        prefix_cs: Option<&'strlt CStr>,
+        mess_cs: &'strlt CStr,
+        sec_cs: Option<&'strlt CStr>,
+    ) -> Result<Self> {
+        let ierr = unsafe {
+            petsc_sys::PetscOptionsBegin_Private(
+                petsc_opt_obj.as_mut_ptr(),
+                petsc.world().as_raw(),
+                prefix_cs.map_or(std::ptr::null(), |cs| cs.as_ptr()),
+                mess_cs.as_ptr(),
+                sec_cs.map_or(std::ptr::null(), |cs| cs.as_ptr()),
+            )
+        };
         unsafe { chkerrq!(petsc.world(), ierr) }?;
-        Ok(Self { petsc, petsc_opt_obj, _str_phantom: PhantomData })
+        Ok(Self {
+            petsc,
+            petsc_opt_obj,
+            _str_phantom: PhantomData,
+        })
     }
 
     /// Gets the integer value for a particular option in the database (over a range).
-    pub fn options_int_range(&mut self, opt: &str, text: &str, man: &str, default: PetscInt, range: impl RangeBounds<PetscInt>) -> Result<PetscInt> {
+    pub fn options_int_range(
+        &mut self,
+        opt: &str,
+        text: &str,
+        man: &str,
+        default: PetscInt,
+        range: impl RangeBounds<PetscInt>,
+    ) -> Result<PetscInt> {
         let opt_cs = CString::new(opt).expect("`CString::new` failed");
         let text_cs = CString::new(text).expect("`CString::new` failed");
         let man_cs = CString::new(man).expect("`CString::new` failed");
@@ -560,72 +612,142 @@ impl<'pl, 'pool, 'strlt> PetscOptBuilder<'pl, 'pool, 'strlt> {
             Bound::Included(&ub) => ub,
             Bound::Excluded(&ub) => ub - 1,
         };
-        let ierr = unsafe { 
-            petsc_raw::PetscOptionsInt_Private(self.petsc_opt_obj.as_mut_ptr(), opt_cs.as_ptr(),
-            text_cs.as_ptr(), man_cs.as_ptr(), default, opt_val.as_mut_ptr(), set.as_mut_ptr(),
-            lb, ub) };
+        let ierr = unsafe {
+            petsc_raw::PetscOptionsInt_Private(
+                self.petsc_opt_obj.as_mut_ptr(),
+                opt_cs.as_ptr(),
+                text_cs.as_ptr(),
+                man_cs.as_ptr(),
+                default,
+                opt_val.as_mut_ptr(),
+                set.as_mut_ptr(),
+                lb,
+                ub,
+            )
+        };
         unsafe { chkerrq!(self.petsc.world(), ierr) }?;
 
-        Ok(if unsafe { set.assume_init().into() } { unsafe { opt_val.assume_init() } } 
-            else { default } )
+        Ok(if unsafe { set.assume_init().into() } {
+            unsafe { opt_val.assume_init() }
+        } else {
+            default
+        })
     }
 
     /// Gets the integer value for a particular option in the database.
-    pub fn options_int(&mut self, opt: &str, text: &str, man: &str, default: PetscInt) -> Result<PetscInt> {
+    pub fn options_int(
+        &mut self,
+        opt: &str,
+        text: &str,
+        man: &str,
+        default: PetscInt,
+    ) -> Result<PetscInt> {
         let opt_cs = CString::new(opt).expect("`CString::new` failed");
         let text_cs = CString::new(text).expect("`CString::new` failed");
         let man_cs = CString::new(man).expect("`CString::new` failed");
         let mut opt_val = MaybeUninit::uninit();
         let mut set = MaybeUninit::uninit();
-        let ierr = unsafe { 
-            petsc_raw::PetscOptionsInt_Private(self.petsc_opt_obj.as_mut_ptr(), opt_cs.as_ptr(),
-            text_cs.as_ptr(), man_cs.as_ptr(), default, opt_val.as_mut_ptr(), set.as_mut_ptr(),
-            PetscInt::MIN, PetscInt::MAX) };
+        let ierr = unsafe {
+            petsc_raw::PetscOptionsInt_Private(
+                self.petsc_opt_obj.as_mut_ptr(),
+                opt_cs.as_ptr(),
+                text_cs.as_ptr(),
+                man_cs.as_ptr(),
+                default,
+                opt_val.as_mut_ptr(),
+                set.as_mut_ptr(),
+                PetscInt::MIN,
+                PetscInt::MAX,
+            )
+        };
         unsafe { chkerrq!(self.petsc.world(), ierr) }?;
 
-        Ok(if unsafe { set.assume_init().into() } { unsafe { opt_val.assume_init() } } 
-            else { default } )
+        Ok(if unsafe { set.assume_init().into() } {
+            unsafe { opt_val.assume_init() }
+        } else {
+            default
+        })
     }
 
     /// Gets the Logical (true or false) value for a particular option in the database.
     ///
     /// Note, TRUE, true, YES, yes, no string, and 1 all translate to `true`.
     /// FALSE, false, NO, no, and 0 all translate to `false`
-    pub fn options_bool(&mut self, opt: &str, text: &str, man: &str, default: bool) -> Result<bool> {
+    pub fn options_bool(
+        &mut self,
+        opt: &str,
+        text: &str,
+        man: &str,
+        default: bool,
+    ) -> Result<bool> {
         let opt_cs = CString::new(opt).expect("`CString::new` failed");
         let text_cs = CString::new(text).expect("`CString::new` failed");
         let man_cs = CString::new(man).expect("`CString::new` failed");
         let mut opt_val = MaybeUninit::uninit();
         let mut set = MaybeUninit::uninit();
-        let ierr = unsafe { 
-            petsc_raw::PetscOptionsBool_Private(self.petsc_opt_obj.as_mut_ptr(), opt_cs.as_ptr(),
-            text_cs.as_ptr(), man_cs.as_ptr(), default.into(), opt_val.as_mut_ptr(), set.as_mut_ptr()) };
+        let ierr = unsafe {
+            petsc_raw::PetscOptionsBool_Private(
+                self.petsc_opt_obj.as_mut_ptr(),
+                opt_cs.as_ptr(),
+                text_cs.as_ptr(),
+                man_cs.as_ptr(),
+                default.into(),
+                opt_val.as_mut_ptr(),
+                set.as_mut_ptr(),
+            )
+        };
         unsafe { chkerrq!(self.petsc.world(), ierr) }?;
 
-        Ok(if unsafe { set.assume_init().into() } { unsafe { opt_val.assume_init().into() } } 
-            else { default } )
+        Ok(if unsafe { set.assume_init().into() } {
+            unsafe { opt_val.assume_init().into() }
+        } else {
+            default
+        })
     }
 
     /// Gets the floating point value for a particular option in the database..
-    pub fn options_real(&mut self, opt: &str, text: &str, man: &str, default: PetscReal) -> Result<PetscReal> {
+    pub fn options_real(
+        &mut self,
+        opt: &str,
+        text: &str,
+        man: &str,
+        default: PetscReal,
+    ) -> Result<PetscReal> {
         let opt_cs = CString::new(opt).expect("`CString::new` failed");
         let text_cs = CString::new(text).expect("`CString::new` failed");
         let man_cs = CString::new(man).expect("`CString::new` failed");
         let mut opt_val = MaybeUninit::uninit();
         let mut set = MaybeUninit::uninit();
-        let ierr = unsafe { 
-            petsc_raw::PetscOptionsReal_Private(self.petsc_opt_obj.as_mut_ptr(), opt_cs.as_ptr(),
-            text_cs.as_ptr(), man_cs.as_ptr(), default, opt_val.as_mut_ptr(), set.as_mut_ptr()) };
+        let ierr = unsafe {
+            petsc_raw::PetscOptionsReal_Private(
+                self.petsc_opt_obj.as_mut_ptr(),
+                opt_cs.as_ptr(),
+                text_cs.as_ptr(),
+                man_cs.as_ptr(),
+                default,
+                opt_val.as_mut_ptr(),
+                set.as_mut_ptr(),
+            )
+        };
         unsafe { chkerrq!(self.petsc.world(), ierr) }?;
 
-        Ok(if unsafe { set.assume_init().into() } { unsafe { opt_val.assume_init() } } 
-            else { default } )
+        Ok(if unsafe { set.assume_init().into() } {
+            unsafe { opt_val.assume_init() }
+        } else {
+            default
+        })
     }
 
     /// Gets the string value for a particular option in the database.
     ///
     /// Gets, at most, 127 characters.
-    pub fn options_string(&mut self, opt: &str, text: &str, man: &str, default: &str) -> Result<String> {
+    pub fn options_string(
+        &mut self,
+        opt: &str,
+        text: &str,
+        man: &str,
+        default: &str,
+    ) -> Result<String> {
         let opt_cs = CString::new(opt).expect("`CString::new` failed");
         let text_cs = CString::new(text).expect("`CString::new` failed");
         let man_cs = CString::new(man).expect("`CString::new` failed");
@@ -633,15 +755,23 @@ impl<'pl, 'pool, 'strlt> PetscOptBuilder<'pl, 'pool, 'strlt> {
         const BUF_LEN: usize = 128;
         let mut buf = [0 as u8; BUF_LEN];
         let mut set = MaybeUninit::uninit();
-        let ierr = unsafe { 
-            petsc_raw::PetscOptionsString_Private(self.petsc_opt_obj.as_mut_ptr(), opt_cs.as_ptr(),
-            text_cs.as_ptr(), man_cs.as_ptr(), default_cs.as_ptr(), buf.as_mut_ptr() as *mut _,
-            BUF_LEN as u64, set.as_mut_ptr()) };
+        let ierr = unsafe {
+            petsc_raw::PetscOptionsString_Private(
+                self.petsc_opt_obj.as_mut_ptr(),
+                opt_cs.as_ptr(),
+                text_cs.as_ptr(),
+                man_cs.as_ptr(),
+                default_cs.as_ptr(),
+                buf.as_mut_ptr() as *mut _,
+                BUF_LEN as u64,
+                set.as_mut_ptr(),
+            )
+        };
         unsafe { chkerrq!(self.petsc.world(), ierr) }?;
 
         Ok(if unsafe { set.assume_init().into() } {
             let nul_term = buf.iter().position(|&v| v == 0).unwrap();
-            let c_str: &CStr = CStr::from_bytes_with_nul(&buf[..nul_term+1]).unwrap();
+            let c_str: &CStr = CStr::from_bytes_with_nul(&buf[..nul_term + 1]).unwrap();
             let str_slice: &str = c_str.to_str().unwrap();
             let string: String = str_slice.to_owned();
             string
@@ -654,7 +784,13 @@ impl<'pl, 'pool, 'strlt> PetscOptBuilder<'pl, 'pool, 'strlt> {
     ///
     /// Note, If the [`from_str`](std::str::FromStr::from_str()) fails, then
     /// [`default()`](Default::default()) is used.
-    pub fn options_from_string<E>(&mut self, opt: &str, text: &str, man: &str, default: E) -> Result<E>
+    pub fn options_from_string<E>(
+        &mut self,
+        opt: &str,
+        text: &str,
+        man: &str,
+        default: E,
+    ) -> Result<E>
     where
         E: Default + std::str::FromStr + Display,
     {
@@ -682,7 +818,12 @@ pub struct Petsc {
 
     // This is used to drop the argc/args data when Petsc is dropped, we never actually use it
     // on the rust side.
-    _arg_data: Option<(Box<c_int>, Vec<CString>, Vec<*mut c_char>, Box<*mut *mut c_char>)>,
+    _arg_data: Option<(
+        Box<c_int>,
+        Vec<CString>,
+        Vec<*mut c_char>,
+        Box<*mut *mut c_char>,
+    )>,
 
     drop_world_first: bool,
 }
@@ -690,7 +831,7 @@ pub struct Petsc {
 // Destructor
 impl Drop for Petsc {
     fn drop(&mut self) {
-        // SAFETY: PetscFinalize might call MPI_FINALIZE, which means we need to make sure our 
+        // SAFETY: PetscFinalize might call MPI_FINALIZE, which means we need to make sure our
         // comm world is dropped before that if that is the case. Otherwise, we want to drop our
         // comm world after. Also `ManuallyDrop::drop` is only called once and then the zombie
         // value is never used again.
@@ -751,17 +892,20 @@ impl Petsc {
     /// [`PetscInitialize`]: petsc_raw::PetscInitialize
     pub fn init_no_args() -> Result<Self> {
         let ierr = unsafe { petsc_raw::PetscInitializeNoArguments() };
-        let petsc = Self { world: ManuallyDrop::new(mpi::topology::SystemCommunicator::world().duplicate()),
-            _arg_data: None, drop_world_first: true };
+        let petsc = Self {
+            world: ManuallyDrop::new(mpi::topology::SystemCommunicator::world().duplicate()),
+            _arg_data: None,
+            drop_world_first: true,
+        };
         unsafe { chkerrq!(petsc.world(), ierr) }?;
 
         Ok(petsc)
     }
 
-    /// Gets a reference to the PETSc comm world. 
+    /// Gets a reference to the PETSc comm world.
     ///
     /// This is effectively equivalent to [`mpi::topology::SystemCommunicator::world()`]
-    /// if you haven't set the comm world to something other that the system communicator 
+    /// if you haven't set the comm world to something other that the system communicator
     /// during petsc initialization using a [`PetscBuilder`].
     ///
     /// The value is functionally the same as the `PETSC_COMM_WORLD` global in the C
@@ -777,7 +921,13 @@ impl Petsc {
     ///
     /// unsafe because `ierr` MUST be memory equivalent to a valid [`petsc_raw::PetscErrorCodeEnum`] or `0`.
     #[doc(hidden)]
-    pub(crate) unsafe fn check_error<C: Communicator>(world: &C, line: i32, func_name: &str, file_name: &str, ierr: petsc_raw::PetscErrorCode) -> Result<()> {
+    pub(crate) unsafe fn check_error<C: Communicator>(
+        world: &C,
+        line: i32,
+        func_name: &str,
+        file_name: &str,
+        ierr: petsc_raw::PetscErrorCode,
+    ) -> Result<()> {
         // Return early if code is clean
         if ierr == 0 {
             return Ok(());
@@ -788,15 +938,27 @@ impl Petsc {
         // We also create the `PetscErrorCodeEnum` enum to have the same size and alignment as `i32`.
         // Which is what petsc_raw::PetscErrorCode is.
         let error_kind = std::mem::transmute(ierr);
-        let error = PetscError { kind: error_kind, error: "".into() };
+        let error = PetscError {
+            kind: error_kind,
+            error: "".into(),
+        };
 
         let c_s_r = CString::new(error.error.to_string());
         let file_cs = CString::new(file_name).expect("`CString::new` failed");
         let func_cs = CString::new(func_name).expect("`CString::new` failed");
 
-        let _ = petsc_raw::PetscError(world.as_raw(), line, func_cs.as_ptr(), 
-            file_cs.as_ptr(), ierr, PetscErrorType::PETSC_ERROR_REPEAT,
-            c_s_r.as_ref().map(|s| s.as_ptr()).unwrap_or(std::ptr::null()));
+        let _ = petsc_raw::PetscError(
+            world.as_raw(),
+            line,
+            func_cs.as_ptr(),
+            file_cs.as_ptr(),
+            ierr,
+            PetscErrorType::PETSC_ERROR_REPEAT,
+            c_s_r
+                .as_ref()
+                .map(|s| s.as_ptr())
+                .unwrap_or(std::ptr::null()),
+        );
 
         return Err(error);
     }
@@ -813,38 +975,67 @@ impl Petsc {
     /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
     /// if petsc.world().size() != 1 {
     ///     // note, cargo wont run tests with mpi so this will never be reached
-    ///     assert!(Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, "This is a uniprocessor example only!").is_err());
+    ///     assert!(Petsc::set_error(
+    ///         petsc.world(),
+    ///         PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE,
+    ///         "This is a uniprocessor example only!"
+    ///     )
+    ///     .is_err());
     /// }
     /// ```
     ///
     /// Same as [`Petsc::set_error2()`] but sets `line`, `func_name`, and `file_name` to `None`.
-    pub fn set_error<C: Communicator, E>(world: &C, error_kind: PetscErrorKind, err_msg: E) -> Result<()>
+    pub fn set_error<C: Communicator, E>(
+        world: &C,
+        error_kind: PetscErrorKind,
+        err_msg: E,
+    ) -> Result<()>
     where
-        E: Into<Box<dyn std::error::Error + Send + Sync>>
+        E: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
         Petsc::set_error2(world, None, None, None, error_kind, err_msg)
     }
 
     /// Same as [`Petsc::set_error()`] but allows you to set the line number, function name, and file name.
-    pub fn set_error2<C: Communicator, E>(world: &C, line: Option<i32>, func_name: Option<&str>, file_name: Option<&str>, error_kind: PetscErrorKind, err_msg: E) -> Result<()>
+    pub fn set_error2<C: Communicator, E>(
+        world: &C,
+        line: Option<i32>,
+        func_name: Option<&str>,
+        file_name: Option<&str>,
+        error_kind: PetscErrorKind,
+        err_msg: E,
+    ) -> Result<()>
     where
-        E: Into<Box<dyn std::error::Error + Send + Sync>>
+        E: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
-        let error = PetscError { kind: error_kind, error: err_msg.into() };
+        let error = PetscError {
+            kind: error_kind,
+            error: err_msg.into(),
+        };
 
         let c_s_r = CString::new(error.error.to_string());
-        let file_ocs = file_name.map(|file_name| CString::new(file_name).expect("`CString::new` failed"));
-        let func_ocs = func_name.map(|func_name| CString::new(func_name).expect("`CString::new` failed"));
+        let file_ocs =
+            file_name.map(|file_name| CString::new(file_name).expect("`CString::new` failed"));
+        let func_ocs =
+            func_name.map(|func_name| CString::new(func_name).expect("`CString::new` failed"));
 
         // TODO: It would be nice to get line number, func name, and file name from the caller,
         // however, it might be better for us to use results to build a stack trace, and
         // then it wouldn't really matter what we do here.
         // Regardless, the error handling needs a lot of work to be as functional as C PETSc.
         unsafe {
-            let _ = petsc_raw::PetscError(world.as_raw(), line.unwrap_or(-1), func_ocs.as_ref().map_or(std::ptr::null(), |cs| cs.as_ptr()), 
-                file_ocs.as_ref().map_or(std::ptr::null(), |cs| cs.as_ptr()), error_kind as petsc_raw::PetscErrorCode,
+            let _ = petsc_raw::PetscError(
+                world.as_raw(),
+                line.unwrap_or(-1),
+                func_ocs.as_ref().map_or(std::ptr::null(), |cs| cs.as_ptr()),
+                file_ocs.as_ref().map_or(std::ptr::null(), |cs| cs.as_ptr()),
+                error_kind as petsc_raw::PetscErrorCode,
                 PetscErrorType::PETSC_ERROR_INITIAL,
-                c_s_r.as_ref().map(|s| s.as_ptr()).unwrap_or(std::ptr::null()));
+                c_s_r
+                    .as_ref()
+                    .map(|s| s.as_ptr())
+                    .unwrap_or(std::ptr::null()),
+            );
         }
 
         return Err(error);
@@ -869,11 +1060,16 @@ impl Petsc {
         // TODO: we should make this work for non PetscError error types
         match res {
             Ok(t) => t,
-            Err(e) => petsc_panic!(world, e.kind, "called `Petsc::unwrap_or_abort()` on an `Err` value: {}", &e),
+            Err(e) => petsc_panic!(
+                world,
+                e.kind,
+                "called `Petsc::unwrap_or_abort()` on an `Err` value: {}",
+                &e
+            ),
         }
     }
 
-    /// replacement for the `PetscPrintf` function in the C api. 
+    /// replacement for the `PetscPrintf` function in the C api.
     ///
     /// You can also use the [`petsc_println!`] macro to have string formatting.
     ///
@@ -888,9 +1084,19 @@ impl Petsc {
     /// # fn main() -> petsc_rs::Result<()> {
     /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
     ///
-    /// Petsc::print(petsc.world(), format!("Hello parallel world of {} processes!\n", petsc.world().size()))?;
+    /// Petsc::print(
+    ///     petsc.world(),
+    ///     format!(
+    ///         "Hello parallel world of {} processes!\n",
+    ///         petsc.world().size()
+    ///     ),
+    /// )?;
     /// // or use:
-    /// petsc_println!(petsc.world(), "Hello parallel world of {} processes!", petsc.world().size())?;
+    /// petsc_println!(
+    ///     petsc.world(),
+    ///     "Hello parallel world of {} processes!",
+    ///     petsc.world().size()
+    /// )?;
     /// # Ok(())
     /// # }
     /// ```
@@ -921,11 +1127,21 @@ impl Petsc {
     /// # fn main() -> petsc_rs::Result<()> {
     /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
     ///
-    /// Petsc::print_sync(petsc.world(), format!("Hello parallel world of {} processes from process {}!\n",
-    ///     petsc.world().size(), petsc.world().rank()))?;
+    /// Petsc::print_sync(
+    ///     petsc.world(),
+    ///     format!(
+    ///         "Hello parallel world of {} processes from process {}!\n",
+    ///         petsc.world().size(),
+    ///         petsc.world().rank()
+    ///     ),
+    /// )?;
     /// // or use:
-    /// petsc_println_sync!(petsc.world(), "Hello parallel world of {} processes from process {}!", 
-    ///     petsc.world().size(), petsc.world().rank())?;
+    /// petsc_println_sync!(
+    ///     petsc.world(),
+    ///     "Hello parallel world of {} processes from process {}!",
+    ///     petsc.world().size(),
+    ///     petsc.world().rank()
+    /// )?;
     /// # Ok(())
     /// # }
     /// ```
@@ -935,10 +1151,13 @@ impl Petsc {
         // The first entry needs to be `%s` so that this function is not susceptible to printf injections.
         let ps = CString::new("%s").unwrap();
 
-        let ierr = unsafe { petsc_raw::PetscSynchronizedPrintf(world.as_raw(), ps.as_ptr(), msg_cs.as_ptr()) };
+        let ierr = unsafe {
+            petsc_raw::PetscSynchronizedPrintf(world.as_raw(), ps.as_ptr(), msg_cs.as_ptr())
+        };
         unsafe { chkerrq!(world, ierr) }?;
 
-        let ierr = unsafe { petsc_raw::PetscSynchronizedFlush(world.as_raw(), petsc_raw::PETSC_STDOUT) };
+        let ierr =
+            unsafe { petsc_raw::PetscSynchronizedFlush(world.as_raw(), petsc_raw::PETSC_STDOUT) };
         unsafe { chkerrq!(world, ierr) }
     }
 
@@ -947,13 +1166,22 @@ impl Petsc {
         let name_cs = CString::new(name).expect("`CString::new` failed");
         let mut opt_val = MaybeUninit::uninit();
         let mut set = MaybeUninit::uninit();
-        let ierr = unsafe { 
-            petsc_raw::PetscOptionsGetInt(std::ptr::null_mut(), std::ptr::null(),
-            name_cs.as_ptr(), opt_val.as_mut_ptr(), set.as_mut_ptr()) };
+        let ierr = unsafe {
+            petsc_raw::PetscOptionsGetInt(
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                name_cs.as_ptr(),
+                opt_val.as_mut_ptr(),
+                set.as_mut_ptr(),
+            )
+        };
         unsafe { chkerrq!(self.world(), ierr) }?;
 
-        Ok(if unsafe { set.assume_init().into() } { Some(unsafe { opt_val.assume_init() }) } 
-            else { None } )
+        Ok(if unsafe { set.assume_init().into() } {
+            Some(unsafe { opt_val.assume_init() })
+        } else {
+            None
+        })
     }
 
     /// Gets the Logical (true or false) value for a particular option in the database.
@@ -964,13 +1192,22 @@ impl Petsc {
         let name_cs = CString::new(name).expect("`CString::new` failed");
         let mut opt_val = MaybeUninit::uninit();
         let mut set = MaybeUninit::uninit();
-        let ierr = unsafe { 
-            petsc_raw::PetscOptionsGetBool(std::ptr::null_mut(), std::ptr::null(),
-            name_cs.as_ptr(), opt_val.as_mut_ptr(), set.as_mut_ptr()) };
+        let ierr = unsafe {
+            petsc_raw::PetscOptionsGetBool(
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                name_cs.as_ptr(),
+                opt_val.as_mut_ptr(),
+                set.as_mut_ptr(),
+            )
+        };
         unsafe { chkerrq!(self.world(), ierr) }?;
 
-        Ok(if unsafe { set.assume_init().into() } { Some(unsafe { opt_val.assume_init().into() }) } 
-            else { None } )
+        Ok(if unsafe { set.assume_init().into() } {
+            Some(unsafe { opt_val.assume_init().into() })
+        } else {
+            None
+        })
     }
 
     /// Gets the floating point value for a particular option in the database..
@@ -978,13 +1215,22 @@ impl Petsc {
         let name_cs = CString::new(name).expect("`CString::new` failed");
         let mut opt_val = MaybeUninit::uninit();
         let mut set = MaybeUninit::uninit();
-        let ierr = unsafe { 
-            petsc_raw::PetscOptionsGetReal(std::ptr::null_mut(), std::ptr::null(),
-            name_cs.as_ptr(), opt_val.as_mut_ptr(), set.as_mut_ptr()) };
+        let ierr = unsafe {
+            petsc_raw::PetscOptionsGetReal(
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                name_cs.as_ptr(),
+                opt_val.as_mut_ptr(),
+                set.as_mut_ptr(),
+            )
+        };
         unsafe { chkerrq!(self.world(), ierr) }?;
 
-        Ok(if unsafe { set.assume_init().into() } { Some(unsafe { opt_val.assume_init() }) } 
-            else { None } )
+        Ok(if unsafe { set.assume_init().into() } {
+            Some(unsafe { opt_val.assume_init() })
+        } else {
+            None
+        })
     }
 
     /// Gets the string value for a particular option in the database.
@@ -996,14 +1242,21 @@ impl Petsc {
         const BUF_LEN: usize = 128;
         let mut buf = [0 as u8; BUF_LEN];
         let mut set = MaybeUninit::uninit();
-        let ierr = unsafe { 
-            petsc_raw::PetscOptionsGetString(std::ptr::null_mut(), std::ptr::null(),
-            name_cs.as_ptr(), buf.as_mut_ptr() as *mut _, BUF_LEN as u64, set.as_mut_ptr()) };
+        let ierr = unsafe {
+            petsc_raw::PetscOptionsGetString(
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                name_cs.as_ptr(),
+                buf.as_mut_ptr() as *mut _,
+                BUF_LEN as u64,
+                set.as_mut_ptr(),
+            )
+        };
         unsafe { chkerrq!(self.world(), ierr) }?;
 
         Ok(if unsafe { set.assume_init().into() } {
             let nul_term = buf.iter().position(|&v| v == 0).unwrap();
-            let c_str: &CStr = CStr::from_bytes_with_nul(&buf[..nul_term+1]).unwrap();
+            let c_str: &CStr = CStr::from_bytes_with_nul(&buf[..nul_term + 1]).unwrap();
             let str_slice: &str = c_str.to_str().unwrap();
             let string: String = str_slice.to_owned();
             Some(string)
@@ -1043,26 +1296,40 @@ impl Petsc {
     }
 
     /// Creates a [`PetscOptBuilder`] to facilitates setting command line arguments.
-    pub fn options_build<'strlt1, 'strlt2, T: PetscOpt>(&self, prefix: impl Into<Option<&'strlt1 str>>,
-        title: &str, man_section: impl Into<Option<&'strlt2 str>>) -> Result<T>
-    {
-        let prefix_cs = prefix.into().map(|prefix| CString::new(prefix).expect("`CString::new` failed"));
+    pub fn options_build<'strlt1, 'strlt2, T: PetscOpt>(
+        &self,
+        prefix: impl Into<Option<&'strlt1 str>>,
+        title: &str,
+        man_section: impl Into<Option<&'strlt2 str>>,
+    ) -> Result<T> {
+        let prefix_cs = prefix
+            .into()
+            .map(|prefix| CString::new(prefix).expect("`CString::new` failed"));
         let prefix_csr = prefix_cs.as_ref().map(|cs| cs.deref());
         let title_cs = CString::new(title).expect("`CString::new` failed");
-        let sec_cs = man_section.into().map(|man_section| CString::new(man_section).expect("`CString::new` failed"));
+        let sec_cs = man_section
+            .into()
+            .map(|man_section| CString::new(man_section).expect("`CString::new` failed"));
         let sec_csr = sec_cs.as_ref().map(|cs| cs.deref());
 
         let mut petsc_opt_obj = MaybeUninit::<petsc_sys::PetscOptionItems>::zeroed();
 
-        for c in if unsafe { petsc_sys::PetscOptionsPublish }.into() {-1} else {1} .. 1 {
+        for c in if unsafe { petsc_sys::PetscOptionsPublish }.into() {
+            -1
+        } else {
+            1
+        }..1
+        {
             unsafe { &mut *petsc_opt_obj.as_mut_ptr() }.count = c;
-            let mut pob = PetscOptBuilder::new(self, &mut petsc_opt_obj, prefix_csr, &title_cs, sec_csr)?;
+            let mut pob =
+                PetscOptBuilder::new(self, &mut petsc_opt_obj, prefix_csr, &title_cs, sec_csr)?;
 
             let _ = T::from_petsc_opt_builder(&mut pob)?;
         }
 
         unsafe { &mut *petsc_opt_obj.as_mut_ptr() }.count = 1;
-        let mut pob = PetscOptBuilder::new(self, &mut petsc_opt_obj, prefix_csr, &title_cs, sec_csr)?;
+        let mut pob =
+            PetscOptBuilder::new(self, &mut petsc_opt_obj, prefix_csr, &title_cs, sec_csr)?;
         PetscOpt::from_petsc_opt_builder(&mut pob)
     }
 
@@ -1086,7 +1353,7 @@ impl Petsc {
         crate::Vector::create(self.world())
     }
 
-    /// Creates an empty matrix object. 
+    /// Creates an empty matrix object.
     ///
     /// Note, it will use the default comm world from [`Petsc::world()`].
     ///
@@ -1170,7 +1437,8 @@ unsafe impl<PT, T: PetscAsRaw<Raw = *mut PT>> PetscAsRaw for Option<T> {
     type Raw = <T as PetscAsRaw>::Raw;
 
     fn as_raw(&self) -> Self::Raw {
-        self.as_ref().map_or(std::ptr::null_mut(), |inner| inner.as_raw())
+        self.as_ref()
+            .map_or(std::ptr::null_mut(), |inner| inner.as_raw())
     }
 }
 
@@ -1180,7 +1448,7 @@ pub unsafe trait PetscAsRawMut: PetscAsRaw {
     fn as_raw_mut(&mut self) -> *mut <Self as PetscAsRaw>::Raw;
 }
 
-/// The trait that is implemented for any PETSc Object [`petsc_rs::vector::Vector`](Vector), 
+/// The trait that is implemented for any PETSc Object [`petsc_rs::vector::Vector`](Vector),
 /// [`petsc_rs::mat::Mat`](Mat), [`petsc_rs::ksp::KSP`](KSP), etc.
 pub trait PetscObject<'a, PT>: PetscAsRaw<Raw = *mut PT> {
     /// Gets the MPI communicator world for any [`PetscObject`] regardless of type;
@@ -1189,16 +1457,26 @@ pub trait PetscObject<'a, PT>: PetscAsRaw<Raw = *mut PT> {
     /// Sets a string name associated with a PETSc object.
     fn set_name(&mut self, name: &str) -> crate::Result<()> {
         let name_cs = ::std::ffi::CString::new(name).expect("`CString::new` failed");
-        
-        let ierr = unsafe { crate::petsc_raw::PetscObjectSetName(self.as_raw() as *mut crate::petsc_raw::_p_PetscObject, name_cs.as_ptr()) };
+
+        let ierr = unsafe {
+            crate::petsc_raw::PetscObjectSetName(
+                self.as_raw() as *mut crate::petsc_raw::_p_PetscObject,
+                name_cs.as_ptr(),
+            )
+        };
         unsafe { chkerrq!(self.world(), ierr) }
     }
 
     /// Gets a string name associated with a PETSc object.
     fn get_name(&self) -> crate::Result<String> {
         let mut c_buf = ::std::mem::MaybeUninit::<*const ::std::os::raw::c_char>::uninit();
-        
-        let ierr = unsafe { crate::petsc_raw::PetscObjectGetName(self.as_raw() as *mut crate::petsc_raw::_p_PetscObject, c_buf.as_mut_ptr()) };
+
+        let ierr = unsafe {
+            crate::petsc_raw::PetscObjectGetName(
+                self.as_raw() as *mut crate::petsc_raw::_p_PetscObject,
+                c_buf.as_mut_ptr(),
+            )
+        };
         unsafe { chkerrq!(self.world(), ierr) }?;
 
         let c_str = unsafe { ::std::ffi::CStr::from_ptr(c_buf.assume_init()) };
@@ -1212,20 +1490,28 @@ pub trait PetscObject<'a, PT>: PetscAsRaw<Raw = *mut PT> {
         let type_name_cs = ::std::ffi::CString::new(type_name).expect("`CString::new` failed");
         let mut tmp = ::std::mem::MaybeUninit::<crate::petsc_raw::PetscBool>::uninit();
 
-        let ierr = unsafe { crate::petsc_raw::PetscObjectTypeCompare(
-            self.as_raw() as *mut _, type_name_cs.as_ptr(),
-            tmp.as_mut_ptr()
-        )};
+        let ierr = unsafe {
+            crate::petsc_raw::PetscObjectTypeCompare(
+                self.as_raw() as *mut _,
+                type_name_cs.as_ptr(),
+                tmp.as_mut_ptr(),
+            )
+        };
         unsafe { chkerrq!(self.world(), ierr) }?;
 
         crate::Result::Ok(unsafe { tmp.assume_init() }.into())
     }
 
-    /// Sets the prefix used for searching for all options of PetscObjectType in the database. 
+    /// Sets the prefix used for searching for all options of PetscObjectType in the database.
     fn set_options_prefix(&mut self, prefix: &str) -> crate::Result<()> {
         let name_cs = ::std::ffi::CString::new(prefix).expect("`CString::new` failed");
-        
-        let ierr = unsafe { crate::petsc_raw::PetscObjectSetOptionsPrefix(self.as_raw() as *mut crate::petsc_raw::_p_PetscObject, name_cs.as_ptr()) };
+
+        let ierr = unsafe {
+            crate::petsc_raw::PetscObjectSetOptionsPrefix(
+                self.as_raw() as *mut crate::petsc_raw::_p_PetscObject,
+                name_cs.as_ptr(),
+            )
+        };
         unsafe { chkerrq!(self.world(), ierr) }
     }
 }
@@ -1268,28 +1554,39 @@ impl_petsc_object_traits! { PetscObjectStruct, po_p, petsc_raw::_p_PetscObject, 
 ///     n: PetscInt,
 ///     view_exact_sol: bool,
 /// }
-/// 
+///
 /// impl PetscOpt for Opt {
 ///     fn from_petsc_opt_builder(pob: &mut PetscOptBuilder) -> petsc_rs::Result<Self> {
 ///         let m = pob.options_int("-m", "The size `m`", "doc-test", 8)?;
 ///         let n = pob.options_int("-n", "The size `n`", "doc-test", 7)?;
-///         let view_exact_sol = pob.options_bool("-view_exact_sol", "Output the solution for verification", "doc-test", false)?;
-///         Ok(Opt { m, n, view_exact_sol })
+///         let view_exact_sol = pob.options_bool(
+///             "-view_exact_sol",
+///             "Output the solution for verification",
+///             "doc-test",
+///             false,
+///         )?;
+///         Ok(Opt {
+///             m,
+///             n,
+///             view_exact_sol,
+///         })
 ///     }
 /// }
 ///
 /// # fn main() -> petsc_rs::Result<()> {
-/// let petsc = Petsc::builder()
-///     .args(std::env::args())
-///     .init()?;
+/// let petsc = Petsc::builder().args(std::env::args()).init()?;
 ///
-/// let Opt { m, n, view_exact_sol } = petsc.options_get()?;
+/// let Opt {
+///     m,
+///     n,
+///     view_exact_sol,
+/// } = petsc.options_get()?;
 /// # Ok(())
 /// # }
 /// ```
 pub trait PetscOpt
 where
-    Self: Sized
+    Self: Sized,
 {
     /// Builds the struct from a [`PetscOptBuilder`] object.
     fn from_petsc_opt_builder(petsc: &mut PetscOptBuilder) -> Result<Self>;
@@ -1298,12 +1595,16 @@ where
 /// PETSc type that represents a complex number with precision matching that of PetscReal.
 ///
 /// You must use the `petsc-use-complex-unsafe` feature to use this type.
-#[cfg(any(doc, feature = "petsc-use-complex-unsafe", feature = "petsc-sys/petsc-use-complex-unsafe"))]
+#[cfg(any(
+    doc,
+    feature = "petsc-use-complex-unsafe",
+    feature = "petsc-sys/petsc-use-complex-unsafe"
+))]
 pub type PetscComplex = Complex<PetscReal>;
 
 /// PETSc scalar type.
 ///
-/// Can represent either a real or complex number in varying levels of precision. The specific 
+/// Can represent either a real or complex number in varying levels of precision. The specific
 /// representation can be set by features for [`petsc-sys`](crate).
 ///
 /// Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
@@ -1327,12 +1628,15 @@ pub type PetscComplex = Complex<PetscReal>;
 /// ```ignore
 /// fn c(r: PetscReal) -> PetscScalar { PetscScalar::from(r) }
 /// ```
-#[cfg(not(any(feature = "petsc-use-complex-unsafe", feature = "petsc-sys/petsc-use-complex-unsafe")))]
+#[cfg(not(any(
+    feature = "petsc-use-complex-unsafe",
+    feature = "petsc-sys/petsc-use-complex-unsafe"
+)))]
 pub type PetscScalar = PetscReal;
 
 /// PETSc scalar type.
 ///
-/// Can represent either a real or complex number in varying levels of precision. The specific 
+/// Can represent either a real or complex number in varying levels of precision. The specific
 /// representation can be set by features for [`petsc-sys`](crate).
 ///
 /// Note, `PetscScalar` could be a complex number, so best practice is to instead of giving
@@ -1356,12 +1660,15 @@ pub type PetscScalar = PetscReal;
 /// ```ignore
 /// fn c(r: PetscReal) -> PetscScalar { PetscScalar::from(r) }
 /// ```
-#[cfg(any(feature = "petsc-use-complex-unsafe", feature = "petsc-sys/petsc-use-complex-unsafe"))]
+#[cfg(any(
+    feature = "petsc-use-complex-unsafe",
+    feature = "petsc-sys/petsc-use-complex-unsafe"
+))]
 pub type PetscScalar = Complex<PetscReal>;
 
 #[cfg(doctest)]
 mod readme_doctest {
     // This will run the doc tests in README.md
     #[doc = include_str!("../README.md")]
-    extern {}
+    extern "C" {}
 }
