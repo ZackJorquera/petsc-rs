@@ -1,8 +1,17 @@
 [package]
 name = "petsc-rs"
 version = "0.1.0"
-authors = ["Zack Jorquera <zackary.jorquera@colorado.edu>"]
+authors = [
+    "Zack Jorquera <jorquerazack@gmail.com>"
+]
 edition = "2018"
+build = "build.rs"
+repository = "https://gitlab.com/petsc/petsc-rs"
+description = """
+Rust bindings for the PETSc library.
+"""
+keywords = ["petsc"]
+categories = ["science"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -15,7 +24,7 @@ petsc-int-i64 = ["petsc-sys/petsc-int-i64"]
 petsc-use-complex-unsafe = ["num-complex", "petsc-sys/petsc-use-complex-unsafe"]
 
 [dependencies]
-mpi = {git = "https://github.com/rsmpi/rsmpi.git", rev = "82e1d35", default-features = false }
+mpi = { git = "https://github.com/rsmpi/rsmpi.git", rev = "82e1d35", default-features = false }
 petsc-sys = { path = "./petsc-sys/", default-features = false, features = ["generate-enums", "use-private-headers"] }
 num-complex = { version = "0.4", optional = true }
 ndarray = "0.15"

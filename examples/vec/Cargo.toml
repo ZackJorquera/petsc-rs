@@ -1,8 +1,14 @@
 [package]
 name = "vec"
 version = "0.1.0"
-authors = ["Zack Jorquera <zackary.jorquera@colorado.edu>"]
+authors = [
+    "Zack Jorquera <jorquerazack@gmail.com>"
+]
 edition = "2018"
+description = """
+Ports of PETSc vec tutorials (the original C versions can be found at 
+https://gitlab.com/petsc/petsc/-/tree/main/src/vec/vec/tutorials).
+"""
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -14,5 +20,5 @@ name = "vec-ex2"
 path = "src/ex2.rs"
 
 [dependencies]
-mpi = {git = "https://github.com/rsmpi/rsmpi.git", rev = "82e1d35", default-features = false }
+mpi = { git = "https://github.com/rsmpi/rsmpi.git", rev = "82e1d35", default-features = false }
 petsc-rs = { path = "../../" }

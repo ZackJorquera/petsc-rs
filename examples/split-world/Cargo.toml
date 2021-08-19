@@ -1,8 +1,13 @@
 [package]
 name = "split-world"
 version = "0.1.0"
-authors = ["Zack Jorquera <zackary.jorquera@colorado.edu>"]
+authors = [
+    "Zack Jorquera <jorquerazack@gmail.com>"
+]
 edition = "2018"
+description = """
+Examples of using petsc-rs when splitting the MPI comm world.
+"""
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -14,5 +19,5 @@ name = "sw-ex1"
 path = "src/ex1.rs"
 
 [dependencies]
-mpi = {git = "https://github.com/rsmpi/rsmpi.git", rev = "82e1d35", default-features = false }
+mpi = { git = "https://github.com/rsmpi/rsmpi.git", rev = "82e1d35", default-features = false }
 petsc-rs = { path = "../../" }

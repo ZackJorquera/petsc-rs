@@ -1,8 +1,12 @@
 [package]
 name = "build-probe-petsc"
 version = "0.1.0"
-authors = ["Zack Jorquera <zackary.jorquera@colorado.edu>"]
+authors = [
+    "Zack Jorquera <jorquerazack@gmail.com>"
+]
 edition = "2018"
+repository = "https://gitlab.com/petsc/petsc-rs"
+categories = ["development-tools::build-utils"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

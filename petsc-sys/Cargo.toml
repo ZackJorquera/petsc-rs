@@ -1,8 +1,17 @@
 [package]
 name = "petsc-sys"
 version = "0.1.0"
-authors = ["Zack Jorquera <zackary.jorquera@colorado.edu>"]
+authors = [
+    "Zack Jorquera <jorquerazack@gmail.com>"
+]
 edition = "2018"
+build = "build.rs"
+repository = "https://gitlab.com/petsc/petsc-rs"
+description = """
+Raw rust bindings for the PETSc library.
+"""
+keywords = ["petsc", "ffi"]
+categories = ["science", "external-ffi-bindings"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
