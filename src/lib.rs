@@ -7,7 +7,7 @@
 //! (parallel) solution of scientific applications modeled by partial differential equations. PETSc supports
 //! MPI through the `mpi` crate from [`rsmpi`](https://github.com/rsmpi/rsmpi).
 //!
-//! # Basic Usage
+//! ## Basic Usage
 //! 
 //! First, you will need to add `petsc-rs` to your `Cargo.toml`.
 //! ```toml
@@ -41,7 +41,7 @@
 //! standard [`Result`](std::result::Result) type which indicates whether an error has occurred during
 //! the call.
 //!
-//! # Features
+//! ## Features
 //! 
 //! PETSc has support for multiple different sizes of scalars and integers. This is exposed
 //! to rust with different features that you can set. The following are all the features that
@@ -70,7 +70,36 @@
 //! features = ["petsc-real-f32", "petsc-int-i64"]
 //! ```
 //!
-//! # Further Reading
+//! ## Using `petsc-sys`
+//! 
+//! If you wish to use raw bindings from `petsc-sys` in the same crate that you are using `petsc-rs`
+//! you can import the `petsc-sys` crate with the following line in your `Cargo.toml`. An example of
+//! using both `petsc-rs` and `petsc-sys` can be found in
+//! [`examples/snes/src/ex12.rs`](https://gitlab.com/petsc/petsc-rs/-/blob/main/examples/snes/src/ex12.rs).
+//! 
+//! ```toml
+//! [dependencies]
+//! petsc-sys = { git = "https://gitlab.com/petsc/petsc-rs/", branch = "main", default-features = false }
+//! ```
+//! 
+//! Note, `petsc-sys` has the same type related feature flags as `petsc-rs`, and `petsc-rs` will pass
+//! its flags to `petsc-sys`. To avoid conflicts you should use `default-features = false` when importing
+//! `petsc-sys` so that you don't accidentally enable any additional flags.
+//! 
+//! ## Using `mpi`
+//! 
+//! If you want to use `mpi` in your project, you MUST use `rsmpi v0.6` or above. Currently, this isn't
+//! available on [crates.io](https://crates.io/) so you will have to get it from the GitHub repo. You
+//! can do that by adding the following to your `Cargo.toml`.
+//! 
+//! ```toml
+//! [dependencies]
+//! mpi = { git = "https://github.com/rsmpi/rsmpi.git", branch = "main" }
+//! ```
+//! 
+//! Or to be consistent with `petsc-rs` you can use `rev = "82e1d35"` instead of `branch = "main"`.
+//!
+//! ## Further Reading
 //! 
 //! - [C API Getting Started](https://petsc.org/release/documentation/manual/getting_started/)
 //!
@@ -488,7 +517,7 @@ impl PetscBuilder
     }
 }
 
-/// Struct that facilitates setting command line arguments.
+/// Struct that facilitates reading from the PETSc options database.
 ///
 /// Wraps a set of queries on the options database that are related and should be displayed
 /// on the same window of a GUI that allows the user to set the options interactively.
@@ -642,7 +671,7 @@ impl Drop for PetscOptBuilder<'_, '_, '_> {
     }
 }
 
-/// A Petsc is a wrapper around PETSc initialization and Finalization.
+/// A Petsc is a wrapper around PETSc initialization and finalization.
 ///
 /// Also stores a reference to the the `MPI_COMM_WORLD`/`PETSC_COMM_WORLD` variable.
 pub struct Petsc {
@@ -1227,7 +1256,7 @@ impl_petsc_object_traits! { PetscObjectStruct, po_p, petsc_raw::_p_PetscObject, 
 // impl_petsc_view_func!{ PetscObjectStruct, PetscObjectView }
 
 // TODO: make into a derive macro
-/// This trait is used to define how to get the options in a struct from the petsc object.
+/// This trait is used to define how to get the options in a struct from the petsc options database.
 ///
 /// # Example
 ///

@@ -38,6 +38,8 @@ use crate::{
     mat::{Mat, MatType, },
     indexset::{IS, },
     spaces::{Space, DualSpace, },
+    snes::{SNES, DomainOrPetscError, },
+    ksp::{KSP, },
     petsc_panic,
 };
 use mpi::topology::UserCommunicator;
@@ -59,22 +61,14 @@ pub struct DM<'a, 'tl> {
 
     ds: Option<DS<'a, 'tl>>,
 
-    // TODO: we need to do a lot more work on determining how to clone a DM on the rust
-    // side.
-    // Idea: We could reference count the trampoline data because under the hood
-    // the DMPLEX data is shallow copied and reference counted.
-    // However, the context variables that stores this trampoline data is in the DS so
-    // idk if this is the correct way to do this. Regardless I think we should move this
-    // to the DS.
-    // Even if this isn't copied when the DM is cloned, it probably wont matter in the short
-    // term as we never use old boundary data (unless this comment is out of date and we do).
-    // Right now, we just create the boundary data, give the pointer to C api and never use
-    // it again util it is dropped, so having the Rc just prolongs the time until drop.
-    // However, if this is the case we should remove the `Rc` as it could be unsafe.
-    boundary_trampoline_data: Option<Vec<DMBoundaryTrampolineData<'tl>>>,
-
     #[allow(dead_code)]
     aux_vec: Option<Vector<'a>>,
+
+    snes_function_trampoline_data: Option<Pin<Box<SNESFunctionTrampolineData<'a, 'tl>>>>,
+    snes_jacobian_trampoline_data: Option<SNESJacobianTrampolineData<'a, 'tl>>,
+
+    ksp_compute_operators_trampoline_data: Option<Pin<Box<KSPComputeOperatorsTrampolineData<'a, 'tl>>>>,
+    ksp_compute_rhs_trampoline_data: Option<Pin<Box<KSPComputeRHSTrampolineData<'a, 'tl>>>>,
 }
 
 /// Object which encapsulates a subset of the mesh from a [`DM`]
@@ -128,8 +122,8 @@ pub enum FieldDisc<'a, 'tl> {
 }
 
 /// internal type used only for storage.
-// TODO: we could get rid of this struct by checking what type the FieldDisc
-// by using `PetscObjectGetClassId` like is done here (look at `to_known_unwrap`):
+// TODO: we could get rid of this struct by checking what type the FieldDisc is
+// by using `PetscObjectGetClassId` like is done here (look at `into_known_unwrap`):
 // https://gitlab.com/petsc/petsc/-/blob/9634419/src/dm/impls/plex/plexsection.c#L454-456
 enum FieldDiscPriv<'a, 'tl> {
     Known(FieldDisc<'a, 'tl>),
@@ -186,7 +180,7 @@ impl<'a, 'tl> Into<FieldDisc<'a, 'tl>> for FVDisc<'a> {
 
 impl<'a, 'tl> FieldDiscPriv<'a, 'tl> {
     #[allow(dead_code)]
-    fn to_known_unwrap(self) -> FieldDisc<'a, 'tl> {
+    fn into_known_unwrap(self) -> FieldDisc<'a, 'tl> {
         match self {
             FieldDiscPriv::Known(fd) => fd,
             FieldDiscPriv::Unknown(ufd) => {
@@ -216,6 +210,17 @@ pub struct DS<'a, 'tl> {
     jacobian_trampoline_data: Option<DSJacobianTrampolineData<'tl>>,
 
     exact_soln_trampoline_data: Option<Pin<Box<DSExactSolutionTrampolineData<'tl>>>>,
+
+    // TODO: we need to do a lot more work on determining how to clone a DM and thus
+    // also a DS on the rust side.
+    // Idea: We could reference count the trampoline data because under the hood
+    // the DMPLEX data is shallow copied and reference counted.
+    // Even if this isn't copied when the DM/DS is cloned, it probably wont matter in the short
+    // term as we never use old boundary data (unless this comment is out of date and we do).
+    // Right now, we just create the boundary data, give the pointer to C api and never use
+    // it again util it is dropped, so having the Rc just prolongs the time until drop.
+    // However, if this is the case we should remove the `Rc` as it could be unsafe.
+    boundary_trampoline_data: Option<Vec<DMBoundaryTrampolineData<'tl>>>,
 }
 
 /// PETSc object that manages a sets of pointwise functions defining a system of equations 
@@ -303,11 +308,45 @@ type BCFieldDyn<'tl> = dyn Fn(PetscInt, PetscInt, PetscInt,
     &[PetscInt], &[PetscInt], &[PetscReal], &[PetscReal], &[PetscReal],
     PetscReal, &[PetscReal], PetscInt, &[PetscScalar], &mut [PetscScalar]) -> Result<()> + 'tl;
 
+struct SNESFunctionTrampolineData<'a, 'tl> {
+    world: &'a UserCommunicator,
+    user_f: Box<dyn FnMut(&SNES<'a, '_, '_>, &Vector<'a>, &mut Vector<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl>,
+}
+
+enum SNESJacobianTrampolineData<'a, 'tl> {
+    SingleMat(Pin<Box<SNESJacobianSingleTrampolineData<'a, 'tl>>>),
+    DoubleMat(Pin<Box<SNESJacobianDoubleTrampolineData<'a, 'tl>>>),
+}
+
+struct SNESJacobianSingleTrampolineData<'a, 'tl> {
+    world: &'a UserCommunicator,
+    user_f: Box<dyn FnMut(&SNES<'a, '_, '_>, &Vector<'a>, &mut Mat<'a, '_>) -> std::result::Result<(), DomainOrPetscError> + 'tl>,
+}
+
+struct SNESJacobianDoubleTrampolineData<'a, 'tl> {
+    world: &'a UserCommunicator,
+    user_f: Box<dyn FnMut(&SNES<'a, '_, '_>, &Vector<'a>, &mut Mat<'a, '_>, &mut Mat<'a, '_>) -> std::result::Result<(), DomainOrPetscError> + 'tl>,
+}
+
+struct KSPComputeOperatorsTrampolineData<'a, 'tl> {
+    world: &'a UserCommunicator,
+    user_f: Box<dyn FnMut(&KSP<'a, '_, '_>, &mut Mat<'a, '_>, &mut Mat<'a, '_>) -> Result<()> + 'tl>,
+}
+
+struct KSPComputeRHSTrampolineData<'a, 'tl> {
+    world: &'a UserCommunicator,
+    user_f: Box<dyn FnMut(&KSP<'a, '_, '_>, &mut Vector<'a>) -> Result<()> + 'tl>,
+}
+
 impl<'a, 'tl> DM<'a, 'tl> {
     /// Same as `DM { ... }` but sets all optional params to `None`
     pub(crate) fn new(world: &'a UserCommunicator, dm_p: *mut petsc_raw::_p_DM) -> Self {
-        DM { world, dm_p, composite_dms: None, boundary_trampoline_data: None, fields: None,
-            ds: None, coord_dm: None, coarse_dm: None, aux_vec: None, }
+        DM { world, dm_p, composite_dms: None, fields: None,
+            ds: None, coord_dm: None, coarse_dm: None, aux_vec: None,
+            snes_function_trampoline_data: None,
+            snes_jacobian_trampoline_data: None,
+            ksp_compute_operators_trampoline_data: None,
+            ksp_compute_rhs_trampoline_data: None, }
     }
 
     /// Creates an empty [`DM`] object. The type can then be set with [`DM::set_type()`].
@@ -635,7 +674,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     }
 
     /// Updates global vectors from local vectors.
-    pub fn global_to_local(&self, global: &Vector<'a>, mode: InsertMode, local: &mut Vector<'a>) -> Result<()> {
+    pub fn global_to_local(&self, global: &Vector, mode: InsertMode, local: &mut Vector) -> Result<()> {
         let ierr = unsafe { petsc_raw::DMGlobalToLocalBegin(self.dm_p, global.vec_p, mode, local.vec_p) };
         unsafe { chkerrq!(self.world, ierr) }?;
         let ierr = unsafe { petsc_raw::DMGlobalToLocalEnd(self.dm_p, global.vec_p, mode, local.vec_p) };
@@ -647,7 +686,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// In the [`ADD_VALUES`](InsertMode::ADD_VALUES) case you normally would zero the receiving vector
     /// before beginning this operation. [`INSERT_VALUES`](InsertMode::INSERT_VALUES) is not supported
     /// for DMDA, in that case simply compute the values directly into a global vector instead of a local one.
-    pub fn local_to_global(&self, local: &Vector<'a>, mode: InsertMode, global: &mut Vector<'a>) -> Result<()> {
+    pub fn local_to_global(&self, local: &Vector, mode: InsertMode, global: &mut Vector) -> Result<()> {
         let ierr = unsafe { petsc_raw::DMLocalToGlobalBegin(self.dm_p, local.vec_p, mode, global.vec_p) };
         unsafe { chkerrq!(self.world, ierr) }?;
         let ierr = unsafe { petsc_raw::DMLocalToGlobalEnd(self.dm_p, local.vec_p, mode, global.vec_p) };
@@ -826,7 +865,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn da_vec_view<'b>(&self, vec: &'b Vector<'a>) -> Result<crate::vector::VectorView<'a, 'b>> {
+    pub fn da_vec_view<'at, 'b>(&self, vec: &'b Vector<'at>) -> Result<crate::vector::VectorView<'at, 'b>> {
         let (xs, ys, zs, xm, ym, zm) = self.da_get_corners()?;
         let (dim, _, _, _, _, _, _, dof, _, _, _, _, _) = self.da_get_info()?;
         let local_size = vec.get_local_size()?;
@@ -939,7 +978,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn da_vec_view_mut<'b>(&self, vec: &'b mut Vector<'a>) -> Result<crate::vector::VectorViewMut<'a, 'b>> {
+    pub fn da_vec_view_mut<'at, 'b>(&self, vec: &'b mut Vector<'at>) -> Result<crate::vector::VectorViewMut<'at, 'b>> {
         let (xs, yx, zs, xm, ym, zm) = self.da_get_corners()?;
         let (dim, _, _, _, _, _, _, dof, _, _, _, _, _) = self.da_get_info()?;
         let local_size = vec.get_local_size()?;
@@ -1320,6 +1359,74 @@ impl<'a, 'tl> DM<'a, 'tl> {
         Ok(label)
     }
 
+    /// Complete labels that are being used for FEM BC
+    #[cfg(petsc_version_3_16_dev)]
+    unsafe fn complete_boundary_label_internal(&self, ds: &DS, field: PetscInt, bd_num: PetscInt, label: &mut DMLabel) -> Result<()> {
+        // In the C code, this is a static function declared/defined in `src/dm/interface/dm.c`
+        // So this function is just a port of it.
+        let mut duplicate = false;
+        if let Some(ref fields) = self.fields {
+            let (_, disc) = &fields[field as usize];
+            let id = match disc {
+                FieldDiscPriv::Known(fd) => fd.get_class_id(),
+                FieldDiscPriv::Unknown(po) => po.get_class_id(),
+            }?;
+            if id == petsc_raw::PETSCFE_CLASSID {
+                let nbd = ds.get_num_boundary()?;
+                for bd in 0..PetscInt::min(nbd, bd_num) {
+                    let (_, _, _, l, _, _, _) = ds.get_boundary_info(bd)?;
+                    duplicate = label.as_raw() == l.as_raw();
+                    if duplicate { break; }
+                }
+                if !duplicate {
+                    let mut plex_p = MaybeUninit::uninit();
+                    let ierr = petsc_raw::DMConvert(self.dm_p,
+                        petsc_raw::DMPLEX.as_ptr() as *const _, plex_p.as_mut_ptr());
+                    chkerrq!(self.world(), ierr)?;
+                    let plex = ManuallyDrop::new(DM::new(self.world(), plex_p.assume_init()));
+                    plex.plex_label_complete(label)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Complete labels that are being used for FEM BC
+    #[cfg(petsc_version_3_15)]
+    unsafe fn complete_boundary_label_internal(&self, ds: &DS, field: PetscInt, bd_num: PetscInt, labelname: &str) -> Result<()> {
+        // In the C code, this is a static function declared/defined in `src/dm/interface/dm.c`
+        // So this function is just a port of it.
+        let mut duplicate = false;
+        if let Some(ref fields) = self.fields {
+            let (_, disc) = &fields[field as usize];
+            let id = match disc {
+                FieldDiscPriv::Known(fd) => fd.get_class_id(),
+                FieldDiscPriv::Unknown(po) => po.get_class_id(),
+            }?;
+            if let Some(mut label) = self.get_label(labelname)? {
+                if id == petsc_raw::PETSCFE_CLASSID {
+                    let nbd = ds.get_num_boundary()?;
+                    for bd in 0..PetscInt::min(nbd, bd_num) {
+                        let (_, _, ln, _, _, _) = ds.get_boundary_info(bd)?;
+                        duplicate = labelname == ln;
+                        if duplicate { break; }
+                    }
+                    if !duplicate {
+                        let mut plex_p = MaybeUninit::uninit();
+                        let ierr = petsc_raw::DMConvert(self.dm_p,
+                            petsc_raw::DMPLEX.as_ptr() as *const _, plex_p.as_mut_ptr());
+                        chkerrq!(self.world(), ierr)?;
+                        let plex = ManuallyDrop::new(DM::new(self.world(), plex_p.assume_init()));
+                        plex.plex_label_complete(&mut label)?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Add an essential boundary condition to the model. (WIP Wrapper function)
     ///
     /// In the C API you would call `DMAddBoundary` with the type being `DM_BC_ESSENTIAL`.
@@ -1348,31 +1455,27 @@ impl<'a, 'tl> DM<'a, 'tl> {
     ///
     /// Look at [`snes-ex12`](https://gitlab.com/petsc/petsc-rs/-/blob/main/examples/snes/src/ex12.rs)
     #[cfg(any(petsc_version_3_16_dev, doc))]
-    pub fn add_boundary_essential<F1>(&mut self, name: &str, label: &DMLabel, values: &[PetscInt],
+    pub fn add_boundary_essential<F1>(&mut self, name: &str, label: &mut DMLabel, values: &[PetscInt],
         field: PetscInt, comps: &[PetscInt], bc_user_func: F1) -> Result<PetscInt>
     where
         F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
     {
-        let mut bd = MaybeUninit::uninit();
+        // TODO: PETSc c func does a lot of extra stuff with C macros:
+        // PetscValidHeaderSpecific(dm, DM_CLASSID, 1);
+        // PetscValidLogicalCollectiveEnum(dm, type, 2);
+        // PetscValidHeaderSpecific(label, DMLABEL_CLASSID, 4);
+        // PetscValidLogicalCollectiveInt(dm, Nv, 5);
+        // PetscValidLogicalCollectiveInt(dm, field, 7);
+        // PetscValidLogicalCollectiveInt(dm, Nc, 8);
+        // ierr = DMGetDS(dm, &ds);CHKERRQ(ierr);
+        // ierr = DMCompleteBoundaryLabel_Internal(dm, ds, field, PETSC_MAX_INT, label);CHKERRQ(ierr);
+        // ierr = PetscDSAddBoundary(ds, type, name, label, Nv, values, field, Nc, comps, bcFunc, bcFunc_t, ctx, bd);CHKERRQ(ierr);
+        // return 0;
 
-        let raw_fn_wrapper = |dm_p, name, nc, comps, field, fn1, fn2, ctx| {
-            unsafe { petsc_raw::DMAddBoundary(
-            dm_p, DMBoundaryConditionType::DM_BC_ESSENTIAL, name,
-            label.dml_p, values.len() as PetscInt,
-            values.as_ptr(), field, nc, comps,
-            fn1, fn2, ctx, bd.as_mut_ptr()) }
-        };
-
-        // I would like to have this function and `add_boundary_essential_with_dt` be the same method with
-        // the second user func being an option. However, the reason why we dont do this is because rust
-        // will complain and say it doesn't know what type `F2` should be when you set it to `None`. This is
-        // why we use explicit types here bellow instead of just `Option::None`. While this isn't a problem
-        // here, i dont want to make the caller have to know they need to do this as it feels unnecessary.
-        self.add_boundary_func_shared(name, field, comps, bc_user_func,
-            Option::<fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()>>::None,
-            raw_fn_wrapper)?;
-
-        Ok(unsafe { bd.assume_init() })
+        let _ = self.get_ds_or_create()?;
+        let ds = self.try_get_ds().unwrap();
+        unsafe { self.complete_boundary_label_internal(ds, field, PetscInt::MAX, label)?; }
+        self.get_ds_or_create()?.add_boundary_essential(name, label, values, field, comps, bc_user_func)
     }
 
     /// Add an essential boundary condition to the model. (WIP Wrapper function)
@@ -1400,25 +1503,16 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// * `nc` - the number of field components
     /// * `bcval` *(output)* - output values at the current point
     #[cfg(any(petsc_version_3_16_dev, doc))]
-    pub fn add_boundary_essential_with_dt<F1, F2>(&mut self, name: &str, label: &DMLabel, values: &[PetscInt],
+    pub fn add_boundary_essential_with_dt<F1, F2>(&mut self, name: &str, label: &mut DMLabel, values: &[PetscInt],
         field: PetscInt, comps: &[PetscInt], bc_user_func: F1, bc_user_func_t: F2) -> Result<PetscInt>
     where
         F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
         F2: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
     {
-        let mut bd = MaybeUninit::uninit();
-
-        let raw_fn_wrapper = |dm_p, name, nc, comps, field, fn1, fn2, ctx| {
-            unsafe { petsc_raw::DMAddBoundary(
-            dm_p, DMBoundaryConditionType::DM_BC_ESSENTIAL, name,
-            label.dml_p, values.len() as PetscInt,
-            values.as_ptr(), field, nc, comps,
-            fn1, fn2, ctx, bd.as_mut_ptr()) }
-        };
-
-        self.add_boundary_func_shared(name, field, comps, bc_user_func, Some(bc_user_func_t), raw_fn_wrapper)?;
-
-        Ok(unsafe { bd.assume_init() })
+        let _ = self.get_ds_or_create()?;
+        let ds = self.try_get_ds().unwrap();
+        unsafe { self.complete_boundary_label_internal(ds, field, PetscInt::MAX, label)?; }
+        self.get_ds_or_create()?.add_boundary_essential_with_dt(name, label, values, field, comps, bc_user_func, bc_user_func_t)
     }
 
     /// Add an essential boundary condition to the model. (WIP Wrapper function)
@@ -1450,18 +1544,10 @@ impl<'a, 'tl> DM<'a, 'tl> {
     where
         F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
     {
-        let labelname_cs = CString::new(labelname).expect("`CString::new` failed");
-
-        let raw_fn_wrapper = |dm_p, name, nc, comps, field, fn1, fn2, ctx| {
-            unsafe { petsc_raw::DMAddBoundary(
-            dm_p, DMBoundaryConditionType::DM_BC_ESSENTIAL, name,
-            labelname_cs.as_ptr(), field, nc, comps, fn1, fn2,
-            ids.len() as PetscInt, ids.as_ptr(), ctx) }
-        };
-        
-        self.add_boundary_func_shared(name, field, comps, bc_user_func,
-            Option::<fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()>>::None,
-            raw_fn_wrapper)
+        let _ = self.get_ds_or_create()?;
+        let ds = self.try_get_ds().unwrap();
+        unsafe { self.complete_boundary_label_internal(ds, field, PetscInt::MAX, labelname)?; }
+        self.get_ds_or_create()?.add_boundary_essential(name, labelname, field, comps, ids, bc_user_func)
     }
 
     /// Add an essential boundary condition to the model. (WIP Wrapper function)
@@ -1495,97 +1581,10 @@ impl<'a, 'tl> DM<'a, 'tl> {
         F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
         F2: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
     {
-        let labelname_cs = CString::new(labelname).expect("`CString::new` failed");
-
-        let raw_fn_wrapper = |dm_p, name, nc, comps, field, fn1, fn2, ctx| {
-            unsafe { petsc_raw::DMAddBoundary(
-            dm_p, DMBoundaryConditionType::DM_BC_ESSENTIAL, name,
-            labelname_cs.as_ptr(), field, nc, comps, fn1, fn2,
-            ids.len() as PetscInt, ids.as_ptr(), ctx) }
-        };
-        
-        self.add_boundary_func_shared(name, field, comps, bc_user_func, Some(bc_user_func_t), raw_fn_wrapper)
-    }
-
-    /// Does all the heavy lifting for `add_boundary_essential` and `add_boundary_natural` independent
-    /// of the version of `DMAddBoundary`
-    fn add_boundary_func_shared<F1, F2, F3>(&mut self, name: &str, field: PetscInt,
-        comps: &[PetscInt], bc_user_func: F1, bc_user_func_t: Option<F2>, add_boundary_wrapper: F3) -> Result<()>
-    where
-        F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
-        F2: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
-        F3: FnOnce(*mut petsc_raw::_p_DM, *const ::std::os::raw::c_char, PetscInt,
-            *const PetscInt, PetscInt, Option<unsafe extern "C" fn()>, Option<unsafe extern "C" fn()>,
-            *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode,
-    {
-        let name_cs = CString::new(name).expect("`CString::new` failed");
-
-        let bc_user_func_t_is_some = bc_user_func_t.is_some();
-        let closure_anchor1 = Box::new(bc_user_func);
-        let closure_anchor2 = bc_user_func_t
-            .map(|bc_user_func_t| -> Box<BCFuncDyn<'tl>> { 
-                Box::new(bc_user_func_t) });
-
-        let trampoline_data = Box::pin(DMBoundaryFuncTrampolineData { 
-            user_f1: closure_anchor1, user_f2: closure_anchor2 });
-
-        unsafe extern "C" fn bc_func_trampoline(dim: PetscInt, time: PetscReal, x: *const PetscReal,
-            nc: PetscInt, bcval: *mut petsc_raw::PetscScalar, ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
-        {
-            let trampoline_data: Pin<&mut DMBoundaryFuncTrampolineData> = std::mem::transmute(ctx);
-
-            let x_slice = slice::from_raw_parts(x, dim as usize);
-            let bcval_slice = slice::from_raw_parts_mut(bcval as *mut _, nc as usize);
-            
-            (trampoline_data.get_mut().user_f1)(dim, time, x_slice, nc, bcval_slice)
-                .map_or_else(|err| err.kind as i32, |_| 0)
-        }
-
-        unsafe extern "C" fn bc_func_t_trampoline(dim: PetscInt, time: PetscReal, x: *const PetscReal,
-            nc: PetscInt, bcval: *mut petsc_raw::PetscScalar, ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
-        {
-            let trampoline_data: Pin<&mut DMBoundaryFuncTrampolineData> = std::mem::transmute(ctx);
-
-            let x_slice = slice::from_raw_parts(x, dim as usize);
-            let bcval_slice = slice::from_raw_parts_mut(bcval as *mut _, nc as usize);
-            
-            (trampoline_data.get_mut().user_f2.as_mut().unwrap())(dim, time, x_slice, nc, bcval_slice)
-                .map_or_else(|err| err.kind as i32, |_| 0)
-        }
-
-        // When it comes to function pointers, casting in NOT your friend. It causes the pointers 
-        // to be curropted. You MUST be VERY explicit with the types. All in all, the following
-        // two declarations will get the function pointers in options correctly (I think). Once
-        // we have them, we can them manipulate them how we see fit.
-        let bc_func_essential_trampoline_fn_ptr: ::std::option::Option<
-            unsafe extern "C" fn(arg1: PetscInt, arg2: PetscReal, arg3: *const PetscReal, arg4: PetscInt,
-                arg5: *mut petsc_raw::PetscScalar, arg6: *mut ::std::os::raw::c_void, ) -> petsc_raw::PetscErrorCode, >
-            = Some(bc_func_trampoline);
-
-        let mut bc_func_t_essential_trampoline_fn_ptr: ::std::option::Option<
-            unsafe extern "C" fn(arg1: PetscInt, arg2: PetscReal, arg3: *const PetscReal, arg4: PetscInt,
-                arg5: *mut petsc_raw::PetscScalar, arg6: *mut ::std::os::raw::c_void, ) -> petsc_raw::PetscErrorCode, >
-            = Some(bc_func_t_trampoline);
-
-        if !bc_user_func_t_is_some {
-            bc_func_t_essential_trampoline_fn_ptr = None;
-        }
-
-        let ierr = add_boundary_wrapper(
-            self.dm_p, name_cs.as_ptr(), comps.len() as PetscInt, comps.as_ptr(),
-            field, unsafe { std::mem::transmute(bc_func_essential_trampoline_fn_ptr) },
-            unsafe { std::mem::transmute(bc_func_t_essential_trampoline_fn_ptr) }, 
-            unsafe { std::mem::transmute(trampoline_data.as_ref()) }
-        );
-        unsafe { chkerrq!(self.world, ierr) }?;
-        
-        if let Some(ref mut boundary_trampoline_data_vec) = self.boundary_trampoline_data {
-            boundary_trampoline_data_vec.push(DMBoundaryTrampolineData::BCFunc(trampoline_data));
-        } else {
-            self.boundary_trampoline_data = Some(vec![DMBoundaryTrampolineData::BCFunc(trampoline_data)]);
-        }
-
-        Ok(())
+        let _ = self.get_ds_or_create()?;
+        let ds = self.try_get_ds().unwrap();
+        unsafe { self.complete_boundary_label_internal(ds, field, PetscInt::MAX, labelname)?; }
+        self.get_ds_or_create()?.add_boundary_essential_with_dt(name, labelname, field, comps, ids, bc_user_func, bc_user_func_t)
     }
 
     /// Add a natural boundary condition to the model. (WIP Wrapper function)
@@ -1608,26 +1607,15 @@ impl<'a, 'tl> DM<'a, 'tl> {
     ///
     /// Look at [`snes-ex12`](https://gitlab.com/petsc/petsc-rs/-/blob/main/examples/snes/src/ex12.rs)
     #[cfg(any(petsc_version_3_16_dev, doc))]
-    pub fn add_boundary_natural<F1>(&mut self, name: &str, label: &DMLabel, values: &[PetscInt],
+    pub fn add_boundary_natural<F1>(&mut self, name: &str, label: &mut DMLabel, values: &[PetscInt],
         field: PetscInt, comps: &[PetscInt], bc_user_func: F1) -> Result<PetscInt>
     where
         F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
     {
-        let mut bd = MaybeUninit::uninit();
-
-        let raw_fn_wrapper = |dm_p, name, nc, comps, field, fn1, fn2, ctx| {
-            unsafe { petsc_raw::DMAddBoundary(
-            dm_p, DMBoundaryConditionType::DM_BC_NATURAL, name,
-            label.dml_p, values.len() as PetscInt,
-            values.as_ptr(), field, nc, comps,
-            fn1, fn2, ctx, bd.as_mut_ptr()) }
-        };
-
-        self.add_boundary_func_shared(name, field, comps, bc_user_func,
-            Option::<fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()>>::None,
-            raw_fn_wrapper)?;
-
-        Ok(unsafe { bd.assume_init() })
+        let _ = self.get_ds_or_create()?;
+        let ds = self.try_get_ds().unwrap();
+        unsafe { self.complete_boundary_label_internal(ds, field, PetscInt::MAX, label)?; }
+        self.get_ds_or_create()?.add_boundary_natural(name, label, values, field, comps, bc_user_func)
     }
 
     /// Add a natural boundary condition to the model. (WIP Wrapper function)
@@ -1647,25 +1635,16 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// * `bc_user_func` - A pointwise function giving boundary values
     /// * `bc_user_func_t` - A pointwise function giving the time deriative of the boundary values
     #[cfg(any(petsc_version_3_16_dev, doc))]
-    pub fn add_boundary_natural_with_dt<F1, F2>(&mut self, name: &str, label: &DMLabel, values: &[PetscInt],
+    pub fn add_boundary_natural_with_dt<F1, F2>(&mut self, name: &str, label: &mut DMLabel, values: &[PetscInt],
         field: PetscInt, comps: &[PetscInt], bc_user_func: F1, bc_user_func_t: F2) -> Result<PetscInt>
     where
         F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
         F2: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
     {
-        let mut bd = MaybeUninit::uninit();
-
-        let raw_fn_wrapper = |dm_p, name, nc, comps, field, fn1, fn2, ctx| {
-            unsafe { petsc_raw::DMAddBoundary(
-            dm_p, DMBoundaryConditionType::DM_BC_NATURAL, name,
-            label.dml_p, values.len() as PetscInt,
-            values.as_ptr(), field, nc, comps,
-            fn1, fn2, ctx, bd.as_mut_ptr()) }
-        };
-
-        self.add_boundary_func_shared(name, field, comps, bc_user_func, Some(bc_user_func_t), raw_fn_wrapper)?;
-
-        Ok(unsafe { bd.assume_init() })
+        let _ = self.get_ds_or_create()?;
+        let ds = self.try_get_ds().unwrap();
+        unsafe { self.complete_boundary_label_internal(ds, field, PetscInt::MAX, label)?; }
+        self.get_ds_or_create()?.add_boundary_natural_with_dt(name, label, values, field, comps, bc_user_func, bc_user_func_t)
     }
 
     /// Add an essential boundary condition to the model. (WIP Wrapper function)
@@ -1688,18 +1667,10 @@ impl<'a, 'tl> DM<'a, 'tl> {
     where
         F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
     {
-        let labelname_cs = CString::new(labelname).expect("`CString::new` failed");
-
-        let raw_fn_wrapper = |dm_p, name, nc, comps, field, fn1, fn2, ctx| {
-            unsafe { petsc_raw::DMAddBoundary(
-            dm_p, DMBoundaryConditionType::DM_BC_NATURAL, name,
-            labelname_cs.as_ptr(), field, nc, comps, fn1, fn2,
-            ids.len() as PetscInt, ids.as_ptr(), ctx) }
-        };
-        
-        self.add_boundary_func_shared(name, field, comps, bc_user_func,
-            Option::<fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()>>::None,
-            raw_fn_wrapper)
+        let _ = self.get_ds_or_create()?;
+        let ds = self.try_get_ds().unwrap();
+        unsafe { self.complete_boundary_label_internal(ds, field, PetscInt::MAX, labelname)?; }
+        self.get_ds_or_create()?.add_boundary_natural(name, labelname, field, comps, ids, bc_user_func)
     }
 
     /// Add an essential boundary condition to the model. (WIP Wrapper function)
@@ -1725,16 +1696,10 @@ impl<'a, 'tl> DM<'a, 'tl> {
         F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
         F2: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
     {
-        let labelname_cs = CString::new(labelname).expect("`CString::new` failed");
-
-        let raw_fn_wrapper = |dm_p, name, nc, comps, field, fn1, fn2, ctx| {
-            unsafe { petsc_raw::DMAddBoundary(
-            dm_p, DMBoundaryConditionType::DM_BC_NATURAL, name,
-            labelname_cs.as_ptr(), field, nc, comps, fn1, fn2,
-            ids.len() as PetscInt, ids.as_ptr(), ctx) }
-        };
-        
-        self.add_boundary_func_shared(name, field, comps, bc_user_func, Some(bc_user_func_t), raw_fn_wrapper)
+        let _ = self.get_ds_or_create()?;
+        let ds = self.try_get_ds().unwrap();
+        unsafe { self.complete_boundary_label_internal(ds, field, PetscInt::MAX, labelname)?; }
+        self.get_ds_or_create()?.add_boundary_natural_with_dt(name, labelname, field, comps, ids, bc_user_func, bc_user_func_t)
     }
 
     // TODO: should these be unsafe functions, or is having the callback be unsafe enough
@@ -1780,7 +1745,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// * `consts` - constant parameters
     /// * `bcval` *(output)* - output values at the current point
     #[cfg(any(petsc_version_3_16_dev, doc))]
-    pub fn add_boundary_field_raw(&mut self, bctype: DMBoundaryConditionType, name: &str, label: &DMLabel, values: &[PetscInt],
+    pub fn add_boundary_field_raw(&mut self, bctype: DMBoundaryConditionType, name: &str, label: &mut DMLabel, values: &[PetscInt],
         field: PetscInt, comps: &[PetscInt],
         bc_user_func: impl Into<Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
             *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
@@ -1791,21 +1756,10 @@ impl<'a, 'tl> DM<'a, 'tl> {
             *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
             PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>>) -> Result<PetscInt>
     {
-        let mut bd = MaybeUninit::uninit();
-
-        let raw_fn_wrapper = |dm_p, bctype, name, nc, comps, field, fn1, fn2, ctx| {
-            unsafe { petsc_raw::DMAddBoundary(
-            dm_p, bctype, name, label.dml_p, values.len() as PetscInt,
-            values.as_ptr(), field, nc, comps,
-            fn1, fn2, ctx, bd.as_mut_ptr()) }
-        };
-
-        let bc_user_func = bc_user_func.into();
-        let bc_user_func_t = bc_user_func_t.into();
-
-        self.add_boundary_field_raw_shared(bctype, name, field, comps, bc_user_func, bc_user_func_t, raw_fn_wrapper)?;
-
-        Ok(unsafe { bd.assume_init() })
+        let _ = self.get_ds_or_create()?;
+        let ds = self.try_get_ds().unwrap();
+        unsafe { self.complete_boundary_label_internal(ds, field, PetscInt::MAX, label)?; }
+        self.get_ds_or_create()?.add_boundary_field_raw(bctype, name, label, values, field, comps, bc_user_func, bc_user_func_t)
     }
 
     /// Add a essential or natural field boundary condition to the model. (WIP Wrapper function)
@@ -1858,63 +1812,12 @@ impl<'a, 'tl> DM<'a, 'tl> {
             *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
             PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>>) -> Result<()>
     {
-        let labelname_cs = CString::new(labelname).expect("`CString::new` failed");
-
-        let bc_user_func = bc_user_func.into();
-        let bc_user_func_t = bc_user_func_t.into();
-
-        let raw_fn_wrapper = |dm_p, bctype, name, nc, comps, field, fn1, fn2, ctx| {
-            unsafe { petsc_raw::DMAddBoundary(
-            dm_p, bctype, name, labelname_cs.as_ptr(), field, nc, comps,
-            fn1, fn2, ids.len() as PetscInt, ids.as_ptr(), ctx) }
-        };
-        
-        self.add_boundary_field_raw_shared(bctype, name, field, comps, bc_user_func, bc_user_func_t, raw_fn_wrapper)
+        let _ = self.get_ds_or_create()?;
+        let ds = self.try_get_ds().unwrap();
+        unsafe { self.complete_boundary_label_internal(ds, field, PetscInt::MAX, labelname)?; }
+        self.get_ds_or_create()?.add_boundary_field_raw(bctype, name, labelname, field, comps, ids, bc_user_func, bc_user_func_t)
     }
     
-    /// Does all the heavy lifting for `add_boundary_field_raw` independent of the version of `DMAddBoundary`
-    fn add_boundary_field_raw_shared<F3>(&mut self, bctype: DMBoundaryConditionType, name: &str, field: PetscInt,
-        comps: &[PetscInt],
-        bc_user_func: Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
-            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
-            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
-            PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>,
-        bc_user_func_t: Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
-            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
-            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
-            PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>,
-        add_boundary_wrapper: F3) -> Result<()>
-    where
-        F3: FnOnce(*mut petsc_raw::_p_DM, DMBoundaryConditionType, *const ::std::os::raw::c_char, PetscInt,
-            *const PetscInt, PetscInt, Option<unsafe extern "C" fn()>, Option<unsafe extern "C" fn()>,
-            *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode,
-    {
-        let name_cs = CString::new(name).expect("`CString::new` failed");
-
-        let bctype = match bctype {
-            DMBoundaryConditionType::DM_BC_ESSENTIAL_FIELD
-                | DMBoundaryConditionType::DM_BC_NATURAL_FIELD => bctype,
-            DMBoundaryConditionType::DM_BC_ESSENTIAL
-                | DMBoundaryConditionType::DM_BC_NATURAL
-                | DMBoundaryConditionType::DM_BC_ESSENTIAL_BD_FIELD
-                => return seterrq!(self.world, PetscErrorKind::PETSC_ERR_USER_INPUT,
-                    format!("DM::add_boundary_field does not support non field boundary conditions. You gave {:?}.", bctype)),
-            // This is for `DMBoundaryConditionType::DM_BC_NATURAL_RIEMANN`
-            _ => return seterrq!(self.world, PetscErrorKind::PETSC_ERR_USER_INPUT,
-                    format!("Unknown boundary condition type given to DM::add_boundary_field. You gave {:?}.", bctype)),
-        };
-    
-        let ierr = add_boundary_wrapper(
-            self.dm_p, bctype, name_cs.as_ptr(), comps.len() as PetscInt, comps.as_ptr(),
-            field, unsafe { std::mem::transmute(bc_user_func) },
-            unsafe { std::mem::transmute(bc_user_func_t) }, 
-            std::ptr::null_mut()
-        );
-        unsafe { chkerrq!(self.world, ierr) }?;
-    
-        Ok(())
-    }
-
     /// Add a essential field boundary condition to the model. (WIP Wrapper function)
     ///
     /// In the C API you would call `DMAddBoundary` with the `bctype` being `DM_BC_ESSENTIAL_BD_FIELD`.
@@ -1956,7 +1859,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// * `consts` - constant parameters
     /// * `bcval` *(output)* - output values at the current point
     #[cfg(any(petsc_version_3_16_dev, doc))]
-    pub fn add_boundary_essential_bd_field_raw(&mut self, name: &str, label: &DMLabel, values: &[PetscInt],
+    pub fn add_boundary_essential_bd_field_raw(&mut self, name: &str, label: &mut DMLabel, values: &[PetscInt],
         field: PetscInt, comps: &[PetscInt],
         bc_user_func: impl Into<Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
             *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
@@ -1967,22 +1870,10 @@ impl<'a, 'tl> DM<'a, 'tl> {
             *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
             PetscReal, *const PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>>) -> Result<PetscInt>
     {
-        let mut bd = MaybeUninit::uninit();
-        let name_cs = CString::new(name).expect("`CString::new` failed");
-
-        let bc_user_func = bc_user_func.into();
-        let bc_user_func_t = bc_user_func_t.into();
-
-        let ierr = unsafe { petsc_raw::DMAddBoundary(
-            self.dm_p, DMBoundaryConditionType::DM_BC_ESSENTIAL_BD_FIELD, name_cs.as_ptr(),
-            label.dml_p, values.len() as PetscInt,
-            values.as_ptr(), field, comps.len() as PetscInt, comps.as_ptr(),
-            std::mem::transmute(bc_user_func),
-            std::mem::transmute(bc_user_func_t), 
-            std::ptr::null_mut(), bd.as_mut_ptr()) };
-        unsafe { chkerrq!(self.world, ierr) }?;
-
-        Ok(unsafe { bd.assume_init() })
+        let _ = self.get_ds_or_create()?;
+        let ds = self.try_get_ds().unwrap();
+        unsafe { self.complete_boundary_label_internal(ds, field, PetscInt::MAX, label)?; }
+        self.get_ds_or_create()?.add_boundary_essential_bd_field_raw(name, label, values, field, comps, bc_user_func, bc_user_func_t)
     }
 
     /// Add a essential field boundary condition to the model. (WIP Wrapper function)
@@ -2037,18 +1928,10 @@ impl<'a, 'tl> DM<'a, 'tl> {
             *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
             PetscReal, *const PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>>) -> Result<()>
     {
-        let labelname_cs = CString::new(labelname).expect("`CString::new` failed");
-        let name_cs = CString::new(name).expect("`CString::new` failed");
-
-        let bc_user_func = bc_user_func.into();
-        let bc_user_func_t = bc_user_func_t.into();
-        
-        let ierr = unsafe { petsc_raw::DMAddBoundary(
-            self.dm_p, DMBoundaryConditionType::DM_BC_ESSENTIAL_BD_FIELD, name_cs.as_ptr(),
-            labelname_cs.as_ptr(), field, comps.len() as i32, comps.as_ptr(),
-            std::mem::transmute(bc_user_func), std::mem::transmute(bc_user_func_t),
-            ids.len() as PetscInt, ids.as_ptr(), std::ptr::null_mut()) };
-        unsafe { chkerrq!(self.world, ierr) }
+        let _ = self.get_ds_or_create()?;
+        let ds = self.try_get_ds().unwrap();
+        unsafe { self.complete_boundary_label_internal(ds, field, PetscInt::MAX, labelname)?; }
+        self.get_ds_or_create()?.add_boundary_essential_bd_field_raw(name, labelname, field, comps, ids, bc_user_func, bc_user_func_t)
     }
 
     /// Create the discrete systems for the DM based upon the fields added to the DM
@@ -2096,6 +1979,18 @@ impl<'a, 'tl> DM<'a, 'tl> {
     /// fail, instead it will return `None`.
     pub fn try_get_ds_mut(&mut self) -> Option<&mut DS<'a, 'tl>> {
         self.ds.as_mut()
+    }
+
+    /// Gets the [DS](DS), or creates the default [`DS`].
+    pub fn get_ds_or_create(&mut self) -> Result<&mut DS<'a, 'tl>> {
+        let mut ds_p = MaybeUninit::uninit();
+        let ierr = unsafe { petsc_raw::DMGetDS(self.dm_p, ds_p.as_mut_ptr()) };
+        unsafe { chkerrq!(self.world, ierr) }?;
+
+        self.ds = Some(DS::new(self.world, unsafe { ds_p.assume_init() }));
+        unsafe { self.ds.as_mut().unwrap().reference()?; }
+
+        Ok(self.ds.as_mut().unwrap())
     }
 
     /// Get the description of mesh periodicity
@@ -2622,14 +2517,7 @@ impl<'a, 'tl> DM<'a, 'tl> {
         // edit the original DM aslong as they dont drop it or change existing closures.
         // IDK if this is possible.
     
-        let mut new_dm = unsafe { self.clone_unchecked()? };
-    
-        // We want to make sure you can't clone the new dm, i.e. 
-        // you have to use clone_shallow again
-        if self.boundary_trampoline_data.is_some() {
-            new_dm.boundary_trampoline_data = Some(vec![]);
-        }
-        // new_dm.boundary_trampoline_data = self.boundary_trampoline_data.clone();
+        let new_dm = unsafe { self.clone_unchecked()? };
     
         Ok(BorrowDM { owned_dm: new_dm, _phantom: PhantomData })
     }
@@ -2666,7 +2554,6 @@ impl<'a, 'tl> DM<'a, 'tl> {
                 new_fields.push(res);
             }
             dm.fields = Some(new_fields);
-            // dm.boundary_trampoline_data = self.boundary_trampoline_data.clone();
             dm
         } else {
             let mut dm2_p = MaybeUninit::uninit();
@@ -2770,6 +2657,374 @@ impl<'a, 'tl> DM<'a, 'tl> {
         let ierr = unsafe { crate::petsc_raw::DMSetOptionsPrefix(self.as_raw(), name_cs.as_ptr()) };
         unsafe { chkerrq!(self.world(), ierr) }
     }
+
+    /// Set [`SNES`] residual evaluation function.
+    ///
+    /// Note, [`SNES::set_function()`] is normally used, but it calls this function internally
+    /// because the user context is actually associated with the DM. This makes the interface
+    /// consistent regardless of whether the user interacts with a DM or not. If DM took a more
+    /// central role at some later date, this could become the primary method of setting the residual.
+    ///
+    /// # Parameters
+    ///
+    /// * `user_f` - A closure used to convey the nonlinear function to be solved by SNES
+    ///     * `snes` - the snes context
+    ///     * `x` - state at which to evaluate residual
+    ///     * `f` *(output)* - vector to put residual (function value)
+    pub fn snes_set_function<F>(&mut self, user_f: F) -> Result<()>
+    where
+        F: FnMut(&SNES<'a, '_, '_>, &Vector<'a>, &mut Vector<'a>) -> std::result::Result<(), DomainOrPetscError> + 'tl,
+    {
+        // TODO: look at how rsmpi did the trampoline stuff:
+        // https://github.com/rsmpi/rsmpi/blob/82e1d357/src/collective.rs#L1684
+        // They used libffi, that could be a safer way to do it.
+
+        let closure_anchor = Box::new(user_f);
+
+        let trampoline_data = Box::pin(SNESFunctionTrampolineData { 
+            world: self.world, user_f: closure_anchor });
+
+        // drop old trampoline_data
+        let _ = self.snes_function_trampoline_data.take();
+
+        // I think this function is called by the SNES, not the dm
+        unsafe extern "C" fn snes_function_trampoline(snes_p: *mut petsc_raw::_p_SNES, x_p: *mut petsc_raw::_p_Vec,
+            f_p: *mut petsc_raw::_p_Vec, ctx: *mut std::os::raw::c_void) -> petsc_raw::PetscErrorCode
+        {
+            // SAFETY: We construct ctx to be a Pin<Box<SNESFunctionTrampolineData>> but pass it in as a *void
+            // Box<T> is equivalent to *T (or &T) for ffi. Because the SNES owns the closure we can make sure
+            // everything in it (and the closure its self) lives for at least as long as this function can be
+            // called.
+            // We don't construct a Box<> because we dont want to drop anything
+            let trampoline_data: Pin<&mut SNESFunctionTrampolineData> = std::mem::transmute(ctx);
+
+            // We don't want to drop anything, we are just using this to turn pointers 
+            // of the underlining types (i.e. *mut petsc_raw::_p_SNES) into references
+            // of the rust wrapper types.
+            // Note, SNES has optional members that might have to be dropped, but because
+            // we only give immutable access to the user_f we don't have to worry about that
+            // as they will all stay `None`.
+            // If `Vector` ever has optional parameters, they MUST be dropped manually.
+            // SAFETY: even though snes is mut and thus we can set optional parameters, we don't
+            // as we dont expose the mut to the user closure, we only use it with `set_jacobian_domain_error`
+            let mut snes = ManuallyDrop::new(SNES::new(trampoline_data.world, snes_p));
+
+            let mut dm_p = MaybeUninit::uninit();
+            let ierr = petsc_raw::SNESGetDM(snes_p, dm_p.as_mut_ptr());
+            if ierr != 0 { let _ = chkerrq!(trampoline_data.world, ierr); return ierr; }
+            let mut dm = DM::new(trampoline_data.world, dm_p.assume_init());
+            let ierr = DM::set_inner_values_for_readonly(&mut dm);
+            if ierr != 0 { return ierr; }
+            snes.dm = Some(dm); // Note, because snes is not dropped, snes.dm wont be either
+
+            let x = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: x_p });
+            let mut f = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: f_p });
+            
+            (trampoline_data.get_mut().user_f)(&snes, &x, &mut f)
+                .map_or_else(|err| match err {
+                    DomainOrPetscError::DomainErr => {
+                        let perr = snes.set_function_domain_error();
+                        match perr {
+                            Ok(_) => 0,
+                            Err(perr) => perr.kind as i32
+                        }
+                    },
+                    DomainOrPetscError::PetscErr(perr) => perr.kind as i32
+                }, |_| 0)
+        }
+
+        let ierr = unsafe { petsc_raw::DMSNESSetFunction(
+            self.dm_p, Some(snes_function_trampoline), 
+            std::mem::transmute(trampoline_data.as_ref())) }; // this will also erase the lifetimes
+        unsafe { chkerrq!(self.world, ierr) }?;
+        
+        self.snes_function_trampoline_data = Some(trampoline_data);
+
+        Ok(())
+    }
+
+    /// Set [`SNES`] Jacobian evaluation function, with the jacobian and the preconditioner being the same.
+    ///
+    /// Note, [`SNES::set_jacobian_single_mat()`] is normally used, but it calls this function internally
+    /// because the user context is actually associated with the DM. This makes the interface consistent
+    /// regardless of whether the user interacts with a DM or not. If DM took a more central role at some
+    /// later date, this could become the primary method of setting the Jacobian. 
+    ///
+    /// # Parameters
+    ///
+    /// * `user_f` - A closure used to convey the Jacobian evaluation routine.
+    ///     * `snes` - the snes context
+    ///     * `x` - input vector, the Jacobian is to be computed at this value
+    ///     * `ap_mat` *(output)* - the matrix to be used in constructing the (approximate) Jacobian as well as
+    ///     the preconditioner.
+    pub fn snes_set_jacobian_single_mat<F>(&mut self, user_f: F) -> Result<()>
+    where
+        F: FnMut(&SNES<'a, '_, '_>, &Vector<'a>, &mut Mat<'a, '_>) -> std::result::Result<(), DomainOrPetscError> + 'tl,
+    {
+        let closure_anchor = Box::new(user_f);
+
+        let trampoline_data = Box::pin(SNESJacobianSingleTrampolineData { 
+            world: self.world, user_f: closure_anchor });
+        let _ = self.snes_jacobian_trampoline_data.take();
+
+        unsafe extern "C" fn snes_jacobian_single_trampoline(snes_p: *mut petsc_raw::_p_SNES, vec_p: *mut petsc_raw::_p_Vec,
+            mat1_p: *mut petsc_raw::_p_Mat, mat2_p: *mut petsc_raw::_p_Mat, ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
+        {
+            // This assert should always be true based on how we constructed this wrapper
+            assert!(mat1_p == mat2_p || mat2_p == 0 as *mut _);
+
+            // SAFETY: read `snes_function_trampoline` safety
+            let trampoline_data: Pin<&mut SNESJacobianSingleTrampolineData> = std::mem::transmute(ctx);
+
+            // We don't want to drop anything, we are just using this to turn pointers 
+            // of the underlining types (i.e. *mut petsc_raw::_p_SNES) into references
+            // of the rust wrapper types.
+            // If `Mat` ever has optional parameters, they MUST be dropped manually.
+            // SAFETY: even though snes is mut and thus we can set optional parameters, we don't
+            // as we dont expose the mut to the user closure, we only use it with `set_jacobian_domain_error`
+            let mut snes = ManuallyDrop::new(SNES::new(trampoline_data.world, snes_p));
+
+            let mut dm_p = MaybeUninit::uninit();
+            let ierr = petsc_raw::SNESGetDM(snes_p, dm_p.as_mut_ptr());
+            if ierr != 0 { let _ = chkerrq!(trampoline_data.world, ierr); return ierr; }
+            let mut dm = DM::new(trampoline_data.world, dm_p.assume_init());
+            let ierr = DM::set_inner_values_for_readonly(&mut dm);
+            if ierr != 0 { return ierr; }
+            snes.dm = Some(dm); // Note, because snes is not dropped, snes.dm wont be either
+
+            let x = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: vec_p });
+            let mut a_mat = ManuallyDrop::new(Mat::new(trampoline_data.world, mat1_p));
+            
+            (trampoline_data.get_mut().user_f)(&snes, &x, &mut a_mat)
+                .map_or_else(|err| match err {
+                    DomainOrPetscError::DomainErr => {
+                        let perr = snes.set_jacobian_domain_error();
+                        match perr {
+                            Ok(_) => 0,
+                            Err(perr) => perr.kind as i32
+                        }
+                    },
+                    DomainOrPetscError::PetscErr(perr) => perr.kind as i32
+                }, |_| 0)
+        }
+
+        let ierr = unsafe { petsc_raw::DMSNESSetJacobian(
+            self.dm_p, Some(snes_jacobian_single_trampoline), 
+            std::mem::transmute(trampoline_data.as_ref())) };
+        unsafe { chkerrq!(self.world, ierr) }?;
+        
+        self.snes_jacobian_trampoline_data = Some(SNESJacobianTrampolineData::SingleMat(trampoline_data));
+
+        Ok(())
+    }
+
+    /// Set [`SNES`] Jacobian evaluation function, with the jacobian and the preconditioner being different.
+    ///
+    /// Note, [`SNES::set_jacobian()`] is normally used, but it calls this function internally
+    /// because the user context is actually associated with the DM. This makes the interface consistent
+    /// regardless of whether the user interacts with a DM or not. If DM took a more central role at some
+    /// later date, this could become the primary method of setting the Jacobian. 
+    ///
+    /// # Parameters
+    ///
+    /// * `user_f` - A closure used to convey the Jacobian evaluation routine.
+    ///     * `snes` - the snes context
+    ///     * `x` - input vector, the Jacobian is to be computed at this value
+    ///     * `a_mat` *(output)* - the matrix that defines the (approximate) Jacobian.
+    ///     * `p_mat` *(output)* - the matrix to be used in constructing the preconditioner.
+    pub fn snes_set_jacobian<F>(&mut self, user_f: F) -> Result<()>
+    where
+        F: FnMut(&SNES<'a, '_, '_>, &Vector<'a>, &mut Mat<'a, '_>, &mut Mat<'a, '_>) -> std::result::Result<(), DomainOrPetscError> + 'tl,
+    {
+        let closure_anchor = Box::new(user_f);
+
+        let trampoline_data = Box::pin(SNESJacobianDoubleTrampolineData { 
+            world: self.world, user_f: closure_anchor });
+        let _ = self.snes_jacobian_trampoline_data.take();
+
+        unsafe extern "C" fn snes_jacobian_double_trampoline(snes_p: *mut petsc_raw::_p_SNES, vec_p: *mut petsc_raw::_p_Vec,
+            mat1_p: *mut petsc_raw::_p_Mat, mat2_p: *mut petsc_raw::_p_Mat, ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
+        {
+            // This assert should always be true based on how we constructed this wrapper
+            assert_ne!(mat1_p, mat2_p);
+
+            // SAFETY: read `snes_function_trampoline` safety
+            let trampoline_data: Pin<&mut SNESJacobianDoubleTrampolineData> = std::mem::transmute(ctx);
+
+            // We don't want to drop anything, we are just using this to turn pointers 
+            // of the underlining types (i.e. *mut petsc_raw::_p_SNES) into references.
+            // If `Mat` ever has optional parameters, they MUST be dropped manually.
+            // SAFETY: even though snes is mut and thus we can set optional parameters, we don't
+            // as we dont expose the mut to the user closure, we only use it with `set_jacobian_domain_error`
+            let mut snes = ManuallyDrop::new(SNES::new(trampoline_data.world, snes_p));
+
+            let mut dm_p = MaybeUninit::uninit();
+            let ierr = petsc_raw::SNESGetDM(snes_p, dm_p.as_mut_ptr());
+            if ierr != 0 { let _ = chkerrq!(trampoline_data.world, ierr); return ierr; }
+            let mut dm = DM::new(trampoline_data.world, dm_p.assume_init());
+            let ierr = DM::set_inner_values_for_readonly(&mut dm);
+            if ierr != 0 { return ierr; }
+            snes.dm = Some(dm); // Note, because snes is not dropped, snes.dm wont be either
+
+            let x = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: vec_p });
+            let mut a_mat = ManuallyDrop::new(Mat::new(trampoline_data.world, mat1_p));
+            let mut p_mat = ManuallyDrop::new(Mat::new(trampoline_data.world, mat2_p));
+            
+            (trampoline_data.get_mut().user_f)(&snes, &x, &mut a_mat, &mut p_mat)
+                .map_or_else(|err| match err {
+                    DomainOrPetscError::DomainErr => {
+                        let perr = snes.set_jacobian_domain_error();
+                        match perr {
+                            Ok(_) => 0,
+                            Err(perr) => perr.kind as i32
+                        }
+                    },
+                    DomainOrPetscError::PetscErr(perr) => perr.kind as i32
+                }, |_| 0)
+        }
+
+        let ierr = unsafe { petsc_raw::DMSNESSetJacobian(
+            self.dm_p, Some(snes_jacobian_double_trampoline), 
+            std::mem::transmute(trampoline_data.as_ref())) };
+        unsafe { chkerrq!(self.world, ierr) }?;
+        
+        self.snes_jacobian_trampoline_data = Some(SNESJacobianTrampolineData::DoubleMat(trampoline_data));
+
+        Ok(())
+    }
+
+    /// Set [`KSP`] matrix evaluation function.
+    ///
+    /// Note, [`KSP::set_compute_operators()`] is normally used, but it calls this function internally
+    /// because the user context is actually associated with the DM. This makes the interface consistent
+    /// regardless of whether the user interacts with a DM or not. If DM took a more central role at some
+    /// later date, this could become the primary method of setting the matrix.
+    ///
+    /// # Parameters
+    ///
+    /// * `user_f` - A closure used to convey the routine to compute the operators.
+    ///     * `ksp` - the ksp context
+    ///     * `a_mat` *(output)* - the linear operator
+    ///     * `p_mat` *(output)* - preconditioning matrix
+    pub fn ksp_set_compute_operators<F>(&mut self, user_f: F) -> Result<()>
+    where
+        F: FnMut(&KSP<'a, '_, '_>, &mut Mat<'a, '_>, &mut Mat<'a, '_>) -> Result<()> + 'tl,
+    {
+        // TODO: look at how rsmpi did the trampoline stuff:
+        // https://github.com/rsmpi/rsmpi/blob/82e1d357/src/collective.rs#L1684
+        // They used libffi, that could be a safer way to do it.
+
+        let closure_anchor = Box::new(user_f);
+
+        let trampoline_data = Box::pin(KSPComputeOperatorsTrampolineData { 
+            world: self.world, user_f: closure_anchor });
+
+        // drop old trampoline_data
+        let _ = self.ksp_compute_operators_trampoline_data.take();
+
+        unsafe extern "C" fn ksp_compute_operators_trampoline(ksp_p: *mut petsc_raw::_p_KSP, mat1_p: *mut petsc_raw::_p_Mat,
+            mat2_p: *mut petsc_raw::_p_Mat, ctx: *mut std::os::raw::c_void) -> petsc_raw::PetscErrorCode
+        {
+            // SAFETY: We construct ctx to be a Pin<Box<KSPComputeOperatorsTrampolineData>> but pass it in as a *void
+            // Box<T> is equivalent to *T (or &T) for ffi. Because the KSP owns the closure we can make sure
+            // everything in it (and the closure its self) lives for at least as long as this function can be
+            // called.
+            // We don't construct a Box<> because we dont want to drop anything
+            let trampoline_data: Pin<&mut KSPComputeOperatorsTrampolineData> = std::mem::transmute(ctx);
+
+            // We don't want to drop anything, we are just using this to turn pointers 
+            // of the underlining types (i.e. *mut petsc_raw::_p_SNES) into references
+            // of the rust wrapper types.
+            let mut ksp = ManuallyDrop::new(KSP::new(trampoline_data.world, ksp_p));
+
+            let mut dm_p = MaybeUninit::uninit();
+            let ierr = petsc_raw::KSPGetDM(ksp_p, dm_p.as_mut_ptr());
+            if ierr != 0 { let _ = chkerrq!(trampoline_data.world, ierr); return ierr; }
+            let mut dm = DM::new(trampoline_data.world, dm_p.assume_init());
+            let ierr = DM::set_inner_values_for_readonly(&mut dm);
+            if ierr != 0 { return ierr; }
+            ksp.dm = Some(dm); // Note, because ksp is not dropped, ksp.dm wont be either
+
+            let mut a_mat = ManuallyDrop::new(Mat::new(trampoline_data.world, mat1_p));
+            let mut p_mat = ManuallyDrop::new(Mat::new(trampoline_data.world, mat2_p));
+            
+            (trampoline_data.get_mut().user_f)(&ksp, &mut a_mat, &mut p_mat)
+                .map_or_else(|err| err.kind as i32, |_| 0)
+        }
+
+        let ierr = unsafe { petsc_raw::DMKSPSetComputeOperators(
+            self.dm_p, Some(ksp_compute_operators_trampoline), 
+            std::mem::transmute(trampoline_data.as_ref())) }; // this will also erase the lifetimes
+        unsafe { chkerrq!(self.world, ierr) }?;
+        
+        self.ksp_compute_operators_trampoline_data = Some(trampoline_data);
+
+        Ok(())
+    }
+
+    /// Set [`KSP`] right hand side evaluation function.
+    ///
+    /// Note, [`KSP::set_compute_rhs()`] is normally used, but it calls this function internally
+    /// because the user context is actually associated with the DM. This makes the interface consistent
+    /// regardless of whether the user interacts with a DM or not. If DM took a more central role at some
+    /// later date, this could become the primary method of setting the rhs.
+    ///
+    /// # Parameters
+    ///
+    /// * `user_f` - A closure used to convey the routine to compute the the right hand side of the linear system
+    ///     * `ksp` - the ksp context
+    ///     * `b` *(output)* - right hand side of linear system
+    pub fn ksp_set_compute_rhs<F>(&mut self, user_f: F) -> Result<()>
+    where
+        F: FnMut(&KSP<'a, '_, '_>, &mut Vector<'a>) -> Result<()> + 'tl,
+    {
+        // TODO: look at how rsmpi did the trampoline stuff:
+        // https://github.com/rsmpi/rsmpi/blob/82e1d357/src/collective.rs#L1684
+        // They used libffi, that could be a safer way to do it.
+
+        let closure_anchor = Box::new(user_f);
+
+        let trampoline_data = Box::pin(KSPComputeRHSTrampolineData { 
+            world: self.world, user_f: closure_anchor });
+
+        // drop old trampoline_data
+        let _ = self.ksp_compute_rhs_trampoline_data.take();
+
+        unsafe extern "C" fn ksp_compute_rhs_trampoline(ksp_p: *mut petsc_raw::_p_KSP, vec_p: *mut petsc_raw::_p_Vec,
+            ctx: *mut std::os::raw::c_void) -> petsc_raw::PetscErrorCode
+        {
+
+            // SAFETY: read `ksp_compute_operators_single_trampoline` safety
+            let trampoline_data: Pin<&mut KSPComputeRHSTrampolineData> = std::mem::transmute(ctx);
+
+            // We don't want to drop anything, we are just using this to turn pointers 
+            // of the underlining types (i.e. *mut petsc_raw::_p_SNES) into references
+            // of the rust wrapper types.
+            let mut ksp = ManuallyDrop::new(KSP::new(trampoline_data.world, ksp_p));
+
+            let mut dm_p = MaybeUninit::uninit();
+            let ierr = petsc_raw::KSPGetDM(ksp_p, dm_p.as_mut_ptr());
+            if ierr != 0 { let _ = chkerrq!(trampoline_data.world, ierr); return ierr; }
+            let mut dm = DM::new(trampoline_data.world, dm_p.assume_init());
+            let ierr = DM::set_inner_values_for_readonly(&mut dm);
+            if ierr != 0 { return ierr; }
+            ksp.dm = Some(dm); // Note, because ksp is not dropped, ksp.dm wont be either
+
+            let mut vec = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p });
+            
+            (trampoline_data.get_mut().user_f)(&ksp, &mut vec)
+                .map_or_else(|err| err.kind as i32, |_| 0)
+        }
+
+        let ierr = unsafe { petsc_raw::DMKSPSetComputeRHS(
+            self.dm_p, Some(ksp_compute_rhs_trampoline), 
+            std::mem::transmute(trampoline_data.as_ref())) }; // this will also erase the lifetimes
+        unsafe { chkerrq!(self.world, ierr) }?;
+        
+        self.ksp_compute_rhs_trampoline_data = Some(trampoline_data);
+
+        Ok(())
+    }
 }
 
 impl<'a> FEDisc<'a, '_> {
@@ -2824,7 +3079,8 @@ impl<'a, 'tl> DS<'a, 'tl> {
     /// Same as `DS { ... }` but sets all optional params to `None`
     pub(crate) fn new(world: &'a UserCommunicator, ds_p: *mut petsc_raw::_p_PetscDS) -> Self {
         DS { world, ds_p, residual_trampoline_data: None, jacobian_trampoline_data: None,
-            exact_soln_trampoline_data: None }
+            exact_soln_trampoline_data: None,
+            boundary_trampoline_data: None, }
     }
 
     /// Gets a boundary condition to the model 
@@ -2966,6 +3222,733 @@ impl<'a, 'tl> DS<'a, 'tl> {
 
         Ok(())
     }
+
+    /// Add an essential boundary condition to the model. (WIP Wrapper function)
+    ///
+    /// In the C API you would call `PetscDSAddBoundary` with the type being `DM_BC_ESSENTIAL`.
+    ///
+    /// This API is for PETSc `v3.16-dev.0`
+    ///
+    /// # Parameters
+    ///
+    /// * `self` - The DM, with a PetscDS that matches the problem being constrained
+    /// * `name` - The BC name
+    /// * `label` - The label defining constrained points
+    /// * `values` - An array of values for constrained points
+    /// * `field` - The field to constrain
+    /// * `comps` - An array of constrained component numbers
+    /// * `bc_user_func` - A pointwise function giving boundary values
+    ///
+    /// ## `bc_user_func` Parameters
+    ///
+    /// * `dim` - the spatial dimension
+    /// * `time` - the time of the current point
+    /// * `x` - coordinates of the current point
+    /// * `nc` - the number of field components
+    /// * `bcval` *(output)* - output values at the current point
+    #[cfg(any(petsc_version_3_16_dev, doc))]
+    pub fn add_boundary_essential<F1>(&mut self, name: &str, label: &DMLabel, values: &[PetscInt],
+        field: PetscInt, comps: &[PetscInt], bc_user_func: F1) -> Result<PetscInt>
+    where
+        F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+    {
+        let mut bd = MaybeUninit::uninit();
+
+        let raw_fn_wrapper = |ds_p, name, nc, comps, field, fn1, fn2, ctx| {
+            unsafe { petsc_raw::PetscDSAddBoundary(
+            ds_p, DMBoundaryConditionType::DM_BC_ESSENTIAL, name,
+            label.dml_p, values.len() as PetscInt,
+            values.as_ptr(), field, nc, comps,
+            fn1, fn2, ctx, bd.as_mut_ptr()) }
+        };
+
+        // I would like to have this function and `add_boundary_essential_with_dt` be the same method with
+        // the second user func being an option. However, the reason why we dont do this is because rust
+        // will complain and say it doesn't know what type `F2` should be when you set it to `None`. This is
+        // why we use explicit types here bellow instead of just `Option::None`. While this isn't a problem
+        // here, i dont want to make the caller have to know they need to do this as it feels unnecessary.
+        self.add_boundary_func_shared(name, field, comps, bc_user_func,
+            Option::<fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()>>::None,
+            raw_fn_wrapper)?;
+
+        Ok(unsafe { bd.assume_init() })
+    }
+
+    /// Add an essential boundary condition to the model. (WIP Wrapper function)
+    ///
+    /// In the C API you would call `PetscDSAddBoundary` with the type being `DM_BC_ESSENTIAL`.
+    ///
+    /// This API is for PETSc `v3.16-dev.0`
+    ///
+    /// # Parameters
+    ///
+    /// * `self` - The DM, with a PetscDS that matches the problem being constrained
+    /// * `name` - The BC name
+    /// * `label` - The label defining constrained points
+    /// * `values` - An array of values for constrained points
+    /// * `field` - The field to constrain
+    /// * `comps` - An array of constrained component numbers
+    /// * `bc_user_func` - A pointwise function giving boundary values
+    /// * `bc_user_func_t` - A pointwise function giving the time deriative of the boundary values
+    ///
+    /// ## `bc_user_func`/`bc_user_func_t` Parameters
+    ///
+    /// * `dim` - the spatial dimension
+    /// * `time` - the time of the current point
+    /// * `x` - coordinates of the current point
+    /// * `nc` - the number of field components
+    /// * `bcval` *(output)* - output values at the current point
+    #[cfg(any(petsc_version_3_16_dev, doc))]
+    pub fn add_boundary_essential_with_dt<F1, F2>(&mut self, name: &str, label: &DMLabel, values: &[PetscInt],
+        field: PetscInt, comps: &[PetscInt], bc_user_func: F1, bc_user_func_t: F2) -> Result<PetscInt>
+    where
+        F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+        F2: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+    {
+        let mut bd = MaybeUninit::uninit();
+
+        let raw_fn_wrapper = |ds_p, name, nc, comps, field, fn1, fn2, ctx| {
+            unsafe { petsc_raw::PetscDSAddBoundary(
+            ds_p, DMBoundaryConditionType::DM_BC_ESSENTIAL, name,
+            label.dml_p, values.len() as PetscInt,
+            values.as_ptr(), field, nc, comps,
+            fn1, fn2, ctx, bd.as_mut_ptr()) }
+        };
+
+        self.add_boundary_func_shared(name, field, comps, bc_user_func, Some(bc_user_func_t), raw_fn_wrapper)?;
+
+        Ok(unsafe { bd.assume_init() })
+    }
+
+    /// Add an essential boundary condition to the model. (WIP Wrapper function)
+    ///
+    /// In the C API you would call `PetscDSAddBoundary` with the type being `DM_BC_ESSENTIAL`.
+    ///
+    /// This API is for PETSc `v3.15`
+    ///
+    /// # Parameters
+    ///
+    /// * `self` - The DM, with a PetscDS that matches the problem being constrained
+    /// * `name` - The BC name
+    /// * `labelname` - The label defining constrained points
+    /// * `field` - The field to constrain
+    /// * `comps` - An array of constrained component numbers
+    /// * `ids` - An array of ids for constrained points
+    /// * `bc_user_func` - A pointwise function giving boundary values
+    ///
+    /// ## `bc_user_func` Parameters
+    ///
+    /// * `dim` - the spatial dimension
+    /// * `time` - the time of the current point
+    /// * `x` - coordinates of the current point
+    /// * `nc` - the number of field components
+    /// * `bcval` *(output)* - output values at the current point
+    #[cfg(any(petsc_version_3_15, doc))]
+    pub fn add_boundary_essential<F1>(&mut self, name: &str, labelname: &str, field: PetscInt,
+        comps: &[PetscInt], ids: &[PetscInt], bc_user_func: F1) -> Result<()>
+    where
+        F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+    {
+        let labelname_cs = CString::new(labelname).expect("`CString::new` failed");
+
+        let raw_fn_wrapper = |ds_p, name, nc, comps, field, fn1, fn2, ctx| {
+            unsafe { petsc_raw::PetscDSAddBoundary(
+            ds_p, DMBoundaryConditionType::DM_BC_ESSENTIAL, name,
+            labelname_cs.as_ptr(), field, nc, comps, fn1, fn2,
+            ids.len() as PetscInt, ids.as_ptr(), ctx) }
+        };
+        
+        self.add_boundary_func_shared(name, field, comps, bc_user_func,
+            Option::<fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()>>::None,
+            raw_fn_wrapper)
+    }
+
+    /// Add an essential boundary condition to the model. (WIP Wrapper function)
+    ///
+    /// In the C API you would call `PetscDSAddBoundary` with the type being `DM_BC_ESSENTIAL`.
+    ///
+    /// This API is for PETSc `v3.15`
+    ///
+    /// # Parameters
+    ///
+    /// * `self` - The DM, with a PetscDS that matches the problem being constrained
+    /// * `name` - The BC name
+    /// * `labelname` - The label defining constrained points
+    /// * `field` - The field to constrain
+    /// * `comps` - An array of constrained component numbers
+    /// * `ids` - An array of ids for constrained points
+    /// * `bc_user_func` - A pointwise function giving boundary values
+    /// * `bc_user_func_t` - A pointwise function giving the time deriative of the boundary values
+    ///
+    /// ## `bc_user_func`/`bc_user_func_t` Parameters
+    ///
+    /// * `dim` - the spatial dimension
+    /// * `time` - the time of the current point
+    /// * `x` - coordinates of the current point
+    /// * `nc` - the number of field components
+    /// * `bcval` *(output)* - output values at the current point
+    #[cfg(any(petsc_version_3_15, doc))]
+    pub fn add_boundary_essential_with_dt<F1, F2>(&mut self, name: &str, labelname: &str, field: PetscInt,
+        comps: &[PetscInt], ids: &[PetscInt], bc_user_func: F1, bc_user_func_t: F2) -> Result<()>
+    where
+        F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+        F2: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+    {
+        let labelname_cs = CString::new(labelname).expect("`CString::new` failed");
+
+        let raw_fn_wrapper = |ds_p, name, nc, comps, field, fn1, fn2, ctx| {
+            unsafe { petsc_raw::PetscDSAddBoundary(
+            ds_p, DMBoundaryConditionType::DM_BC_ESSENTIAL, name,
+            labelname_cs.as_ptr(), field, nc, comps, fn1, fn2,
+            ids.len() as PetscInt, ids.as_ptr(), ctx) }
+        };
+        
+        self.add_boundary_func_shared(name, field, comps, bc_user_func, Some(bc_user_func_t), raw_fn_wrapper)
+    }
+
+    /// Does all the heavy lifting for `add_boundary_essential` and `add_boundary_natural` independent
+    /// of the version of `PetscDSAddBoundary`
+    fn add_boundary_func_shared<F1, F2, F3>(&mut self, name: &str, field: PetscInt,
+        comps: &[PetscInt], bc_user_func: F1, bc_user_func_t: Option<F2>, add_boundary_wrapper: F3) -> Result<()>
+    where
+        F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+        F2: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+        F3: FnOnce(*mut petsc_raw::_p_PetscDS, *const ::std::os::raw::c_char, PetscInt,
+            *const PetscInt, PetscInt, Option<unsafe extern "C" fn()>, Option<unsafe extern "C" fn()>,
+            *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode,
+    {
+        let name_cs = CString::new(name).expect("`CString::new` failed");
+
+        let bc_user_func_t_is_some = bc_user_func_t.is_some();
+        let closure_anchor1 = Box::new(bc_user_func);
+        let closure_anchor2 = bc_user_func_t
+            .map(|bc_user_func_t| -> Box<BCFuncDyn<'tl>> { 
+                Box::new(bc_user_func_t) });
+
+        let trampoline_data = Box::pin(DMBoundaryFuncTrampolineData { 
+            user_f1: closure_anchor1, user_f2: closure_anchor2 });
+
+        unsafe extern "C" fn bc_func_trampoline(dim: PetscInt, time: PetscReal, x: *const PetscReal,
+            nc: PetscInt, bcval: *mut petsc_raw::PetscScalar, ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
+        {
+            let trampoline_data: Pin<&mut DMBoundaryFuncTrampolineData> = std::mem::transmute(ctx);
+
+            let x_slice = slice::from_raw_parts(x, dim as usize);
+            let bcval_slice = slice::from_raw_parts_mut(bcval as *mut _, nc as usize);
+            
+            (trampoline_data.get_mut().user_f1)(dim, time, x_slice, nc, bcval_slice)
+                .map_or_else(|err| err.kind as i32, |_| 0)
+        }
+
+        unsafe extern "C" fn bc_func_t_trampoline(dim: PetscInt, time: PetscReal, x: *const PetscReal,
+            nc: PetscInt, bcval: *mut petsc_raw::PetscScalar, ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
+        {
+            let trampoline_data: Pin<&mut DMBoundaryFuncTrampolineData> = std::mem::transmute(ctx);
+
+            let x_slice = slice::from_raw_parts(x, dim as usize);
+            let bcval_slice = slice::from_raw_parts_mut(bcval as *mut _, nc as usize);
+            
+            (trampoline_data.get_mut().user_f2.as_mut().unwrap())(dim, time, x_slice, nc, bcval_slice)
+                .map_or_else(|err| err.kind as i32, |_| 0)
+        }
+
+        // When it comes to function pointers, casting in NOT your friend. It causes the pointers 
+        // to be curropted. You MUST be VERY explicit with the types. All in all, the following
+        // two declarations will get the function pointers in options correctly (I think). Once
+        // we have them, we can them manipulate them how we see fit.
+        let bc_func_essential_trampoline_fn_ptr: ::std::option::Option<
+            unsafe extern "C" fn(arg1: PetscInt, arg2: PetscReal, arg3: *const PetscReal, arg4: PetscInt,
+                arg5: *mut petsc_raw::PetscScalar, arg6: *mut ::std::os::raw::c_void, ) -> petsc_raw::PetscErrorCode, >
+            = Some(bc_func_trampoline);
+
+        let mut bc_func_t_essential_trampoline_fn_ptr: ::std::option::Option<
+            unsafe extern "C" fn(arg1: PetscInt, arg2: PetscReal, arg3: *const PetscReal, arg4: PetscInt,
+                arg5: *mut petsc_raw::PetscScalar, arg6: *mut ::std::os::raw::c_void, ) -> petsc_raw::PetscErrorCode, >
+            = Some(bc_func_t_trampoline);
+
+        if !bc_user_func_t_is_some {
+            bc_func_t_essential_trampoline_fn_ptr = None;
+        }
+
+        let ierr = add_boundary_wrapper(
+            self.ds_p, name_cs.as_ptr(), comps.len() as PetscInt, comps.as_ptr(),
+            field, unsafe { std::mem::transmute(bc_func_essential_trampoline_fn_ptr) },
+            unsafe { std::mem::transmute(bc_func_t_essential_trampoline_fn_ptr) }, 
+            unsafe { std::mem::transmute(trampoline_data.as_ref()) }
+        );
+        unsafe { chkerrq!(self.world, ierr) }?;
+        
+        if let Some(ref mut boundary_trampoline_data_vec) = self.boundary_trampoline_data {
+            boundary_trampoline_data_vec.push(DMBoundaryTrampolineData::BCFunc(trampoline_data));
+        } else {
+            self.boundary_trampoline_data = Some(vec![DMBoundaryTrampolineData::BCFunc(trampoline_data)]);
+        }
+
+        Ok(())
+    }
+
+    /// Add a natural boundary condition to the model. (WIP Wrapper function)
+    ///
+    /// In the C API you would call `PetscDSAddBoundary` with the type being `DM_BC_NATURAL`.
+    ///
+    /// This API is for PETSc `v3.16-dev.0`
+    ///
+    /// # Parameters
+    ///
+    /// * `self` - The DM, with a PetscDS that matches the problem being constrained
+    /// * `name` - The BC name
+    /// * `label` - The label defining constrained points
+    /// * `values` - An array of values for constrained points
+    /// * `field` - The field to constrain
+    /// * `comps` - An array of constrained component numbers
+    /// * `bc_user_func` - A pointwise function giving boundary values
+    ///
+    /// # Example
+    ///
+    /// Look at [`snes-ex12`](https://gitlab.com/petsc/petsc-rs/-/blob/main/examples/snes/src/ex12.rs)
+    #[cfg(any(petsc_version_3_16_dev, doc))]
+    pub fn add_boundary_natural<F1>(&mut self, name: &str, label: &DMLabel, values: &[PetscInt],
+        field: PetscInt, comps: &[PetscInt], bc_user_func: F1) -> Result<PetscInt>
+    where
+        F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+    {
+        let mut bd = MaybeUninit::uninit();
+
+        let raw_fn_wrapper = |ds_p, name, nc, comps, field, fn1, fn2, ctx| {
+            unsafe { petsc_raw::PetscDSAddBoundary(
+            ds_p, DMBoundaryConditionType::DM_BC_NATURAL, name,
+            label.dml_p, values.len() as PetscInt,
+            values.as_ptr(), field, nc, comps,
+            fn1, fn2, ctx, bd.as_mut_ptr()) }
+        };
+
+        self.add_boundary_func_shared(name, field, comps, bc_user_func,
+            Option::<fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()>>::None,
+            raw_fn_wrapper)?;
+
+        Ok(unsafe { bd.assume_init() })
+    }
+
+    /// Add a natural boundary condition to the model. (WIP Wrapper function)
+    ///
+    /// In the C API you would call `PetscDSAddBoundary` with the type being `DM_BC_NATURAL`.
+    ///
+    /// This API is for PETSc `v3.16-dev.0`
+    ///
+    /// # Parameters
+    ///
+    /// * `self` - The DM, with a PetscDS that matches the problem being constrained
+    /// * `name` - The BC name
+    /// * `label` - The label defining constrained points
+    /// * `values` - An array of values for constrained points
+    /// * `field` - The field to constrain
+    /// * `comps` - An array of constrained component numbers
+    /// * `bc_user_func` - A pointwise function giving boundary values
+    /// * `bc_user_func_t` - A pointwise function giving the time deriative of the boundary values
+    #[cfg(any(petsc_version_3_16_dev, doc))]
+    pub fn add_boundary_natural_with_dt<F1, F2>(&mut self, name: &str, label: &DMLabel, values: &[PetscInt],
+        field: PetscInt, comps: &[PetscInt], bc_user_func: F1, bc_user_func_t: F2) -> Result<PetscInt>
+    where
+        F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+        F2: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+    {
+        let mut bd = MaybeUninit::uninit();
+
+        let raw_fn_wrapper = |ds_p, name, nc, comps, field, fn1, fn2, ctx| {
+            unsafe { petsc_raw::PetscDSAddBoundary(
+            ds_p, DMBoundaryConditionType::DM_BC_NATURAL, name,
+            label.dml_p, values.len() as PetscInt,
+            values.as_ptr(), field, nc, comps,
+            fn1, fn2, ctx, bd.as_mut_ptr()) }
+        };
+
+        self.add_boundary_func_shared(name, field, comps, bc_user_func, Some(bc_user_func_t), raw_fn_wrapper)?;
+
+        Ok(unsafe { bd.assume_init() })
+    }
+
+    /// Add an essential boundary condition to the model. (WIP Wrapper function)
+    ///
+    /// In the C API you would call `PetscDSAddBoundary` with the type being `DM_BC_NATURAL`.
+    ///
+    /// This API is for PETSc `v3.15`
+    ///
+    /// # Parameters
+    ///
+    /// * `self` - The DM, with a PetscDS that matches the problem being constrained
+    /// * `name` - The BC name
+    /// * `labelname` - The label defining constrained points
+    /// * `field` - The field to constrain
+    /// * `comps` - An array of constrained component numbers
+    /// * `ids` - An array of ids for constrained points
+    #[cfg(any(petsc_version_3_15, doc))]
+    pub fn add_boundary_natural<F1>(&mut self, name: &str, labelname: &str, field: PetscInt,
+        comps: &[PetscInt], ids: &[PetscInt], bc_user_func: F1) -> Result<()>
+    where
+        F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+    {
+        let labelname_cs = CString::new(labelname).expect("`CString::new` failed");
+
+        let raw_fn_wrapper = |ds_p, name, nc, comps, field, fn1, fn2, ctx| {
+            unsafe { petsc_raw::PetscDSAddBoundary(
+            ds_p, DMBoundaryConditionType::DM_BC_NATURAL, name,
+            labelname_cs.as_ptr(), field, nc, comps, fn1, fn2,
+            ids.len() as PetscInt, ids.as_ptr(), ctx) }
+        };
+        
+        self.add_boundary_func_shared(name, field, comps, bc_user_func,
+            Option::<fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()>>::None,
+            raw_fn_wrapper)
+    }
+
+    /// Add an essential boundary condition to the model. (WIP Wrapper function)
+    ///
+    /// In the C API you would call `PetscDSAddBoundary` with the type being `DM_BC_ESSENTIAL`.
+    ///
+    /// This API is for PETSc `v3.15`
+    ///
+    /// # Parameters
+    ///
+    /// * `self` - The DM, with a PetscDS that matches the problem being constrained
+    /// * `name` - The BC name
+    /// * `labelname` - The label defining constrained points
+    /// * `field` - The field to constrain
+    /// * `comps` - An array of constrained component numbers
+    /// * `ids` - An array of ids for constrained points
+    /// * `bc_user_func` - A pointwise function giving boundary values
+    /// * `bc_user_func_t` - A pointwise function giving the time deriative of the boundary values
+    #[cfg(any(petsc_version_3_15, doc))]
+    pub fn add_boundary_natural_with_dt<F1, F2>(&mut self, name: &str, labelname: &str, field: PetscInt,
+        comps: &[PetscInt], ids: &[PetscInt], bc_user_func: F1, bc_user_func_t: F2) -> Result<()>
+    where
+        F1: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+        F2: Fn(PetscInt, PetscReal, &[PetscReal], PetscInt, &mut [PetscScalar]) -> Result<()> + 'tl,
+    {
+        let labelname_cs = CString::new(labelname).expect("`CString::new` failed");
+
+        let raw_fn_wrapper = |ds_p, name, nc, comps, field, fn1, fn2, ctx| {
+            unsafe { petsc_raw::PetscDSAddBoundary(
+            ds_p, DMBoundaryConditionType::DM_BC_NATURAL, name,
+            labelname_cs.as_ptr(), field, nc, comps, fn1, fn2,
+            ids.len() as PetscInt, ids.as_ptr(), ctx) }
+        };
+        
+        self.add_boundary_func_shared(name, field, comps, bc_user_func, Some(bc_user_func_t), raw_fn_wrapper)
+    }
+
+    // TODO: should these be unsafe functions, or is having the callback be unsafe enough
+    /// Add a essential or natural field boundary condition to the model. (WIP Wrapper function)
+    ///
+    /// In the C API you would call `PetscDSAddBoundary` with the `bctype` being `DM_BC_*_FIELD`.
+    ///
+    /// Note, the functions `bc_user_func` and `bc_user_func` can not be closures. And they
+    /// Will take pointers instead of slices. 
+    ///
+    /// This API is for PETSc `v3.16-dev.0`
+    ///
+    /// # Parameters
+    ///
+    /// * `self` - The DM, with a PetscDS that matches the problem being constrained
+    /// * `bctype` - The type of condition, e.g. DM_BC_ESSENTIAL_FIELD (Dirichlet),
+    /// or DM_BC_NATURAL_FIELD (Neumann). Must end in field.
+    /// * `name` - The BC name
+    /// * `label` - The label defining constrained points
+    /// * `values` - An array of values for constrained points
+    /// * `field` - The field to constrain
+    /// * `comps` - An array of constrained component numbers
+    /// * `bc_user_func` - A pointwise function giving boundary values
+    /// * `bc_user_func_t` - A pointwise function giving the time deriative of the boundary values, or `None`
+    ///
+    /// ## `bc_user_func`/`bc_user_func_t` Parameters
+    ///
+    /// * `dim` - the spatial dimension
+    /// * `nf` - the number of fields
+    /// * `u_off` - the offset into u[] and u_t[] for each field
+    /// * `u_off_x` - the offset into u_x[] for each field
+    /// * `u` - each field evaluated at the current point
+    /// * `u_t` - the time derivative of each field evaluated at the current point
+    /// * `u_x` - the gradient of each field evaluated at the current point
+    /// * `a_off` - the offset into a[] and a_t[] for each auxiliary field
+    /// * `a_off_x` - the offset into a_x[] for each auxiliary field
+    /// * `a` - each auxiliary field evaluated at the current point
+    /// * `a_t` - the time derivative of each auxiliary field evaluated at the current point
+    /// * `a_x` - the gradient of auxiliary each field evaluated at the current point
+    /// * `t` - current time
+    /// * `x` - coordinates of the current point
+    /// * `nc` - number of constant parameters
+    /// * `consts` - constant parameters
+    /// * `bcval` *(output)* - output values at the current point
+    #[cfg(any(petsc_version_3_16_dev, doc))]
+    pub fn add_boundary_field_raw(&mut self, bctype: DMBoundaryConditionType, name: &str, label: &DMLabel, values: &[PetscInt],
+        field: PetscInt, comps: &[PetscInt],
+        bc_user_func: impl Into<Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>>,
+        bc_user_func_t: impl Into<Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>>) -> Result<PetscInt>
+    {
+        let mut bd = MaybeUninit::uninit();
+
+        let raw_fn_wrapper = |ds_p, bctype, name, nc, comps, field, fn1, fn2, ctx| {
+            unsafe { petsc_raw::PetscDSAddBoundary(
+            ds_p, bctype, name, label.dml_p, values.len() as PetscInt,
+            values.as_ptr(), field, nc, comps,
+            fn1, fn2, ctx, bd.as_mut_ptr()) }
+        };
+
+        let bc_user_func = bc_user_func.into();
+        let bc_user_func_t = bc_user_func_t.into();
+
+        self.add_boundary_field_raw_shared(bctype, name, field, comps, bc_user_func, bc_user_func_t, raw_fn_wrapper)?;
+
+        Ok(unsafe { bd.assume_init() })
+    }
+
+    /// Add a essential or natural field boundary condition to the model. (WIP Wrapper function)
+    ///
+    /// In the C API you would call `PetscDSAddBoundary` with the `bctype` being `DM_BC_*_FIELD`.
+    ///
+    /// This API is for PETSc `v3.15`
+    ///
+    /// # Parameters
+    ///
+    /// * `self` - The DM, with a PetscDS that matches the problem being constrained
+    /// * `bctype` - The type of condition, e.g. DM_BC_ESSENTIAL_FIELD (Dirichlet),
+    /// or DM_BC_NATURAL_FIELD (Neumann). Must end in field.
+    /// * `name` - The BC name
+    /// * `labelname` - The label defining constrained points
+    /// * `field` - The field to constrain
+    /// * `comps` - An array of constrained component numbers
+    /// * `ids` - An array of ids for constrained points
+    /// * `bc_user_func` - A pointwise function giving boundary values
+    /// * `bc_user_func_t` - A pointwise function giving the time deriative of the boundary values, or `None`
+    ///
+    /// ## `bc_user_func`/`bc_user_func_t` Parameters
+    ///
+    /// * `dim` - the spatial dimension
+    /// * `nf` - the number of fields
+    /// * `u_off` - the offset into u[] and u_t[] for each field
+    /// * `u_off_x` - the offset into u_x[] for each field
+    /// * `u` - each field evaluated at the current point
+    /// * `u_t` - the time derivative of each field evaluated at the current point
+    /// * `u_x` - the gradient of each field evaluated at the current point
+    /// * `a_off` - the offset into a[] and a_t[] for each auxiliary field
+    /// * `a_off_x` - the offset into a_x[] for each auxiliary field
+    /// * `a` - each auxiliary field evaluated at the current point
+    /// * `a_t` - the time derivative of each auxiliary field evaluated at the current point
+    /// * `a_x` - the gradient of auxiliary each field evaluated at the current point
+    /// * `t` - current time
+    /// * `x` - coordinates of the current point
+    /// * `nc` - number of constant parameters
+    /// * `consts` - constant parameters
+    /// * `bcval` *(output)* - output values at the current point
+    #[cfg(any(petsc_version_3_15, doc))]
+    pub fn add_boundary_field_raw(&mut self, bctype: DMBoundaryConditionType, name: &str, labelname: &str, field: PetscInt,
+        comps: &[PetscInt], ids: &[PetscInt],
+        bc_user_func: impl Into<Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>>,
+        bc_user_func_t: impl Into<Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>>) -> Result<()>
+    {
+        let labelname_cs = CString::new(labelname).expect("`CString::new` failed");
+
+        let bc_user_func = bc_user_func.into();
+        let bc_user_func_t = bc_user_func_t.into();
+
+        let raw_fn_wrapper = |ds_p, bctype, name, nc, comps, field, fn1, fn2, ctx| {
+            unsafe { petsc_raw::PetscDSAddBoundary(
+            ds_p, bctype, name, labelname_cs.as_ptr(), field, nc, comps,
+            fn1, fn2, ids.len() as PetscInt, ids.as_ptr(), ctx) }
+        };
+        
+        self.add_boundary_field_raw_shared(bctype, name, field, comps, bc_user_func, bc_user_func_t, raw_fn_wrapper)
+    }
+    
+    /// Does all the heavy lifting for `add_boundary_field_raw` independent of the version of `PetscDSAddBoundary`
+    fn add_boundary_field_raw_shared<F3>(&mut self, bctype: DMBoundaryConditionType, name: &str, field: PetscInt,
+        comps: &[PetscInt],
+        bc_user_func: Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>,
+        bc_user_func_t: Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>,
+        add_boundary_wrapper: F3) -> Result<()>
+    where
+        F3: FnOnce(*mut petsc_raw::_p_PetscDS, DMBoundaryConditionType, *const ::std::os::raw::c_char, PetscInt,
+            *const PetscInt, PetscInt, Option<unsafe extern "C" fn()>, Option<unsafe extern "C" fn()>,
+            *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode,
+    {
+        let name_cs = CString::new(name).expect("`CString::new` failed");
+
+        let bctype = match bctype {
+            DMBoundaryConditionType::DM_BC_ESSENTIAL_FIELD
+                | DMBoundaryConditionType::DM_BC_NATURAL_FIELD => bctype,
+            DMBoundaryConditionType::DM_BC_ESSENTIAL
+                | DMBoundaryConditionType::DM_BC_NATURAL
+                | DMBoundaryConditionType::DM_BC_ESSENTIAL_BD_FIELD
+                => return seterrq!(self.world, PetscErrorKind::PETSC_ERR_USER_INPUT,
+                    format!("DM::add_boundary_field does not support non field boundary conditions. You gave {:?}.", bctype)),
+            // This is for `DMBoundaryConditionType::DM_BC_NATURAL_RIEMANN`
+            _ => return seterrq!(self.world, PetscErrorKind::PETSC_ERR_USER_INPUT,
+                    format!("Unknown boundary condition type given to DM::add_boundary_field. You gave {:?}.", bctype)),
+        };
+    
+        let ierr = add_boundary_wrapper(
+            self.ds_p, bctype, name_cs.as_ptr(), comps.len() as PetscInt, comps.as_ptr(),
+            field, unsafe { std::mem::transmute(bc_user_func) },
+            unsafe { std::mem::transmute(bc_user_func_t) }, 
+            std::ptr::null_mut()
+        );
+        unsafe { chkerrq!(self.world, ierr) }?;
+    
+        Ok(())
+    }
+
+    /// Add a essential field boundary condition to the model. (WIP Wrapper function)
+    ///
+    /// In the C API you would call `PetscDSAddBoundary` with the `bctype` being `DM_BC_ESSENTIAL_BD_FIELD`.
+    ///
+    /// Note, the functions `bc_user_func` and `bc_user_func` can not be closures. And they
+    /// Will take pointers instead of slices. 
+    ///
+    /// This API is for PETSc `v3.16-dev.0`
+    ///
+    /// # Parameters
+    ///
+    /// * `self` - The DM, with a PetscDS that matches the problem being constrained
+    /// * `name` - The BC name
+    /// * `label` - The label defining constrained points
+    /// * `values` - An array of values for constrained points
+    /// * `field` - The field to constrain
+    /// * `comps` - An array of constrained component numbers
+    /// * `bc_user_func` - A pointwise function giving boundary values
+    /// * `bc_user_func_t` - A pointwise function giving the time deriative of the boundary values, or `None`
+    ///
+    /// ## `bc_user_func`/`bc_user_func_t` Parameters
+    ///
+    /// * `dim` - the spatial dimension
+    /// * `nf` - the number of fields
+    /// * `u_off` - the offset into u[] and u_t[] for each field
+    /// * `u_off_x` - the offset into u_x[] for each field
+    /// * `u` - each field evaluated at the current point
+    /// * `u_t` - the time derivative of each field evaluated at the current point
+    /// * `u_x` - the gradient of each field evaluated at the current point
+    /// * `a_off` - the offset into a[] and a_t[] for each auxiliary field
+    /// * `a_off_x` - the offset into a_x[] for each auxiliary field
+    /// * `a` - each auxiliary field evaluated at the current point
+    /// * `a_t` - the time derivative of each auxiliary field evaluated at the current point
+    /// * `a_x` - the gradient of auxiliary each field evaluated at the current point
+    /// * `t` - current time
+    /// * `x` - coordinates of the current point
+    /// * `n` - facet normal at the current point
+    /// * `nc` - number of constant parameters
+    /// * `consts` - constant parameters
+    /// * `bcval` *(output)* - output values at the current point
+    #[cfg(any(petsc_version_3_16_dev, doc))]
+    pub fn add_boundary_essential_bd_field_raw(&mut self, name: &str, label: &DMLabel, values: &[PetscInt],
+        field: PetscInt, comps: &[PetscInt],
+        bc_user_func: impl Into<Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            PetscReal, *const PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>>,
+        bc_user_func_t: impl Into<Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            PetscReal, *const PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>>) -> Result<PetscInt>
+    {
+        let mut bd = MaybeUninit::uninit();
+        let name_cs = CString::new(name).expect("`CString::new` failed");
+
+        let bc_user_func = bc_user_func.into();
+        let bc_user_func_t = bc_user_func_t.into();
+
+        let ierr = unsafe { petsc_raw::PetscDSAddBoundary(
+            self.ds_p, DMBoundaryConditionType::DM_BC_ESSENTIAL_BD_FIELD, name_cs.as_ptr(),
+            label.dml_p, values.len() as PetscInt,
+            values.as_ptr(), field, comps.len() as PetscInt, comps.as_ptr(),
+            std::mem::transmute(bc_user_func),
+            std::mem::transmute(bc_user_func_t), 
+            std::ptr::null_mut(), bd.as_mut_ptr()) };
+        unsafe { chkerrq!(self.world, ierr) }?;
+
+        Ok(unsafe { bd.assume_init() })
+    }
+
+    /// Add a essential field boundary condition to the model. (WIP Wrapper function)
+    ///
+    /// In the C API you would call `PetscDSAddBoundary` with the `bctype` being `DM_BC_ESSENTIAL_BD_FIELD`.
+    ///
+    /// Note, the functions `bc_user_func` and `bc_user_func` can not be closures. And they
+    /// Will take pointers instead of slices. 
+    ///
+    /// This API is for PETSc `v3.15`
+    ///
+    /// # Parameters
+    ///
+    /// * `self` - The DM, with a PetscDS that matches the problem being constrained
+    /// * `name` - The BC name
+    /// * `label` - The label defining constrained points
+    /// * `values` - An array of values for constrained points
+    /// * `field` - The field to constrain
+    /// * `comps` - An array of constrained component numbers
+    /// * `bc_user_func` - A pointwise function giving boundary values
+    /// * `bc_user_func_t` - A pointwise function giving the time deriative of the boundary values, or `None`
+    ///
+    /// ## `bc_user_func`/`bc_user_func_t` Parameters
+    ///
+    /// * `dim` - the spatial dimension
+    /// * `nf` - the number of fields
+    /// * `u_off` - the offset into u[] and u_t[] for each field
+    /// * `u_off_x` - the offset into u_x[] for each field
+    /// * `u` - each field evaluated at the current point
+    /// * `u_t` - the time derivative of each field evaluated at the current point
+    /// * `u_x` - the gradient of each field evaluated at the current point
+    /// * `a_off` - the offset into a[] and a_t[] for each auxiliary field
+    /// * `a_off_x` - the offset into a_x[] for each auxiliary field
+    /// * `a` - each auxiliary field evaluated at the current point
+    /// * `a_t` - the time derivative of each auxiliary field evaluated at the current point
+    /// * `a_x` - the gradient of auxiliary each field evaluated at the current point
+    /// * `t` - current time
+    /// * `x` - coordinates of the current point
+    /// * `n` - facet normal at the current point
+    /// * `nc` - number of constant parameters
+    /// * `consts` - constant parameters
+    /// * `bcval` *(output)* - output values at the current point
+    #[cfg(any(petsc_version_3_15, doc))]
+    pub fn add_boundary_essential_bd_field_raw(&mut self, name: &str, labelname: &str, field: PetscInt,
+        comps: &[PetscInt], ids: &[PetscInt],
+        bc_user_func: impl Into<Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            PetscReal, *const PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>>,
+        bc_user_func_t: impl Into<Option<unsafe extern "C" fn(PetscInt, PetscInt, PetscInt,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            *const PetscInt, *const PetscInt, *const PetscScalar, *const PetscScalar, *const PetscScalar,
+            PetscReal, *const PetscReal, *const PetscReal, PetscInt, *const PetscScalar, *mut PetscScalar)>>) -> Result<()>
+    {
+        let labelname_cs = CString::new(labelname).expect("`CString::new` failed");
+        let name_cs = CString::new(name).expect("`CString::new` failed");
+
+        let bc_user_func = bc_user_func.into();
+        let bc_user_func_t = bc_user_func_t.into();
+        
+        let ierr = unsafe { petsc_raw::PetscDSAddBoundary(
+            self.ds_p, DMBoundaryConditionType::DM_BC_ESSENTIAL_BD_FIELD, name_cs.as_ptr(),
+            labelname_cs.as_ptr(), field, comps.len() as i32, comps.as_ptr(),
+            std::mem::transmute(bc_user_func), std::mem::transmute(bc_user_func_t),
+            ids.len() as PetscInt, ids.as_ptr(), std::ptr::null_mut()) };
+        unsafe { chkerrq!(self.world, ierr) }
+    }
 }
 
 impl<'a, 'tl> Deref for BorrowDM<'a, 'tl, '_> {
@@ -3032,6 +4015,13 @@ impl<'a> DM<'a, '_> {
         DMGetNumFields, pub get_num_fields, output PetscInt, nf, #[doc = "Get the number of fields in the DM"];
         DMSetAuxiliaryVec, pub set_auxiliary_vec, input Option<&DMLabel<'a>>, label .as_raw, input PetscInt, value, input Vector<'a>, aux .as_raw consume .aux_vec, takes mut,
             #[doc = "Set the auxiliary vector for region specified by the given label and value.\n\nOnly avalable for PETSc `v3.16-dev.0`"] #[cfg(any(petsc_version_3_16_dev, doc))];
+        DMPlexLabelComplete, pub plex_label_complete, input &mut DMLabel, label .as_raw, #[doc = "Starting with a label marking points on a surface, we add the transitive closure to the surface."]; 
+    }
+}
+
+impl DS<'_, '_> {
+    wrap_simple_petsc_member_funcs! {
+        PetscDSGetNumBoundary, get_num_boundary, output PetscInt, nbd, #[doc = "TODO"];
     }
 }
 

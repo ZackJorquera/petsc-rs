@@ -337,8 +337,8 @@ fn setup_problem(dm: &mut DM, opt: &Opt) -> petsc_rs::Result<(
             }
 
             if opt.bc_type == BCType::NEUMANN {
-                let label = dm.get_label("boundary")?.unwrap();
-                let bd = dm.add_boundary_natural("wall", &label, slice::from_ref(&id), 0, &[], |_, _, _, _, _| Ok(()))?;
+                let mut label = dm.get_label("boundary")?.unwrap();
+                let bd = dm.add_boundary_natural("wall", &mut label, slice::from_ref(&id), 0, &[], |_, _, _, _, _| Ok(()))?;
                 let (mut wf, _, _, _, _, _, _) = dm.try_get_ds_mut().unwrap().get_boundary_info(bd)?;
                 petsc_weak_form_set_index_bd_residual(&mut wf, &label, id, f0_bd_u)?;
             }
@@ -348,8 +348,8 @@ fn setup_problem(dm: &mut DM, opt: &Opt) -> petsc_rs::Result<(
             exact_field = Some(quadratic_u_field_3d);
 
             if opt.bc_type == BCType::NEUMANN {
-                let label = dm.get_label("boundary")?.unwrap();
-                let bd = dm.add_boundary_natural("wall", &label, slice::from_ref(&id), 0, &[], |_, _, _, _, _| Ok(()))?;
+                let mut label = dm.get_label("boundary")?.unwrap();
+                let bd = dm.add_boundary_natural("wall", &mut label, slice::from_ref(&id), 0, &[], |_, _, _, _, _| Ok(()))?;
                 let (mut wf, _, _, _, _, _, _) = dm.try_get_ds_mut().unwrap().get_boundary_info(bd)?;
                 petsc_weak_form_set_index_bd_residual(&mut wf, &label, id, f0_bd_u)?;
             }
@@ -367,10 +367,10 @@ fn setup_problem(dm: &mut DM, opt: &Opt) -> petsc_rs::Result<(
     dm.try_get_ds_mut().unwrap().set_exact_solution(0, exact_func.clone())?;
 
     if opt.bc_type == BCType::DIRICHLET {
-        if let Some(label) = dm.get_label("marker")? {
+        if let Some(mut label) = dm.get_label("marker")? {
             if opt.field_bc { dm.add_boundary_field_raw(DMBoundaryConditionType::DM_BC_ESSENTIAL_FIELD, "wall",
-                &label, slice::from_ref(&id), 0, &[], exact_field, None)?; }
-            let _ = dm.add_boundary_essential("wall", &label, slice::from_ref(&id), 0, &[], exact_func.clone())?;
+                &mut label, slice::from_ref(&id), 0, &[], exact_field, None)?; }
+            let _ = dm.add_boundary_essential("wall", &mut label, slice::from_ref(&id), 0, &[], exact_func.clone())?;
         } else {
             todo!();
         }

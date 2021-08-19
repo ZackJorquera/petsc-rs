@@ -156,7 +156,7 @@ impl<'a> Vector<'a> {
     ///
     /// If you call `x.set_option(VecOption::VEC_IGNORE_NEGATIVE_INDICES, true)`, negative indices
     /// may be passed in ix. These rows are simply ignored. This allows easily inserting element
-    /// load matrices with homogeneous Dirchlet boundary conditions that you don't want represented
+    /// load matrices with homogeneous Dirichlet boundary conditions that you don't want represented
     /// in the vector.
     ///
     /// These values may be cached, so [`Vector::assembly_begin()`] and [`Vector::assembly_end()`] MUST be

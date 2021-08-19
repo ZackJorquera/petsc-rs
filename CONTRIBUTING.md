@@ -42,7 +42,7 @@ Right now, this is all done in the `build.rs` for `petsc-sys`, but I think it wo
 
 ### Complex numbers
 
-While complex numbers are unsafe, I've still did a lot of work to support complex numbers as safely as possible. The main thing is that `petsc-rs` uses the [`num-complex` `Complex` type](https://docs.rs/num-complex/0.4.0/num_complex/struct.Complex.html), but `petsc-sys` uses the complex type that bindgen creates. To convert between the two I implemented `Into` and `From` that uses a `mem::transmute` under the hood. Or, if you have a pointer to a complex number the conversion can be a simple pointer cast.
+While complex numbers are unsafe, I've still done a lot of work to support complex numbers as safely as possible. The main thing is that `petsc-rs` uses the [`num-complex` `Complex` type](https://docs.rs/num-complex/0.4.0/num_complex/struct.Complex.html), but `petsc-sys` uses the complex type that bindgen creates. To convert between the two I implemented `Into` and `From` that uses a `mem::transmute` under the hood. Or, if you have a pointer to a complex number the conversion can be a simple pointer cast.
 
 ### lifetimes and struct references
 
@@ -70,10 +70,10 @@ Most of these are just things I made as I was making `petsc-rs` so some might be
 
 There are also a lot of `TODO` comments throughout the repository that I try to keep up to date.
 
-- [ ] should DMDA and other types of DM be their own struct. Then DM can be a trait or something. This would make it safer, i.e. you can't call da method unless you are a DMDA. This same question exists for all PETSc wrapper types. However, I think what we have right now works fine so I'm not supper motivated to try to implement this right now. Also, look at the [`Field` type](https://gitlab.com/petsc/petsc-rs/-/blob/main/src/dm.rs#L119-127).
-- [ ] Do we want wrappers of `DMSNESSetFunction`, `DMKSPSetComputeOperators`, and the such. If so it would make sense to move the trampoline data to the DM, i.e. `SNES::set_function` would just call `DM::snes_set_function` and that would deal with the closure.
+- [ ] should DMDA and other types of DM be their own struct. Then DM can be a trait or something. This would make it safer, i.e. you can't call da method unless you are a DMDA. This same question exists for all PETSc wrapper types. However, I think what we have right now works fine so I'm not super motivated to try and implement this right now. Also, look at the [`FieldDisc` type](https://gitlab.com/petsc/petsc-rs/-/blob/95cb741c/src/dm.rs#L122-128), maybe we could make `DM` an enum that can be different types of DMs.
+- [x] Do we want wrappers of `DMSNESSetFunction`, `DMKSPSetComputeOperators`, and the such. If so it would make sense to move the trampoline data to the DM, i.e. `SNES::set_function` would just call `DM::snes_set_function` and that would deal with the closure.
 - [ ] Add a wrapper for `DMGetCoordinates` - returns a vector with a different type than PetscScalar. should we use generics on vector, or we could make a new struct CoordVec or something?
-- [ ] make Mat builder an option for construction I think what we have now works well enough, but you shouldn't be able to use the mat until you call `set_up` so it would make sense to have that be a consuming builder.
+- [ ] make Mat builder an option for construction. I think what we have now works well enough, but you shouldn't be able to use the mat until you call `set_up` so it would make sense to have that be a consuming builder.
   - [ ] make Vector builder an option for construction
 - [ ] add comments to raw bindings (would have to edit the bindgen results) (the PETSc code has comments on all the functions (in `*.c` file), It would be cool if we could grab it) (or just link to the online C API docs). I don't know how to do this or if we even can. I've tried a couple of things but have had no success. In the end, it probably isn't a big deal because the user can always just search the PETSc C API docs.
 - [ ] make build.rs build petsc if a feature to do that is on
@@ -83,11 +83,11 @@ There are also a lot of `TODO` comments throughout the repository that I try to 
   - [ ] I foresee this being an issue in the future, when we install petsc in petsc-sys build.rs, we will want to make sure that the petsc-rs build.rs is not run until the install has finished, or have some way of petsc-rs waiting for the install. Note, cargo runs them in parallel right now so we can guarantee anything about what is run when.
 - [ ] make all unwraps in docstrings us try `?` instead
 - [ ] add PF bindings (https://petsc.org/release/docs/manualpages/PF/index.html)
-- [ ] add better MatStencil type for petsc-rs (maybe add a bunch of types that all implement `Into<MatStencil>` or a bunch of `new_Xd` functions )
+- [ ] add better MatStencil type for petsc-rs (maybe add a bunch of types that all implement `Into<MatStencil>` or a bunch of `new_Xd` functions.)
 - [ ] add wrapper for `MatNullSpaceSetFunction`
 - [ ] it would be cool to make a macro that functions sort of like stuctopt for the PetscOpt trait
-- [ ] work on complex numbers more. The api, while ok, still has problems. An annoying thing is the fact that complex numbers have no `abs()` method and real numbers have no `norm()` method. This make supporting both real and complex a pain. We have to use a `#[cfg(feature = "petsc-use-complex-unsafe")]` (look at snes-ex3 for an example of this).
-- [ ] it would make sense to move a lot of the high-level functionality to the rust side (for of like we did for da_vec_view)
+- [ ] work on complex numbers more. The api, while ok, still has problems. An annoying thing is the fact that complex numbers have no `.abs()` method and real numbers have no `.norm()` method. This make supporting both real and complex numbers a pain. We have to use a `#[cfg(feature = "petsc-use-complex-unsafe")]` (look at snes-ex3 for an example of this).
+- [ ] it would make sense to move a lot of the high-level functionality to the rust side (like we did for `da_vec_view`)
   - [ ] we could do this for viewers
   - [ ] Also add GUI viewer, look how OpenCV rust bindings do it
   - [ ] we could maybe do this for error handling (i.e. rewrite PetscError).
@@ -95,10 +95,10 @@ There are also a lot of `TODO` comments throughout the repository that I try to 
 - [ ] make DMDA use const generic to store the dimensions - this is in the same vein as having DMDA be its own struct type
 - [ ] make set_sizes take an enum that contains both local and global so you can't give two Nones and get an error - IDK if this is that important, I kind of like the current API.
 - [ ] maybe make re-exports from petsc_raw use typedefs if we change the name e.g., `pub type PetscErrorKind = petsc_raw::PetscErrorCodeEnum` not `pub use petsc_raw::PetscErrorCodeEnum as PetscErrorKind`. However, this does cause problems for enums, we lose the variants in the docs.
-- [ ] add `KSP::set_compute_operators_single_mat`, if it would even make a different. Right now we just ignore one of the operators.
 - [ ] create wrapper macro to synchronize method calls, for example, we could do something like `sync! { petsc.world(), println!("hello process: {}", petsc.world().rank()) }` in place of `petsc_println_all!(petsc.world(), "hello process: {}", petsc.world().rank())`. Would this even work?
-- [ ] should rename the `create` methods to be `new` (make things rustier). We would have to change the name of the existing private `new` methods.
-- [ ] make it so panic! aborts nicely (i.e. it calls PetscAbort and MPI_Abort), maybe we have to make a petsc_abort!. Make all uses of panic! use petsc_abort! instead. this includes unwrap, assert_eq, and others probably. I started this to test out the API, but never finished it.
+- [ ] should we rename the `create` methods to be `new` (make things rustier). We would have to change the name of the existing private `new` methods to something else though.
+- [x] make it so `panic!` aborts nicely (i.e. it calls PetscAbort and MPI_Abort), maybe we have to make a petsc_abort!.
+  - [ ] Make all uses of panic! use petsc_abort! instead. this includes unwrap, assert_eq, and others probably. I started this to test out the API, but never finished it.
 - [ ] add Quadrature type (https://petsc.org/release/docs/manualpages/FE/PetscQuadrature.html)
   - [ ] do `PetscDTStroudConicalQuadrature`
 - [ ] do `https://petsc.org/release/docs/manualpages/DMPLEX/DMPlexSetClosurePermutationTensor.html`
@@ -108,13 +108,13 @@ There are also a lot of `TODO` comments throughout the repository that I try to 
 - [ ] add `DMPlexInsertBoundaryValues`
 - [ ] Generate code for types like DMBoundaryType, right now we manually write the impls for it.
 - [ ] Generate FromStr for some of the generated enums
-- [ ] Move the `boundary_trampoline_data` from DM to DS also move all methods to the DS and have wrapper ones replace existing ones. This should be easy-ish, look at KSP::set_operators and how it calls PC::set_operators.
-- [ ] in all the rust methods that we unwrap petsc_rs::Results, we should instead call PetscAbort or do some type of abort on panic, look into [the `panic_handler` attribute](https://doc.rust-lang.org/reference/runtime.html#the-panic_handler-attribute) which is only in no-std so IDK if that will work
+- [x] Move the `boundary_trampoline_data` from DM to DS also move all methods to the DS and have wrapper ones replace existing ones. This should be easy-ish, look at KSP::set_operators and how it calls PC::set_operators.
 - [ ] when we take a file path as an input we should probably take an `AsRef<Path>`, for the `PetscBuilder::file` we might want to separate the ':yaml' thing from the file path, at least as far as the caller is concerned.  
 - [ ] in a lot of the doc test examples we use `set_from_options` and other stuff from the options database. This is a problem because the test relies on the options being specific values. We should instead manually set the values. Using the options database in the full examples should be fine though.
-- [ ] Some functions return `Rc`s to inner types, but maybe shouldn't.
+- [ ] Some functions return `Rc`s to inner types, but maybe shouldn't. Unless we store it as an Rc, then it's probably fine.
 - [ ] Should `get_local_vector` take `&mut self`. This is because it does mutate the DM a little, however, it might also be possible to just use some interior mutability construct. Or maybe we store the `localin`/`localout` array in the rust side as a slice and put a RefCell around that. Or maybe it doesn't even have to be around the arrays and could be a different variable that acts as a mutability lock handled all internally, but at this point, it would be useless as it is already safe. Or maybe we just make it take `&mut self` and also return `&self`/`&mut self` you aren't locked out of doing anything because of the lifetime in `BorrowVector`. IDK what to do here, as it seems like it is fine already, but it also doesn't seem fine.
 - [ ] right now we block versions of PETSc that aren't supported, but maybe we should have a feature to disable this so users can use unsupported versions if they actually do work.
 - [ ] I added `build-probe-petsc` because I wanted to get PETSc version/build info in petsc-rs build.rs, but it might also work to make petsc-sys a build dependency for petsc-rs, and then we can just use the consts from that.
 - [ ] Add TS wrappers (<https://petsc.org/release/docs/manualpages/TS/index.html>)
 - [ ] Add Tao wrappers (<https://petsc.org/release/docs/manualpages/Tao/index.html>)
+- [ ] DMLabel should be `Rc<DMLable>` or something. At least when we return the label from a function. Its a little weird to `get_label` then modify it and then drop it because it is reference counted on the C side. 

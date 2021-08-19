@@ -10,8 +10,7 @@
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/KSP/index.html>
 
 use std::ffi::CString;
-use std:: pin::Pin;
-use std::mem::{MaybeUninit, ManuallyDrop};
+use std::mem::MaybeUninit;
 use std::rc::Rc;
 use crate::{
     petsc_raw,
@@ -41,30 +40,15 @@ pub struct KSP<'a, 'tl, 'bl> {
     // As far as Petsc is concerned we own a reference to the PC as it is reference counted under the hood.
     // But it should be fine to keep it here as an owned reference because we can control access and the 
     // default `KSPDestroy` accounts for references.
-    pc: Option<PC<'a, 'tl, 'bl>>,
+    pub(crate) pc: Option<PC<'a, 'tl, 'bl>>,
 
-    dm: Option<DM<'a, 'tl>>,
-
-    compute_operators_trampoline_data: Option<Pin<Box<KSPComputeOperatorsTrampolineData<'a, 'tl>>>>,
-    compute_rhs_trampoline_data: Option<Pin<Box<KSPComputeRHSTrampolineData<'a, 'tl>>>>,
-}
-
-struct KSPComputeOperatorsTrampolineData<'a, 'tl> {
-    world: &'a UserCommunicator,
-    user_f: Box<dyn FnMut(&KSP<'a, 'tl, '_>, &mut Mat<'a, 'tl>, &mut Mat<'a, 'tl>) -> Result<()> + 'tl>,
-}
-
-struct KSPComputeRHSTrampolineData<'a, 'tl> {
-    world: &'a UserCommunicator,
-    user_f: Box<dyn FnMut(&KSP<'a, 'tl, '_>, &mut Vector<'a>) -> Result<()> + 'tl>,
+    pub(crate) dm: Option<DM<'a, 'tl>>,
 }
 
 impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
     /// Same as `KSP { ... }` but sets all optional params to `None`
     pub(crate) fn new(world: &'a UserCommunicator, ksp_p: *mut petsc_raw::_p_KSP) -> Self {
-        KSP { world, ksp_p, pc: None, dm: None,
-            compute_operators_trampoline_data: None,
-            compute_rhs_trampoline_data: None }
+        KSP { world, ksp_p, pc: None, dm: None, }
     }
 
     /// Same as [`Petsc::ksp_create()`](crate::Petsc::ksp_create).
@@ -214,58 +198,13 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
     /// [`let dm = ksp.try_get_dm().unwrap();`](KSP::try_get_dm()).
     pub fn set_compute_operators<F>(&mut self, user_f: F) -> Result<()>
     where
-        F: FnMut(&KSP<'a, 'tl, '_>, &mut Mat<'a, 'tl>, &mut Mat<'a, 'tl>) -> Result<()> + 'tl
+        F: FnMut(&KSP<'a, '_, '_>, &mut Mat<'a, '_>, &mut Mat<'a, '_>) -> Result<()> + 'tl
     {
-        // TODO: look at how rsmpi did the trampoline stuff:
-        // https://github.com/rsmpi/rsmpi/blob/82e1d357/src/collective.rs#L1684
-        // They used libffi, that could be a safer way to do it.
-
-        let closure_anchor = Box::new(user_f);
-
-        let trampoline_data = Box::pin(KSPComputeOperatorsTrampolineData { 
-            world: self.world, user_f: closure_anchor });
-
-        // drop old trampoline_data
-        let _ = self.compute_operators_trampoline_data.take();
-
-        unsafe extern "C" fn ksp_compute_operators_trampoline(ksp_p: *mut petsc_raw::_p_KSP, mat1_p: *mut petsc_raw::_p_Mat,
-            mat2_p: *mut petsc_raw::_p_Mat, ctx: *mut std::os::raw::c_void) -> petsc_raw::PetscErrorCode
-        {
-            // SAFETY: We construct ctx to be a Pin<Box<KSPComputeOperatorsTrampolineData>> but pass it in as a *void
-            // Box<T> is equivalent to *T (or &T) for ffi. Because the KSP owns the closure we can make sure
-            // everything in it (and the closure its self) lives for at least as long as this function can be
-            // called.
-            // We don't construct a Box<> because we dont want to drop anything
-            let trampoline_data: Pin<&mut KSPComputeOperatorsTrampolineData> = std::mem::transmute(ctx);
-
-            // We don't want to drop anything, we are just using this to turn pointers 
-            // of the underlining types (i.e. *mut petsc_raw::_p_SNES) into references
-            // of the rust wrapper types.
-            let mut ksp = ManuallyDrop::new(KSP::new(trampoline_data.world, ksp_p));
-
-            let mut dm_p = MaybeUninit::uninit();
-            let ierr = petsc_raw::KSPGetDM(ksp_p, dm_p.as_mut_ptr());
-            if ierr != 0 { let _ = chkerrq!(trampoline_data.world, ierr); return ierr; }
-            let mut dm = DM::new(trampoline_data.world, dm_p.assume_init());
-            let ierr = DM::set_inner_values_for_readonly(&mut dm);
-            if ierr != 0 { return ierr; }
-            ksp.dm = Some(dm); // Note, because ksp is not dropped, ksp.dm wont be either
-
-            let mut a_mat = ManuallyDrop::new(Mat::new(trampoline_data.world, mat1_p));
-            let mut p_mat = ManuallyDrop::new(Mat::new(trampoline_data.world, mat2_p));
-            
-            (trampoline_data.get_mut().user_f)(&ksp, &mut a_mat, &mut p_mat)
-                .map_or_else(|err| err.kind as i32, |_| 0)
-        }
-
         let ierr = unsafe { petsc_raw::KSPSetComputeOperators(
-            self.ksp_p, Some(ksp_compute_operators_trampoline), 
-            std::mem::transmute(trampoline_data.as_ref())) }; // this will also erase the lifetimes
+            self.ksp_p, None, std::ptr::null_mut()) };
         unsafe { chkerrq!(self.world, ierr) }?;
         
-        self.compute_operators_trampoline_data = Some(trampoline_data);
-
-        Ok(())
+        self.get_dm_or_create()?.ksp_set_compute_operators(user_f)
     }
 
     /// Sets the routine to compute the right hand side of the linear system
@@ -277,7 +216,6 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
     ///
     /// * `user_f` - A closure used to convey the routine to compute the the right hand side of the linear system
     ///     * `ksp` - the ksp context
-    ///     * `dm` - the dm context held by the ksp
     ///     * `b` *(output)* - right hand side of linear system
     ///
     /// # Note
@@ -288,52 +226,11 @@ impl<'a, 'tl, 'bl> KSP<'a, 'tl, 'bl> {
     where
         F: FnMut(&KSP<'a, '_, '_>, &mut Vector<'a>) -> Result<()> + 'tl
     {
-        // TODO: look at how rsmpi did the trampoline stuff:
-        // https://github.com/rsmpi/rsmpi/blob/82e1d357/src/collective.rs#L1684
-        // They used libffi, that could be a safer way to do it.
-
-        let closure_anchor = Box::new(user_f);
-
-        let trampoline_data = Box::pin(KSPComputeRHSTrampolineData { 
-            world: self.world, user_f: closure_anchor });
-
-        // drop old trampoline_data
-        let _ = self.compute_rhs_trampoline_data.take();
-
-        unsafe extern "C" fn ksp_compute_rhs_trampoline(ksp_p: *mut petsc_raw::_p_KSP, vec_p: *mut petsc_raw::_p_Vec,
-            ctx: *mut std::os::raw::c_void) -> petsc_raw::PetscErrorCode
-        {
-
-            // SAFETY: read `ksp_compute_operators_single_trampoline` safety
-            let trampoline_data: Pin<&mut KSPComputeRHSTrampolineData> = std::mem::transmute(ctx);
-
-            // We don't want to drop anything, we are just using this to turn pointers 
-            // of the underlining types (i.e. *mut petsc_raw::_p_SNES) into references
-            // of the rust wrapper types.
-            let mut ksp = ManuallyDrop::new(KSP::new(trampoline_data.world, ksp_p));
-
-            let mut dm_p = MaybeUninit::uninit();
-            let ierr = petsc_raw::KSPGetDM(ksp_p, dm_p.as_mut_ptr());
-            if ierr != 0 { let _ = chkerrq!(trampoline_data.world, ierr); return ierr; }
-            let mut dm = DM::new(trampoline_data.world, dm_p.assume_init());
-            let ierr = DM::set_inner_values_for_readonly(&mut dm);
-            if ierr != 0 { return ierr; }
-            ksp.dm = Some(dm); // Note, because ksp is not dropped, ksp.dm wont be either
-
-            let mut vec = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p });
-            
-            (trampoline_data.get_mut().user_f)(&ksp, &mut vec)
-                .map_or_else(|err| err.kind as i32, |_| 0)
-        }
-
         let ierr = unsafe { petsc_raw::KSPSetComputeRHS(
-            self.ksp_p, Some(ksp_compute_rhs_trampoline), 
-            std::mem::transmute(trampoline_data.as_ref())) }; // this will also erase the lifetimes
+            self.ksp_p, None, std::ptr::null_mut()) };
         unsafe { chkerrq!(self.world, ierr) }?;
         
-        self.compute_rhs_trampoline_data = Some(trampoline_data);
-
-        Ok(())
+        self.get_dm_or_create()?.ksp_set_compute_rhs(user_f)
     }
 
     /// Gets the right-hand-side vector for the linear system to be solved.

@@ -35,7 +35,10 @@ pub struct Mat<'a, 'tl> {
     pub(crate) mat_p: *mut petsc_raw::_p_Mat, // I could use Mat which is the same thing, but i think using a pointer is more clear
 
     // if Mat uses the closures (under the hood) we want to make
-    // sure that it holds the lifetime of them too.
+    // sure that it holds the lifetimes of them too.
+    // TODO: do we even want/need this, it causes problems with lifetimes with SNES closure
+    // setting functions. In the PC this problem is caused when we store a `&'bl Mat<'a, 'tl>`.
+    // which causes `'bl: 'tl` which isn't necessary for the function signature.
     pub(crate) _phantom_closure: PhantomData<Box<dyn FnMut(&Mat<'a, 'tl>, &Vector<'a>, &mut Vector<'a>) -> Result<()> + 'tl>>
 }
 

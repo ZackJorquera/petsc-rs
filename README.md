@@ -68,7 +68,7 @@ If you wish to use raw bindings from `petsc-sys` in the same crate that you are 
 petsc-sys = { git = "https://gitlab.com/petsc/petsc-rs/", branch = "main", default-features = false }
 ```
 
-Note, `petsc-sys` has the same type related feature flags as `petsc-rs` and `petsc-rs` will pass its flags to `petsc-sys`. To avoid conflicts you should use `default-features = false` when importing `petsc-sys` so that you don't accidentally enable any additional flags.
+Note, `petsc-sys` has the same type related feature flags as `petsc-rs`, and `petsc-rs` will pass its flags to `petsc-sys`. To avoid conflicts you should use `default-features = false` when importing `petsc-sys` so that you don't accidentally enable any additional flags.
 
 ### Using `mpi`
 
@@ -76,7 +76,7 @@ If you want to use `mpi` in your project, you MUST use `rsmpi v0.6` or above. Cu
 
 ```toml
 [dependencies]
-mpi = {git = "https://github.com/rsmpi/rsmpi.git", branch = "main" }
+mpi = { git = "https://github.com/rsmpi/rsmpi.git", branch = "main" }
 ```
 
 Or to be consistent with `petsc-rs` you can use `rev = "82e1d35"` instead of `branch = "main"`.
@@ -89,7 +89,7 @@ cargo build
 ```
 Note, cargo normally puts the binary at `target/debug/petsc_program_name`.
 
-All PETSc programs use the MPI (Message Passing Interface) standard for message-passing communication [[For94](https://petsc.org/release/documentation/manual/getting_started/#id205)]. Thus, to execute PETSc programs, users must know the procedure for beginning MPI jobs on their selected computer system(s). For instance, when using the MPICH implementation of MPI and many others, the following command initiates a program that uses eight processors:
+All PETSc programs use the MPI (Message Passing Interface) standard for message-passing communication [[For94](https://petsc.org/release/docs/manual/getting_started/#id205)]. Thus, to execute PETSc programs, users must know the procedure for beginning MPI jobs on their selected computer system(s). For instance, when using the MPICH implementation of MPI and many others, the following command initiates a program that uses eight processors:
 
 ```text
 mpiexec -n 8 target/debug/petsc_program_name [petsc_options]
@@ -247,6 +247,6 @@ You can use the `--open` flag to open it in your browser.
 
 ## C API Documentation
 
-- [Getting Started](https://petsc.org/release/documentation/manual/getting_started/)
+- [Getting Started](https://petsc.org/release/docs/manual/getting_started/)
 
-- [Programming with PETSc/TAO](https://petsc.org/release/documentation/manual/programming/)
+- [Programming with PETSc/TAO](https://petsc.org/release/docs/manual/)
