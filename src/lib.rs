@@ -101,9 +101,9 @@
 //!
 //! ## Further Reading
 //! 
-//! - [C API Getting Started](https://petsc.org/release/documentation/manual/getting_started/)
+//! - [C API Getting Started](https://petsc.org/release/docs/manual/getting_started/)
 //!
-//! - [C API Programming with PETSc/TAO](https://petsc.org/release/documentation/manual/programming/)
+//! - [C API Programming with PETSc/TAO](https://petsc.org/release/docs/manual/programming/)
 //!
 //! - [`petsc-rs` GitLab page](https://gitlab.com/petsc/petsc-rs/)
 
@@ -118,7 +118,7 @@ use std::vec;
 
 /// The raw C language PETSc API
 ///
-/// Documented on the [PETSc Documentation page](https://petsc.org/release/documentation/).
+/// Documented on the [PETSc Documentation page](https://petsc.org/release/docs/).
 // TODO: should this be public? Should we rename to `ffi`? Or should we just reexport petsc-sys?
 // Or just keep it the same?
 pub(crate) mod petsc_raw {
