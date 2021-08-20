@@ -2,7 +2,9 @@
 
 This file is not really intended to tell you how to contribute like most `CONTRIBUTING.md` files but instead will serve as an explanation of what work has already been done and what work still needs to be done. Most of this will talk about issues I faced and decisions I made. I don't believe that a lot of the decisions I made are the best solutions, but I think there is value in explaining why I made them.
 
-Contributing to `petsc-rs` is encouraged. For a better guide of how to contribute, read the [PETSc `CONTRIBUTING` file](https://gitlab.com/petsc/petsc/-/blob/main/CONTRIBUTING). 
+Contributing to `petsc-rs` is encouraged. For a better guide of how to contribute, read the [PETSc `CONTRIBUTING` file](https://gitlab.com/petsc/petsc/-/blob/main/CONTRIBUTING).
+
+Before you commit, make sure all the doc-tests and examples still work as expected. This includes testing for both real and complex numbers as well as using PETSc `v3.15` and the main branch.
 
 ## Library structure
 
@@ -81,7 +83,7 @@ There are also a lot of `TODO` comments throughout the repository that I try to 
   - [ ] I suspect that if Petsc installed mpi, then we could use that version, i.e., we need to find the mpi installed on the system (look at rsmpi to see what they do in this case).
   - [ ] In the same vein we should support a static install of petsc (I think the only reason it doesn't work for me rn is that the static install I have is 3.10 not 3.15)
   - [ ] I foresee this being an issue in the future, when we install petsc in petsc-sys build.rs, we will want to make sure that the petsc-rs build.rs is not run until the install has finished, or have some way of petsc-rs waiting for the install. Note, cargo runs them in parallel right now so we can guarantee anything about what is run when.
-- [ ] make all unwraps in docstrings us try `?` instead
+- [x] make all unwraps in docstrings us try `?` instead
 - [ ] add PF bindings (https://petsc.org/release/docs/manualpages/PF/index.html)
 - [ ] add better MatStencil type for petsc-rs (maybe add a bunch of types that all implement `Into<MatStencil>` or a bunch of `new_Xd` functions.)
 - [ ] add wrapper for `MatNullSpaceSetFunction`
@@ -91,7 +93,6 @@ There are also a lot of `TODO` comments throughout the repository that I try to 
   - [ ] we could do this for viewers
   - [ ] Also add GUI viewer, look how OpenCV rust bindings do it
   - [ ] we could maybe do this for error handling (i.e. rewrite PetscError).
-- [ ] make LineSearch API better (in general and for set_post/pre_check) (Note, the `changed` bools needing to be the same for all processes so it might make sense to do a mpi all reduce) Maybe look into ndarray::CowArray to determine if the user edited the array.
 - [ ] make DMDA use const generic to store the dimensions - this is in the same vein as having DMDA be its own struct type
 - [ ] make set_sizes take an enum that contains both local and global so you can't give two Nones and get an error - IDK if this is that important, I kind of like the current API.
 - [ ] create wrapper macro to synchronize method calls, for example, we could do something like `sync! { petsc.world(), println!("hello process: {}", petsc.world().rank()) }` in place of `petsc_println_all!(petsc.world(), "hello process: {}", petsc.world().rank())`. Would this even work?
@@ -103,12 +104,11 @@ There are also a lot of `TODO` comments throughout the repository that I try to 
 - [ ] do `https://petsc.org/release/docs/manualpages/DMPLEX/DMPlexSetClosurePermutationTensor.html`
 - [ ] should the examples be in `src/` folders or should we put them in the root with the `Cargo.toml`. Or should they just all be in examples/ so that cargo build --examples works.
 - [ ] Add a proc macro or something that does the same thing as PetscFunctionBeginUser and PetscFunctionReturn. Or incorporate this into the try `?` operator
-- [ ] For almost every closure, we take a `FnMut` but this might not always be correct. I think we should take `Fn`s. This is because the method that calls the fn might not take `&mut self`, but some do. Look at how MatShell works, I think that is correct.
 - [ ] add `DMPlexInsertBoundaryValues`
 - [ ] Generate code for types like DMBoundaryType, right now we manually write the impls for it.
 - [ ] Generate FromStr for some of the generated enums
 - [x] Move the `boundary_trampoline_data` from DM to DS also move all methods to the DS and have wrapper ones replace existing ones. This should be easy-ish, look at KSP::set_operators and how it calls PC::set_operators.
-- [ ] when we take a file path as an input we should probably take an `AsRef<Path>`, for the `PetscBuilder::file` we might want to separate the ':yaml' thing from the file path, at least as far as the caller is concerned.  
+- [x] when we take a file path as an input we should probably take an `AsRef<Path>`, for the `PetscBuilder::file` we might want to separate the ':yaml' thing from the file path, at least as far as the caller is concerned.  
 - [ ] in a lot of the doc test examples we use `set_from_options` and other stuff from the options database. This is a problem because the test relies on the options being specific values. We should instead manually set the values. Using the options database in the full examples should be fine though.
 - [ ] Some functions return `Rc`s to inner types, but maybe shouldn't. Unless we store it as an Rc, then it's probably fine.
 - [ ] Should `get_local_vector` take `&mut self`. This is because it does mutate the DM a little, however, it might also be possible to just use some interior mutability construct. Or maybe we store the `localin`/`localout` array in the rust side as a slice and put a RefCell around that. Or maybe it doesn't even have to be around the arrays and could be a different variable that acts as a mutability lock handled all internally, but at this point, it would be useless as it is already safe. Or maybe we just make it take `&mut self` and also return `&self`/`&mut self` you aren't locked out of doing anything because of the lifetime in `BorrowVector`. IDK what to do here, as it seems like it is fine already, but it also doesn't seem fine.
@@ -116,4 +116,5 @@ There are also a lot of `TODO` comments throughout the repository that I try to 
 - [ ] I added `build-probe-petsc` because I wanted to get PETSc version/build info in petsc-rs build.rs, but it might also work to make petsc-sys a build dependency for petsc-rs, and then we can just use the consts from that.
 - [ ] Add TS wrappers (<https://petsc.org/release/docs/manualpages/TS/index.html>)
 - [ ] Add Tao wrappers (<https://petsc.org/release/docs/manualpages/Tao/index.html>)
-- [ ] DMLabel should be `Rc<DMLable>` or something. At least when we return the label from a function. Its a little weird to `get_label` then modify it and then drop it because it is reference counted on the C side. 
+- [ ] DMLabel should be `Rc<DMLable>` or something. At least when we return the label from a function. Its a little weird to `get_label` then modify it and then drop it because it is reference counted on the C side.
+- [ ] Add better tests, maybe run them in a `gitlab-ci.yml`.

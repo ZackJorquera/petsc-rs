@@ -11,9 +11,11 @@
 //!
 //! PETSc C API docs: <https://petsc.org/release/docs/manualpages/SNES/index.html>
 
-use std:: pin::Pin;
+use std::ops::DerefMut;
+use std::pin::Pin;
 use std::mem::{MaybeUninit, ManuallyDrop};
 use std::ffi::CStr;
+use std::slice;
 use crate::{
     petsc_raw,
     Result,
@@ -206,7 +208,8 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     ///
     /// # Example
     ///
-    /// See example: snes ex2.rs for full code (at `examples/snes/src/ex2.rs`).
+    /// See example: `snes-ex2` for full code (at 
+    /// [`examples/snes/src/ex2.rs`](https://gitlab.com/petsc/petsc-rs/-/blob/main/examples/snes/src/ex2.rs)).
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
@@ -238,7 +241,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     ///     Ok(())
     /// })?;
     ///
-    /// // We would then set the jacobian and call solve of the snes context
+    /// // We would then set the jacobian and call solve on the snes context
     /// # Ok(())
     /// # }
     /// ```
@@ -282,7 +285,8 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     ///
     /// # Example
     ///
-    /// See example: snes ex2.rs for full code (at `examples/snes/src/ex2.rs`).
+    /// See example: `snes-ex2` for full code (at 
+    /// [`examples/snes/src/ex2.rs`](https://gitlab.com/petsc/petsc-rs/-/blob/main/examples/snes/src/ex2.rs)).
     ///
     /// ```
     /// # use petsc_rs::prelude::*;
@@ -467,26 +471,14 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
         Ok(())
     }
 
-    /// Returns an immutable reference to the line search context set with `SNESSetLineSearch()`
-    /// or creates a default line search instance associated with the SNES and returns it. 
-    pub fn get_linesearch(&mut self) -> Result<&LineSearch<'a>> {
-        if self.linesearch.is_some() {
-            Ok(self.linesearch.as_ref().unwrap())
-        } else {
-            let mut ls_p = MaybeUninit::uninit();
-            let ierr = unsafe { petsc_raw::SNESGetLineSearch(self.snes_p, ls_p.as_mut_ptr()) };
-            unsafe { chkerrq!(self.world, ierr) }?;
-
-            self.linesearch = Some(LineSearch { world: self.world, ls_p: unsafe { ls_p.assume_init() } });
-            unsafe { self.linesearch.as_mut().unwrap().reference()?; }
-
-            Ok(self.linesearch.as_ref().unwrap())
-        }
+    /// Returns an immutable reference to the line search context set with `SNESSetLineSearch()`.
+    pub fn try_get_linesearch(&self) -> Option<&LineSearch<'a>> {
+        self.linesearch.as_ref()
     }
 
     /// Returns a mutable reference to the line search context set with `SNESSetLineSearch()`
     /// or creates a default line search instance associated with the SNES and returns it. 
-    pub fn get_linesearch_mut(&mut self) -> Result<&mut LineSearch<'a>> {
+    pub fn get_linesearch_or_create(&mut self) -> Result<&mut LineSearch<'a>> {
         if self.linesearch.is_some() {
             Ok(self.linesearch.as_mut().unwrap())
         } else {
@@ -513,22 +505,84 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     ///     * `ls` - The linesearch context 
     ///     * `snes` - The snes context 
     ///     * `x` - The last step
-    ///     * `y` - The step direction 
-    ///     * `w` - The updated solution, `w = x + lambda*y` for some lambda.
-    ///     * `changed_y` - Indicator if the direction `y` has been changed.
-    ///     * `changed_w` - Indicator if the new candidate solution `w` has been changed.
+    ///     * `y` - The mutable step direction.
+    ///     * `w` - The mutable updated solution, normally `w = x + lambda*y` for some lambda.
+    ///     * `changed_y` *(output)* - Indicator if the direction `y` has been changed.
+    ///     * `changed_w` *(output)* - Indicator if the new candidate solution `w` has been changed.
     ///
     /// # Note
     ///
+    /// Note, when the `post_check` function is called, `petsc-rs` will automatically apply
+    /// a logical OR via an MPI all reduce on the `change_*` values. That is to say, if you
+    /// set one of the change values to `true` on any process, it will be treated as if all
+    /// processes returned true. This is different from the C API which requires all the
+    /// values to be logically collective (the same for each process).
+    ///
     /// You can access the [`DM`] owned by the `snes` in the `user_f` by using
     /// [`let dm = snes.try_get_dm().unwrap();`](SNES::try_get_dm()).
+    ///
+    /// # Example
+    ///
+    /// See example: `snes-ex3` for full code (at 
+    /// [`examples/snes/src/ex3.rs`](https://gitlab.com/petsc/petsc-rs/-/blob/main/examples/snes/src/ex3.rs)).
+    ///
+    /// ```
+    /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// # let petsc = Petsc::init_no_args()?;
+    /// let check_tol = 1.0;
+    ///
+    /// let mut snes = petsc.snes_create()?;
+    /// snes.set_from_options()?;
+    ///
+    /// snes.linesearch_set_post_check(|_ls, snes, x_last, _y, x, _y_mod, x_mod| { 
+    ///     let it = snes.get_iteration_number()?;
+    ///     if it > 0 {
+    ///         petsc_println!(petsc.world(),
+    ///             "Checking candidate step at iteration {} with tolerance {}",
+    ///             it, check_tol)?;
+    ///         let xa_last = x_last.view()?;
+    ///         let mut xa = x.view_mut()?;
+    ///
+    /// # // We want the complex case to pass the doc-test but we dont want to
+    /// # // put both versions in the doc-example, thus the `#`s.
+    /// #         #[cfg(feature = "petsc-use-complex-unsafe")]
+    /// #         xa_last.indexed_iter().map(|(pat, _)|  pat[0])
+    /// #             .for_each(|i| {
+    /// #                 let rdiff = if xa[i].norm() == 0.0 { 2.0*check_tol }
+    /// #                     else { ((xa[i] - xa_last[i])/xa[i]).norm() };
+    /// #                 if rdiff > check_tol {
+    /// #                     xa[i] = 0.5*(xa[i] + xa_last[i]);
+    /// #                     *x_mod = true;
+    /// #                 }
+    /// #             });
+    /// #         #[cfg(not(feature = "petsc-use-complex-unsafe"))]
+    ///         xa_last.indexed_iter().map(|(pat, _)|  pat[0])
+    ///             .for_each(|i| {
+    ///                 // Note, for complex numbers you would use `.norm()`
+    ///                 let rdiff = if xa[i].abs() == 0.0 { 2.0*check_tol }
+    ///                     else { ((xa[i] - xa_last[i])/xa[i]).abs() };
+    ///                 if rdiff > check_tol {
+    ///                     xa[i] = 0.5*(xa[i] + xa_last[i]);
+    ///                     *x_mod = true;
+    ///                 }
+    ///             });
+    ///     }
+    ///     Ok(())
+    /// })?;
+    ///
+    /// // We would then set the function and jacobian and call solve on the snes context
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn linesearch_set_post_check<F>(&mut self, user_f: F) -> Result<()>
     where
         F: FnMut(&LineSearch<'a>, &SNES<'a, 'tl, '_>, &Vector<'a>, &mut Vector<'a>, &mut Vector<'a>, &mut bool, &mut bool) -> Result<()> + 'tl
     {
         if self.linesearch.is_none() {
             // This just sets the linesearch
-            let _ = self.get_linesearch()?;
+            let _ = self.get_linesearch_or_create()?;
         }
 
         let closure_anchor = Box::new(user_f);
@@ -543,7 +597,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
             ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
         {
             // SAFETY: read `snes_function_trampoline` safety
-            let trampoline_data: Pin<&mut SNESLineSearchPostCheckTrampolineData> = std::mem::transmute(ctx);
+            let mut trampoline_data: Pin<&mut SNESLineSearchPostCheckTrampolineData> = std::mem::transmute(ctx);
 
             let ls = ManuallyDrop::new(LineSearch { world: trampoline_data.world, ls_p });
             let mut snes_p = MaybeUninit::uninit();
@@ -564,12 +618,21 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
             let mut w_vec = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: w_p });
             let mut changed_y = false;
             let mut changed_w = false;
+            let mut changed_y_red = false;
+            let mut changed_w_red = false;
             
-            let res = (trampoline_data.get_mut().user_f)(&ls, &snes, &x_vec, &mut y_vec, &mut w_vec, &mut changed_y, &mut changed_w)
+            let res = (trampoline_data.deref_mut().user_f)(&ls, &snes, &x_vec, &mut y_vec, &mut w_vec, &mut changed_y, &mut changed_w)
                 .map_or_else(|err| err.kind as i32, |_| 0);
 
-            *changed_y_p = changed_y.into();
-            *changed_w_p = changed_w.into();
+            // TODO: should we do this? The C API doesn't do this, it just returns an error,
+            // but I dont think that is very helpful. It doesn't seem like there is a good
+            // reason to not just do this all reduce.
+            let lor = mpi::collective::SystemOperation::logical_or();
+            trampoline_data.world.all_reduce_into(slice::from_ref(&changed_y), slice::from_mut(&mut changed_y_red), lor);
+            trampoline_data.world.all_reduce_into(slice::from_ref(&changed_w), slice::from_mut(&mut changed_w_red), lor);
+
+            *changed_y_p = changed_y_red.into();
+            *changed_w_p = changed_w_red.into();
 
             res
         }
@@ -595,9 +658,15 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     ///     * `snes` - The snes context 
     ///     * `x` - The last step
     ///     * `y` - The step direction
-    ///     * `changed_y` - Indicator if the direction `y` has been changed.
+    ///     * `changed_y` *(output)* - Indicator if the direction `y` has been changed.
     ///
     /// # Note
+    ///
+    /// Note, when the `pre_check` function is called, `petsc-rs` will automatically apply
+    /// a logical OR via an MPI all reduce on the `change_y` value. That is to say, if you
+    /// set one of the `change_y` values to `true` on any process, it will be treated as if all
+    /// processes returned `true`. This is different from the C API which requires all the
+    /// values to be logically collective (the same for each process).
     ///
     /// You can access the [`DM`] owned by the `snes` in the `user_f` by using
     /// [`let dm = snes.try_get_dm().unwrap();`](SNES::try_get_dm()).
@@ -607,7 +676,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
     {
         if self.linesearch.is_none() {
             // This just sets the linesearch if it isn't already
-            let _ = self.get_linesearch()?;
+            let _ = self.get_linesearch_or_create()?;
         }
 
         let closure_anchor = Box::new(user_f);
@@ -622,7 +691,7 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
             ctx: *mut ::std::os::raw::c_void) -> petsc_raw::PetscErrorCode
         {
             // SAFETY: read `snes_function_trampoline` safety
-            let trampoline_data: Pin<&mut SNESLineSearchPreCheckTrampolineData> = std::mem::transmute(ctx);
+            let mut trampoline_data: Pin<&mut SNESLineSearchPreCheckTrampolineData> = std::mem::transmute(ctx);
 
             let ls = ManuallyDrop::new(LineSearch { world: trampoline_data.world, ls_p });
             let mut snes_p = MaybeUninit::uninit();
@@ -641,11 +710,18 @@ impl<'a, 'tl, 'bl> SNES<'a, 'tl, 'bl> {
             let x_vec = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: x_p });
             let mut y_vec = ManuallyDrop::new(Vector { world: trampoline_data.world, vec_p: y_p });
             let mut changed_y = false;
+            let mut changed_y_red = false;
             
-            let res = (trampoline_data.get_mut().user_f)(&ls, &snes, &x_vec, &mut y_vec, &mut changed_y)
+            let res = (trampoline_data.deref_mut().user_f)(&ls, &snes, &x_vec, &mut y_vec, &mut changed_y)
                 .map_or_else(|err| err.kind as i32, |_| 0);
 
-            *changed_y_p = changed_y.into();
+            // TODO: should we do this? The C API doesn't do this, it just returns an error,
+            // but I dont think that is very helpful. It doesn't seem like there is a good
+            // reason to not just do this all reduce.
+            let lor = mpi::collective::SystemOperation::logical_or();
+            trampoline_data.world.all_reduce_into(slice::from_ref(&changed_y), slice::from_mut(&mut changed_y_red), lor);
+
+            *changed_y_p = changed_y_red.into();
 
             res
         }

@@ -201,7 +201,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// # use petsc_rs::prelude::*;
     /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
-    /// # let petsc = Petsc::init_no_args().unwrap();
+    /// # let petsc = Petsc::init_no_args()?;
     /// if petsc.world().size() != 1 {
     ///     // note, cargo wont run tests with mpi so this will never be reached,
     ///     // but this example will only work in a uniprocessor comm world
@@ -243,10 +243,10 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// # mat2.view_with(Some(&viewer))?;
     /// 
     /// // We do that map in the case that `PetscScalar` is complex.
-    /// assert_eq!(mat.get_values(0..n, 0..n).unwrap(), mat2.get_values(0..n, 0..n).unwrap());
-    /// assert_eq!(mat.get_values(0..n, 0..n).unwrap(), [ 0.0,  1.0,  2.0,
-    ///                                                   3.0,  4.0,  5.0,
-    ///                                                   6.0,  7.0,  8.0,]
+    /// assert_eq!(mat.get_values(0..n, 0..n)?, mat2.get_values(0..n, 0..n)?);
+    /// assert_eq!(mat.get_values(0..n, 0..n)?, [ 0.0,  1.0,  2.0,
+    ///                                           3.0,  4.0,  5.0,
+    ///                                           6.0,  7.0,  8.0,]
     ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
     /// # Ok(())
     /// # }
@@ -349,7 +349,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// # use petsc_rs::prelude::*;
     /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
-    /// # let petsc = Petsc::init_no_args().unwrap();
+    /// # let petsc = Petsc::init_no_args()?;
     /// if petsc.world().size() != 1 {
     ///     // note, cargo wont run tests with mpi so this will never be reached,
     ///     // but this example will only work in a uniprocessor comm world
@@ -378,11 +378,11 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// # mat.view_with(Some(&viewer))?;
     /// 
     /// // We do that map in the case that `PetscScalar` is complex.
-    /// assert_eq!(mat.get_values(0..n, 0..n).unwrap(), [ 2.0, -1.0,  0.0,  0.0,  0.0,
-    ///                                                  -1.0,  2.0, -1.0,  0.0,  0.0,
-    ///                                                   0.0, -1.0,  2.0, -1.0,  0.0,
-    ///                                                   0.0,  0.0, -1.0,  2.0, -1.0,
-    ///                                                   0.0,  0.0,  0.0, -1.0,  2.0]
+    /// assert_eq!(mat.get_values(0..n, 0..n)?, [ 2.0, -1.0,  0.0,  0.0,  0.0,
+    ///                                          -1.0,  2.0, -1.0,  0.0,  0.0,
+    ///                                           0.0, -1.0,  2.0, -1.0,  0.0,
+    ///                                           0.0,  0.0, -1.0,  2.0, -1.0,
+    ///                                           0.0,  0.0,  0.0, -1.0,  2.0]
     ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
     /// # Ok(())
     /// # }
@@ -419,7 +419,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// # use petsc_rs::prelude::*;
     /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
-    /// # let petsc = Petsc::init_no_args().unwrap();
+    /// # let petsc = Petsc::init_no_args()?;
     /// if petsc.world().size() != 1 {
     ///     // note, cargo wont run tests with mpi so this will never be reached,
     ///     // but this example will only work in a uniprocessor comm world
@@ -449,11 +449,11 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// # let viewer = Viewer::create_ascii_stdout(petsc.world())?;
     /// # mat.view_with(Some(&viewer))?;
     /// 
-    /// assert_eq!(mat.get_values(0..n, 0..n).unwrap(), [ 2.0, -1.0,  0.0,  0.0,  0.0,
-    ///                                                  -1.0,  2.0, -1.0,  0.0,  0.0,
-    ///                                                   0.0, -1.0,  2.0, -1.0,  0.0,
-    ///                                                   0.0,  0.0, -1.0,  2.0, -1.0,
-    ///                                                   0.0,  0.0,  0.0, -1.0,  2.0]
+    /// assert_eq!(mat.get_values(0..n, 0..n)?, [ 2.0, -1.0,  0.0,  0.0,  0.0,
+    ///                                          -1.0,  2.0, -1.0,  0.0,  0.0,
+    ///                                           0.0, -1.0,  2.0, -1.0,  0.0,
+    ///                                           0.0,  0.0, -1.0,  2.0, -1.0,
+    ///                                           0.0,  0.0,  0.0, -1.0,  2.0]
     ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
     /// # Ok(())
     /// # }
@@ -570,7 +570,7 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// # use petsc_rs::prelude::*;
     /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
-    /// # let petsc = Petsc::init_no_args().unwrap();
+    /// # let petsc = Petsc::init_no_args()?;
     /// if petsc.world().size() != 1 {
     ///     // note, cargo wont run tests with mpi so this will never be reached,
     ///     // but this example will only work in a uniprocessor comm world
@@ -595,13 +595,13 @@ impl<'a, 'tl> Mat<'a, 'tl> {
     /// # mat.view_with(Some(&viewer))?;
     /// 
     /// // We do that map in the case that `PetscScalar` is complex.
-    /// assert_eq!(mat.get_values(0..n, 0..n).unwrap(),
+    /// assert_eq!(mat.get_values(0..n, 0..n)?,
     ///            [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
-    /// assert_eq!(mat.get_values(0..n, [0]).unwrap(),
+    /// assert_eq!(mat.get_values(0..n, [0])?,
     ///            [0.0, 3.0, 6.0].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
-    /// assert_eq!(mat.get_values([1], 0..2).unwrap(),
+    /// assert_eq!(mat.get_values([1], 0..2)?,
     ///            [3.0, 4.0].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
-    /// assert_eq!(mat.get_values([1,2], [0,2]).unwrap(),
+    /// assert_eq!(mat.get_values([1,2], [0,2])?,
     ///            [3.0, 5.0, 6.0, 8.0].iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
     /// # Ok(())
     /// # }

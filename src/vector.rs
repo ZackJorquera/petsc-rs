@@ -91,9 +91,11 @@ impl<'a> Vector<'a> {
     /// ```
     /// # use petsc_rs::prelude::*;
     /// # use mpi::traits::*;
-    /// let petsc = Petsc::init_no_args().unwrap();
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// let petsc = Petsc::init_no_args()?;
     ///
-    /// Vector::create(petsc.world()).unwrap();
+    /// Vector::create(petsc.world())?;
+    /// # Ok(()) }
     /// ```
     pub fn create(world: &'a UserCommunicator) -> Result<Self> {
         let mut vec_p = MaybeUninit::uninit();
@@ -179,36 +181,38 @@ impl<'a> Vector<'a> {
     /// ```
     /// # use petsc_rs::prelude::*;
     /// # use mpi::traits::*;
-    /// # let petsc = Petsc::init_no_args().unwrap();
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// # let petsc = Petsc::init_no_args()?;
     /// if petsc.world().size() != 1 {
     ///     // note, cargo wont run tests with mpi so this will never be reached,
     ///     // but this example will only work in a uniprocessor comm world
-    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, "This is a uniprocessor example only!").unwrap();
+    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
     /// }
     ///
-    /// let mut v = petsc.vec_create().unwrap();
-    /// v.set_sizes(None, Some(10)).unwrap(); // create vector of size 10
-    /// v.set_from_options().unwrap();
+    /// let mut v = petsc.vec_create()?;
+    /// v.set_sizes(None, Some(10))?; // create vector of size 10
+    /// v.set_from_options()?;
     ///
     /// v.set_values(&[0, 3, 7, 9], &[PetscScalar::from(1.1), PetscScalar::from(2.2),
     ///                               PetscScalar::from(3.3), PetscScalar::from(4.4)],
-    ///     InsertMode::INSERT_VALUES).unwrap();
+    ///     InsertMode::INSERT_VALUES)?;
     /// // You MUST assemble before you can use 
-    /// v.assembly_begin().unwrap();
-    /// v.assembly_end().unwrap();
+    /// v.assembly_begin()?;
+    /// v.assembly_end()?;
     ///
     /// // We do the map in the case that `PetscScalar` is complex.
-    /// assert_eq!(v.get_values(0..10).unwrap(), [1.1,0.0,0.0,2.2,0.0,0.0,0.0,3.3,0.0,4.4]
+    /// assert_eq!(v.get_values(0..10)?, [1.1,0.0,0.0,2.2,0.0,0.0,0.0,3.3,0.0,4.4]
     ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
     ///
     /// v.set_values(&vec![0, 2, 8, 9], &vec![PetscScalar::from(1.0), PetscScalar::from(2.0),
     ///                                       PetscScalar::from(3.0), PetscScalar::from(4.0)],
-    ///     InsertMode::ADD_VALUES).unwrap();
+    ///     InsertMode::ADD_VALUES)?;
     /// // You MUST assemble before you can use 
-    /// v.assembly_begin().unwrap();
-    /// v.assembly_end().unwrap();
-    /// assert_eq!(v.get_values(0..10).unwrap(), [2.1,0.0,2.0,2.2,0.0,0.0,0.0,3.3,3.0,8.4]
+    /// v.assembly_begin()?;
+    /// v.assembly_end()?;
+    /// assert_eq!(v.get_values(0..10)?, [2.1,0.0,2.0,2.2,0.0,0.0,0.0,3.3,3.0,8.4]
     ///     .iter().cloned().map(|v| PetscScalar::from(v)).collect::<Vec<_>>());
+    /// # Ok(()) }
     /// ```
     pub fn set_values(&mut self, ix: &[PetscInt], v: &[PetscScalar], iora: InsertMode) -> Result<()> {
         assert!(iora == InsertMode::INSERT_VALUES || iora == InsertMode::ADD_VALUES);
@@ -484,7 +488,7 @@ impl<'a> Vector<'a> {
     /// if petsc.world().size() != 1 {
     ///     // note, cargo wont run tests with mpi so this will never be reached,
     ///     // but this example will only work in a uniprocessor comm world
-    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, "This is a uniprocessor example only!").unwrap();
+    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
     /// }
     /// let mut v = petsc.vec_create()?;
     /// v.set_sizes(None, Some(10))?; // create vector of size 10
@@ -542,7 +546,7 @@ impl<'a> Vector<'a> {
     /// if petsc.world().size() != 1 {
     ///     // note, cargo wont run tests with mpi so this will never be reached,
     ///     // but this example will only work in a uniprocessor comm world
-    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, "This is a uniprocessor example only!").unwrap();
+    ///     Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, "This is a uniprocessor example only!")?;
     /// }
     /// let mut v = petsc.vec_create()?;
     /// v.set_sizes(None, Some(10))?; // create vector of size 10

@@ -58,10 +58,6 @@ impl Display for BCType {
     }
 }
 
-impl Default for BCType {
-    fn default() -> Self { BCType::DIRICHLET }
-}
-
 impl FromStr for RunType {
     type Err = Error;
     fn from_str(input: &str) -> Result<RunType, Error> {
@@ -84,10 +80,6 @@ impl Display for RunType {
             _ => write!(f, "perf"),
         }
     }
-}
-
-impl Default for RunType {
-    fn default() -> Self { RunType::RUN_FULL }
 }
 
 impl FromStr for CoeffType {
@@ -120,10 +112,6 @@ impl Display for CoeffType {
             CoeffType::COEFF_CHECKERBOARD_1 => write!(f, "CHECKERBOARD_1"),
         }
     }
-}
-
-impl Default for CoeffType {
-    fn default() -> Self { CoeffType::COEFF_NONE }
 }
 
 #[derive(Debug)]

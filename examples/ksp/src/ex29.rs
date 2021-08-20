@@ -51,10 +51,6 @@ impl fmt::Display for BCType {
     }
 }
 
-impl Default for BCType {
-    fn default() -> Self { BCType::DIRICHLET }
-}
-
 struct Opt {
     /// The conductivity
     rho: PetscReal,

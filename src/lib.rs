@@ -113,6 +113,7 @@ use std::fmt::Display;
 use std::marker::PhantomData;
 use std::ops::{Deref, Bound, RangeBounds};
 use std::os::raw::{c_char, c_int};
+use std::path::Path;
 use std::vec;
 
 /// The raw C language PETSc API
@@ -214,7 +215,7 @@ pub type Complex<T> = petsc_sys::__BindgenComplex<T>;
 /// # use petsc_rs::prelude::*;
 /// # use mpi::traits::*;
 /// # fn main() -> petsc_rs::Result<()> {
-/// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
+/// let petsc = petsc_rs::Petsc::init_no_args()?;
 ///
 /// // will print once no matter how many processes there are
 /// petsc_println!(petsc.world(), "Hello parallel world of {} processes!", petsc.world().size())?;
@@ -263,7 +264,7 @@ macro_rules! petsc_print {
 /// # use petsc_rs::prelude::*;
 /// # use mpi::traits::*;
 /// # fn main() -> petsc_rs::Result<()> {
-/// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
+/// let petsc = petsc_rs::Petsc::init_no_args()?;
 ///
 /// // will print multiple times, once for each processor
 /// Petsc::print_sync(petsc.world(), format!("Hello parallel world of {} processes from process {}!\n",
@@ -315,7 +316,7 @@ macro_rules! petsc_print_sync {
 /// # use petsc_rs::prelude::*;
 /// # use mpi::traits::*;
 /// # fn main() -> petsc_rs::Result<()> {
-/// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
+/// let petsc = petsc_rs::Petsc::init_no_args()?;
 ///
 /// petsc_panic!(petsc.world(), PetscErrorKind::PETSC_ERR_USER);
 /// petsc_panic!(petsc.world(), PetscErrorKind::PETSC_ERR_USER,
@@ -371,6 +372,8 @@ pub use petsc_raw::InsertMode;
 /// ```no_run
 /// # use petsc_rs::prelude::*;
 /// # use mpi::traits::*;
+/// # fn main() -> petsc_rs::Result<()> {
+/// # let is_yaml = false;
 /// let univ = mpi::initialize().unwrap();
 /// let petsc = Petsc::builder()
 ///     .args(std::env::args())
@@ -378,8 +381,10 @@ pub use petsc_raw::InsertMode;
 ///     // then there is no need to use the world method as we do here.
 ///     .world(univ.world().duplicate())
 ///     .help_msg("Hello, this is a help message\n")
-///     .file("path/to/database/file")
-///     .init().unwrap();
+///     .file("path/to/database/file", is_yaml)
+///     .init()?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// Look at [`PetscBuilder::world()`] for more info on setting the comm world.
@@ -514,18 +519,26 @@ impl PetscBuilder
 
     /// PETSc database file.
     ///
-    /// Append ":yaml" to filename to specify YAML options format. 
+    /// Use `yaml` to specify the YAML options format.
+    ///
     /// Use empty string (or don't call this method) to not check for code specific file.
-    /// Also checks ~/.petscrc, .petscrc and petscrc. Use -skip_petscrc in the code specific
-    /// file (or command line) to skip ~/.petscrc, .petscrc and petscrc files
-    pub fn file<T: ToString>(mut self, file: T) -> Self
+    /// Also checks `~/.petscrc`, `.petscrc` and `petscrc`. Use `-skip_petscrc` in the code specific
+    /// file (or command line) to skip `~/.petscrc`, `.petscrc` and `petscrc` files
+    pub fn file<T: AsRef<Path>>(mut self, file: T, yaml: bool) -> Self
     {
-        self.file = Some(file.to_string());
+        let mut file_str = file.as_ref().to_string_lossy().to_string();
+        if yaml {
+            file_str.push_str(":yaml");
+        }
+        self.file = Some(file_str);
         self
     }
 }
 
 /// Struct that facilitates reading from the PETSc options database.
+///
+/// All usage of this struct should be through the [`PetscOpt::from_petsc_opt_builder()`]
+/// function.
 ///
 /// Wraps a set of queries on the options database that are related and should be displayed
 /// on the same window of a GUI that allows the user to set the options interactively.
@@ -661,14 +674,14 @@ impl<'pl, 'pool, 'strlt> PetscOptBuilder<'pl, 'pool, 'strlt> {
     /// Gets an option in the database (as a string), then converts to type `E`.
     ///
     /// Note, If the [`from_str`](std::str::FromStr::from_str()) fails, then
-    /// [`default()`](Default::default()) is used.
+    /// `default` is used.
     pub fn options_from_string<E>(&mut self, opt: &str, text: &str, man: &str, default: E) -> Result<E>
     where
-        E: Default + std::str::FromStr + Display,
+        E: std::str::FromStr + Display,
     {
         let as_str = self.options_string(opt, text, man, &default.to_string())?;
         // TODO: or should we error instead of default
-        Ok(E::from_str(as_str.as_str()).unwrap_or(E::default()))
+        Ok(E::from_str(as_str.as_str()).unwrap_or(default))
     }
 }
 
@@ -753,7 +766,11 @@ impl Petsc {
     /// If you want to pass in Arguments use [`Petsc::builder()`].
     ///
     /// ```
-    /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
+    /// # use petsc_rs::prelude::*;
+    /// # use mpi::traits::*;
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// let petsc = petsc_rs::Petsc::init_no_args()?;
+    /// # Ok(()) }
     /// ```
     ///
     /// [`PetscInitialize`]: petsc_raw::PetscInitialize
@@ -818,11 +835,11 @@ impl Petsc {
     /// ```
     /// # use petsc_rs::prelude::*;
     /// # use mpi::traits::*;
-    /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
-    /// if petsc.world().size() != 1 {
-    ///     // note, cargo wont run tests with mpi so this will never be reached
-    ///     assert!(Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_WRONG_MPI_SIZE, "This is a uniprocessor example only!").is_err());
-    /// }
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// let petsc = petsc_rs::Petsc::init_no_args()?;
+    /// assert!(Petsc::set_error(petsc.world(), PetscErrorKind::PETSC_ERR_USER,
+    ///     "called `Petsc::set_error()`").is_err());
+    /// # Ok(()) }
     /// ```
     ///
     /// Same as [`Petsc::set_error2()`] but sets `line`, `func_name`, and `file_name` to `None`.
@@ -894,7 +911,7 @@ impl Petsc {
     /// # use petsc_rs::prelude::*;
     /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
-    /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
+    /// let petsc = petsc_rs::Petsc::init_no_args()?;
     ///
     /// Petsc::print(petsc.world(), format!("Hello parallel world of {} processes!\n", petsc.world().size()))?;
     /// // or use:
@@ -927,7 +944,7 @@ impl Petsc {
     /// # use petsc_rs::prelude::*;
     /// # use mpi::traits::*;
     /// # fn main() -> petsc_rs::Result<()> {
-    /// let petsc = petsc_rs::Petsc::init_no_args().unwrap();
+    /// let petsc = petsc_rs::Petsc::init_no_args()?;
     ///
     /// Petsc::print_sync(petsc.world(), format!("Hello parallel world of {} processes from process {}!\n",
     ///     petsc.world().size(), petsc.world().rank()))?;
@@ -1023,14 +1040,14 @@ impl Petsc {
     /// Gets an option in the database (as a string), then converts to type `E`.
     ///
     /// Note, If the [`from_str`](std::str::FromStr::from_str()) fails, then
-    /// [`default()`](Default::default()) is used.
+    /// `None` is returned.
     pub fn options_try_get_from_string<E>(&self, name: &str) -> Result<Option<E>>
     where
-        E: Default + std::str::FromStr,
+        E: std::str::FromStr,
     {
         let as_str = self.options_try_get_string(name)?;
         if let Some(as_str) = as_str {
-            Ok(Some(E::from_str(as_str.as_str()).unwrap_or(E::default())))
+            Ok(E::from_str(as_str.as_str()).ok())
         } else {
             Ok(None)
         }
@@ -1051,6 +1068,8 @@ impl Petsc {
     }
 
     /// Creates a [`PetscOptBuilder`] to facilitates setting command line arguments.
+    ///
+    /// Will call [`PetscOpt::from_petsc_opt_builder()`].
     pub fn options_build<'strlt1, 'strlt2, T: PetscOpt>(&self, prefix: impl Into<Option<&'strlt1 str>>,
         title: &str, man_section: impl Into<Option<&'strlt2 str>>) -> Result<T>
     {
@@ -1087,8 +1106,10 @@ impl Petsc {
     /// ```
     /// # use petsc_rs::prelude::*;
     /// # use mpi::traits::*;
-    /// let petsc = Petsc::init_no_args().unwrap();
-    /// let vec = petsc.vec_create().unwrap();
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// let petsc = Petsc::init_no_args()?;
+    /// let vec = petsc.vec_create()?;
+    /// # Ok(()) }
     /// ```
     pub fn vec_create(&self) -> Result<crate::Vector> {
         crate::Vector::create(self.world())
@@ -1105,8 +1126,10 @@ impl Petsc {
     /// ```
     /// # use petsc_rs::prelude::*;
     /// # use mpi::traits::*;
-    /// let petsc = Petsc::init_no_args().unwrap();
-    /// let mat = petsc.mat_create().unwrap();
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// let petsc = Petsc::init_no_args()?;
+    /// let mat = petsc.mat_create()?;
+    /// # Ok(()) }
     /// ```
     pub fn mat_create(&self) -> Result<crate::Mat> {
         crate::Mat::create(self.world())
@@ -1123,8 +1146,10 @@ impl Petsc {
     /// ```
     /// # use petsc_rs::prelude::*;
     /// # use mpi::traits::*;
-    /// let petsc = Petsc::init_no_args().unwrap();
-    /// let ksp = petsc.ksp_create().unwrap();
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// let petsc = Petsc::init_no_args()?;
+    /// let ksp = petsc.ksp_create()?;
+    /// # Ok(()) }
     /// ```
     pub fn ksp_create(&self) -> Result<crate::KSP> {
         crate::KSP::create(self.world())
@@ -1141,8 +1166,10 @@ impl Petsc {
     /// ```
     /// # use petsc_rs::prelude::*;
     /// # use mpi::traits::*;
-    /// let petsc = Petsc::init_no_args().unwrap();
-    /// let snes = petsc.snes_create().unwrap();
+    /// # fn main() -> petsc_rs::Result<()> {
+    /// let petsc = Petsc::init_no_args()?;
+    /// let snes = petsc.snes_create()?;
+    /// Ok(()) }
     /// ```
     pub fn snes_create(&self) -> Result<crate::SNES> {
         crate::SNES::create(self.world())
