@@ -14,8 +14,16 @@ use std::process::Stdio;
 use quote::{ToTokens, quote};
 use proc_macro2::{Ident, Span};
 use syn::{ItemConst, ItemEnum};
-// use semver::Version;
 
+/// The list of enum names that `impl_fromstr_for_enums` is called on.
+///
+/// The requirements to be on this list are, there must exist an enum
+/// with the same name as that in the list and there must exist an array
+/// with the name "{enum_name}s". Note, this array might be declared to
+/// be a zero sized array in the header, but is defined in a .c file
+/// somewhere. For example `DMBoundaryTypes` is defined in dm.c with length
+/// 8, but bindgen creates: `DMBoundaryTypes: [*const ::std::os::raw::c_char; 0usize]`
+/// from the header.
 static ENUMS_TO_IMPL_FROMSTR: &[&'static str; 3] = &[
     "DMBoundaryType",
     "DMBoundaryConditionType",
@@ -23,6 +31,7 @@ static ENUMS_TO_IMPL_FROMSTR: &[&'static str; 3] = &[
     // There are more that can be put here, like: ISColoringType
 ];
 
+/// runs rustfmt on a &str.
 fn rustfmt_string(code_str: &str) -> Cow<'_, str> {
     if let Ok(mut child) = Command::new("rustfmt")
         .arg("--emit=stdout")
@@ -94,6 +103,11 @@ fn create_enum_from_consts(name: Ident, items: Vec<ItemConst>, repr_type: proc_m
     }
 }
 
+/// Creates an enum with discriminant being enumerated and the table having the values of
+/// the consts in `items`. Note, each const must have the type `&'static [u8; Nusize]`.
+///
+/// Note, `name` is NOT the ident of either the enum or the table that is created.
+/// The actual idents used are "{name}Enum" and "{name}_TABLE"..
 fn create_type_enum_and_table(name: Ident, items: Vec<ItemConst>) -> proc_macro2::TokenStream {
     let enum_ident = Ident::new(&format!("{}Enum", name), Span::call_site());
     let table_ident = Ident::new(&format!("{}_TABLE", name).to_uppercase(), Span::call_site());
@@ -133,8 +147,6 @@ fn create_type_enum_and_table(name: Ident, items: Vec<ItemConst>) -> proc_macro2
             }
         }
 
-        // TODO: add impl for FromStr
-
         #[test]
         fn #fn_ident() {
             #(
@@ -148,7 +160,7 @@ fn create_type_enum_and_table(name: Ident, items: Vec<ItemConst>) -> proc_macro2
     };
 
     let this_enum = syn::parse_quote!{#enum_code};
-    let from_str_code = impl_fromstr_for_enum(&this_enum, table_ident, false, true);
+    let from_str_code = impl_fromstr_for_enums(&this_enum, table_ident, false, true);
 
     quote! {
         #tt_code
@@ -156,6 +168,8 @@ fn create_type_enum_and_table(name: Ident, items: Vec<ItemConst>) -> proc_macro2
     }
 }
 
+/// Creates an enum and a table for each name in the internal array `enum_ident_strs`. 
+/// Looks through `consts` to get values that are in the enum and table.
 fn create_all_type_enums(consts: &Vec<ItemConst>) -> proc_macro2::TokenStream {
     // I think these are correct. They might miss a few or grab to many
     // but i think it is better than manually grabbing everything.
@@ -230,7 +244,13 @@ fn create_all_type_enums(consts: &Vec<ItemConst>) -> proc_macro2::TokenStream {
     }
 }
 
-fn impl_fromstr_for_enum(item_enum: &ItemEnum, str_table_ident: Ident, impl_display: bool, raw_str_array: bool) -> proc_macro2::TokenStream {
+/// Creates code that implements `FromStr` and `Display` (optional).
+///
+/// impl_display: if you also want to generate an impl for `Display`.
+///
+/// table_is_array_of_slices: if the str_table (with ident `str_table_ident`) is an
+/// array of rust slices and not an array of raw pointers.
+fn impl_fromstr_for_enums(item_enum: &ItemEnum, str_table_ident: Ident, impl_display: bool, table_is_array_of_slices: bool) -> proc_macro2::TokenStream {
     let enum_ident = item_enum.ident.clone();
     let variant_idents = item_enum.variants.iter().map(|v| v.ident.clone()).collect::<Vec<_>>();
     let slice_len = item_enum.variants.iter().map(|v| match &v.discriminant.as_ref().unwrap().1 {
@@ -239,8 +259,11 @@ fn impl_fromstr_for_enum(item_enum: &ItemEnum, str_table_ident: Ident, impl_disp
         },
         _ => panic!("Discriminant of enum is not an int literal")
     }).max().unwrap() + 1;
-    let fn_ident = Ident::new(&format!("impl_fromstr_for_enum_test_strs_{}", enum_ident), Span::call_site());
-    let cstr_from_fn = if raw_str_array {
+    let fn_ident = Ident::new(&format!("impl_fromstr_for_enums_test_strs_{}", enum_ident), Span::call_site());
+    // The arrays created by C are arrays of pointers (so we need to use `from_ptr`), but the
+    // tables we create in `create_type_enum_and_table` are slices of slices and so we need
+    // to use `from_bytes_with_nul_unchecked`. Either way we get the same results in the end.
+    let cstr_from_fn = if table_is_array_of_slices {
         Ident::new("from_bytes_with_nul_unchecked", Span::call_site())
     } else {
         Ident::new("from_ptr", Span::call_site())
@@ -250,6 +273,8 @@ fn impl_fromstr_for_enum(item_enum: &ItemEnum, str_table_ident: Ident, impl_disp
         quote! {
             impl ::std::fmt::Display for crate::#enum_ident {
                 fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                    // SAFETY: The arrays we are using are created alongside the
+                    // enums to be usable in the way we use it.
                     let types_p = unsafe { crate::#str_table_ident.as_ptr() };
                     let types_slice =  unsafe { std::slice::from_raw_parts(types_p, #slice_len) };
                     write!(f, "{}", unsafe { 
@@ -265,6 +290,9 @@ fn impl_fromstr_for_enum(item_enum: &ItemEnum, str_table_ident: Ident, impl_disp
         impl ::std::str::FromStr for crate::#enum_ident {
             type Err = std::io::Error;
             fn from_str(input: &str) -> std::result::Result<crate::#enum_ident, std::io::Error> {
+                // SAFETY: The arrays to get the c strings we are using are created alongside the
+                // enums. The arrays are defined in the .c files not the headers so
+                // thats why bindgen thinks it is a zero sized array.
                 #[allow(unused_unsafe)]
                 let types_p = unsafe { crate::#str_table_ident.as_ptr() };
                 let types_slice =  unsafe { ::std::slice::from_raw_parts(types_p, #slice_len) };
@@ -274,13 +302,14 @@ fn impl_fromstr_for_enum(item_enum: &ItemEnum, str_table_ident: Ident, impl_disp
                     if input == unsafe { std::ffi::CStr::#cstr_from_fn(
                         types_slice[crate::#enum_ident::#variant_idents as usize]) }
                         .to_str().unwrap().to_uppercase()
-                    || input.as_str() == stringify!(#variant_idents) {
+                    || input == stringify!(#variant_idents).to_uppercase() {
                         Ok(crate::#enum_ident::#variant_idents)
                     } else
                 )*
-                /* else */ {
+                // else case:
+                {
                     Err(std::io::Error::new(std::io::ErrorKind::InvalidInput,
-                        format!("{}, is not a valid {}", input, stringify!(#enum_ident))))
+                        format!("{} is not a valid {}", input, stringify!(#enum_ident))))
                 }
             }
         }
@@ -299,11 +328,12 @@ fn impl_fromstr_for_enum(item_enum: &ItemEnum, str_table_ident: Ident, impl_disp
     }
 }
 
-fn impl_fromstr_for_all_enum(enums: &Vec<ItemEnum>) -> proc_macro2::TokenStream {
+/// calls `impl_fromstr_for_enums` for each enum.
+fn impl_fromstr_for_all_enums(enums: &Vec<ItemEnum>) -> proc_macro2::TokenStream {
     let token_streams = enums.iter().map(|item_enum| {
         // The string table is just the enum ident with an `s` on the end
         let str_table_ident = Ident::new(&format!("{}s", item_enum.ident.to_token_stream()), Span::call_site());
-        impl_fromstr_for_enum(item_enum, str_table_ident, true, false)
+        impl_fromstr_for_enums(item_enum, str_table_ident, true, false)
     });
 
     quote! {
@@ -493,7 +523,7 @@ fn main() {
             // `c_int` so that we get compiler error when they differ. We also do the above asserts.
             create_enum_from_consts(Ident::new("PetscErrorCodeEnum", Span::call_site()), petsc_err_consts, quote!{i32}, quote!{::std::os::raw::c_int}).into_token_stream(),
             create_all_type_enums(&raw_const_items).into_token_stream(),
-            impl_fromstr_for_all_enum(&enums_to_impl_fromstr).into_token_stream()
+            impl_fromstr_for_all_enums(&enums_to_impl_fromstr).into_token_stream()
         );
         f.write(rustfmt_string(&code_string).as_bytes()).unwrap();
     }
